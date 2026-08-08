@@ -19,7 +19,7 @@ net: ## Ensure the external infra-net Docker network exists
 	@docker network create infra-net >/dev/null 2>&1 || true
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
-	@./scripts/gen-certs.sh $(if $(FORCE),--force,)
+	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
 
 hosts: ## Print /etc/hosts lines for this stack
 	@./scripts/print-hosts-entries.sh
@@ -62,14 +62,14 @@ down: ## Stop the stack (keeps volumes)
 	docker compose down
 
 restart: ## Restart services (optional: s=<service>)
-	docker compose restart $(s)
+	docker compose restart $(if $(s),"$(s)",)
 
 logs: ## Tail logs (optional: s=<service>)
-	docker compose logs -f $(s)
+	docker compose logs -f $(if $(s),"$(s)",)
 
-ps: status ## Show service status
+ps: status
 
-status: ## Show service status
+status: ## Show service status (alias: ps)
 	docker compose ps
 
 pull: ## Pull latest images
@@ -80,14 +80,14 @@ config: check-env ## Validate docker-compose.yml + .env
 
 shell: ## Open a shell in a service (s=<service>)
 	@test -n "$(s)" || { echo "usage: make shell s=<service>" >&2; exit 1; }
-	docker compose exec $(s) sh
+	docker compose exec "$(s)" sh
 
 psql: ## Open a psql shell as the superuser
-	docker compose exec postgres psql -U $${POSTGRES_USER:-postgres}
+	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
-	@./scripts/provision-app.sh $(app)
+	@./scripts/provision-app.sh "$(app)"
 
 dns-provision: check-env ## Create/update DNS zones & records
 	@./scripts/dns-provision.sh
