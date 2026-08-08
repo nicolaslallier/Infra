@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Generates a local CA + leaf cert covering *.infra.famillelallier.net,
-# plus pgadmin.famillelallier.net as a standalone extra SAN (pgAdmin is
-# deliberately served outside the .infra. subdomain convention).
+# plus pgadmin.famillelallier.net and keycloak.famillelallier.net as
+# standalone extra SANs (both are deliberately served outside the .infra.
+# subdomain convention).
 #
 # Uses mkcert if it's installed (simplest, auto-trusts on some platforms);
 # otherwise falls back to openssl, which is always present on macOS.
@@ -12,7 +13,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DOMAIN="infra.famillelallier.net"
-EXTRA_SAN="pgadmin.famillelallier.net"
+EXTRA_SANS=(
+  "pgadmin.famillelallier.net"
+  "keycloak.famillelallier.net"
+)
 CERT_DIR="certs"
 FORCE="${1:-}"
 
@@ -27,7 +31,7 @@ if command -v mkcert >/dev/null 2>&1; then
   echo "gen-certs.sh: using mkcert"
   CAROOT="$(mkcert -CAROOT)"
   mkcert -cert-file "$CERT_DIR/infra.crt" -key-file "$CERT_DIR/infra.key" \
-    "$DOMAIN" "*.$DOMAIN" "$EXTRA_SAN" localhost 127.0.0.1
+    "$DOMAIN" "*.$DOMAIN" "${EXTRA_SANS[@]}" localhost 127.0.0.1
   cp "$CAROOT/rootCA.pem" "$CERT_DIR/infra-ca.crt"
   echo "gen-certs.sh: done. mkcert already trusts its CA in your system store."
   exit 0
@@ -47,7 +51,18 @@ openssl req -x509 -new -nodes -newkey rsa:4096 -sha256 -days 3650 \
   -subj "/CN=Infra Local Dev CA" \
   -keyout "$CA_KEY" -out "$CA_CRT"
 
-# 2. Leaf key + CSR with SANs for the wildcard domain and localhost.
+# 2. Leaf key + CSR with SANs for the wildcard domain, localhost, and
+#    each extra exception hostname.
+ALT_NAMES="DNS.1 = $DOMAIN
+DNS.2 = *.$DOMAIN
+DNS.3 = localhost"
+i=4
+for san in "${EXTRA_SANS[@]}"; do
+  ALT_NAMES="$ALT_NAMES
+DNS.$i = $san"
+  i=$((i + 1))
+done
+
 cat > "$SAN_CONF" <<EOF
 [req]
 distinguished_name = req_distinguished_name
@@ -63,10 +78,7 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = $DOMAIN
-DNS.2 = *.$DOMAIN
-DNS.3 = localhost
-DNS.4 = $EXTRA_SAN
+$ALT_NAMES
 IP.1 = 127.0.0.1
 EOF
 
