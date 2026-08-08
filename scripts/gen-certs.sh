@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Generates a local CA + leaf cert covering *.infra.famillelallier.net,
-# plus pgadmin.famillelallier.net and keycloak.famillelallier.net as
-# standalone extra SANs (both are deliberately served outside the .infra.
-# subdomain convention).
+# plus pgadmin.famillelallier.net, keycloak.famillelallier.net, and
+# jarvis.famillelallier.net as standalone extra SANs (all three are
+# deliberately served outside the .infra. subdomain convention).
 #
 # Uses mkcert if it's installed (simplest, auto-trusts on some platforms);
 # otherwise falls back to openssl, which is always present on macOS.
@@ -16,6 +16,7 @@ DOMAIN="infra.famillelallier.net"
 EXTRA_SANS=(
   "pgadmin.famillelallier.net"
   "keycloak.famillelallier.net"
+  "jarvis.famillelallier.net"
 )
 CERT_DIR="certs"
 FORCE="${1:-}"
