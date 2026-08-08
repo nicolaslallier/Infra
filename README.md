@@ -2,16 +2,17 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18, and pgAdmin. Application repos stay independent: they don't
-run their own database or proxy, they just join this stack's Docker network.
+PostgreSQL 18, pgAdmin, and Keycloak. Application repos stay independent:
+they don't run their own database or proxy, they just join this stack's
+Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), and 5432 (TCP
-passthrough) for Postgres. Postgres and pgAdmin publish nothing themselves;
-they're reachable only on the shared `infra-net` Docker network or through
-NGINX. A separate `dns` container publishes its own ports too — it's a
-top-level infra service in its own right, not something NGINX can front.
-See "DNS" below.
+passthrough) for Postgres. Postgres, pgAdmin, and Keycloak publish nothing
+themselves; they're reachable only on the shared `infra-net` Docker network
+or through NGINX. A separate `dns` container publishes its own ports too —
+it's a top-level infra service in its own right, not something NGINX can
+front. See "DNS" below.
 
 ## First run
 
@@ -20,7 +21,8 @@ make init      # creates infra-net, generates local dev certs, copies .env.examp
 ```
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
-and one `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`).
+`KEYCLOAK_ADMIN_PASSWORD`, and one `<APPNAME>_DB_PASSWORD` per entry in
+`APP_DATABASES`, including `KEYCLOAK_DB_PASSWORD`).
 
 ```bash
 make hosts     # prints /etc/hosts lines to add (not applied automatically)
@@ -32,6 +34,8 @@ trust the local CA in macOS's keychain — run that yourself if you want
 browsers to stop warning about the self-signed cert.
 
 pgAdmin: `https://pgadmin.famillelallier.net`
+Keycloak: `https://keycloak.famillelallier.net` (admin console at
+`/admin/master/console/`)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
@@ -50,6 +54,14 @@ service name:
 (The `127.0.0.1:5432` address above is for connecting from your host
 machine via `psql` — it's a different path than pgAdmin uses.)
 
+### Keycloak admin bootstrap
+
+`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` in `.env` only take effect on
+Keycloak's very first boot against an empty `keycloak` database (same
+caveat as `PGADMIN_EMAIL`/`PGADMIN_PASSWORD` above) — changing them later
+in `.env` does nothing to an already-provisioned admin user. Change the
+password from inside the admin console instead.
+
 ## DNS
 
 `make hosts` (loopback `/etc/hosts` entries, one device at a time) still
@@ -57,13 +69,14 @@ works and is the simplest option if you only need this on the machine
 running Docker, or don't want to touch router settings.
 
 For LAN-wide resolution — so other devices (phones, laptops) also resolve
-`*.infra.famillelallier.net` and `pgadmin.famillelallier.net` without
-per-device `/etc/hosts` edits — this stack also runs a `dns` service
-([Technitium DNS Server](https://technitium.com/dns/)). It answers
-authoritatively for those two names (the wildcard covers every
-`*.infra.famillelallier.net` app automatically) and forwards every other
-query upstream to `UPSTREAM_DNS`/`UPSTREAM_DNS_2` (Cloudflare by default),
-so it's safe to use as your LAN's only DNS resolver.
+`*.infra.famillelallier.net`, `pgadmin.famillelallier.net`, and
+`keycloak.famillelallier.net` without per-device `/etc/hosts` edits — this
+stack also runs a `dns` service ([Technitium DNS
+Server](https://technitium.com/dns/)). It answers authoritatively for
+those names (the wildcard covers every `*.infra.famillelallier.net` app
+automatically) and forwards every other query upstream to
+`UPSTREAM_DNS`/`UPSTREAM_DNS_2` (Cloudflare by default), so it's safe to
+use as your LAN's only DNS resolver.
 
 To use it LAN-wide:
 
@@ -71,9 +84,9 @@ To use it LAN-wide:
    `LAN_IP` is strongly recommended, so it doesn't change on reboot).
 2. `make up` — starts `dns` alongside the rest of the stack, listening on
    `${LAN_IP}:53` and its web console on `${LAN_IP}:5380`.
-3. `make dns-provision` — creates the `infra.famillelallier.net` and
-   `pgadmin.famillelallier.net` zones/records via Technitium's API. Safe to
-   re-run.
+3. `make dns-provision` — creates the `infra.famillelallier.net`,
+   `pgadmin.famillelallier.net`, and `keycloak.famillelallier.net`
+   zones/records via Technitium's API. Safe to re-run.
 4. Point your router's DHCP DNS server setting at `LAN_IP` (a manual,
    router-specific step this repo can't automate — same treatment as
    trusting the local CA in `gen-certs.sh`). Devices may need to reconnect
@@ -134,7 +147,7 @@ environment if you want to encrypt that session too.
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, nginx, dns — nginx and dns are the services with `ports:`
+docker-compose.yml       postgres, pgadmin, keycloak, nginx, dns — nginx and dns are the services with `ports:`
 nginx/nginx.conf         http{} (web) + stream{} (Postgres TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
 nginx/stream.d/          the Postgres TCP proxy block

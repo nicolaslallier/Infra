@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Creates/updates the DNS zones and records this stack owns inside the
 # running Technitium `dns` container: a wildcard zone for
-# *.infra.famillelallier.net (covers every app automatically) and a
-# leaf zone for pgadmin.famillelallier.net. Safe to re-run — zone
-# creation is ignored if the zone already exists, and records are
-# added with overwrite=true.
+# *.infra.famillelallier.net (covers every app automatically) and leaf
+# zones for pgadmin.famillelallier.net and keycloak.famillelallier.net.
+# Safe to re-run — zone creation is ignored if the zone already exists,
+# and records are added with overwrite=true.
 #
 # Deliberately does NOT touch famillelallier.net itself: beacon./dev.
 # subdomains live outside this repo and must keep resolving elsewhere.
@@ -62,5 +62,8 @@ add_a_record "*.infra.famillelallier.net" "infra.famillelallier.net"
 
 create_zone "pgadmin.famillelallier.net"
 add_a_record "pgadmin.famillelallier.net" "pgadmin.famillelallier.net"
+
+create_zone "keycloak.famillelallier.net"
+add_a_record "keycloak.famillelallier.net" "keycloak.famillelallier.net"
 
 echo "Done. Run 'make dns-check' to verify."

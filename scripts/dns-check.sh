@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Confirms the dns service is actually answering LAN DNS queries:
-# - infra.famillelallier.net / pgadmin.famillelallier.net resolve to
-#   LAN_IP (proves the zones from dns-provision.sh are live)
+# - infra.famillelallier.net / pgadmin.famillelallier.net /
+#   keycloak.famillelallier.net resolve to LAN_IP (proves the zones
+#   from dns-provision.sh are live)
 # - example.com still resolves to a real public IP (proves forwarding
 #   to the upstream servers works too, not just the local answers)
 #
@@ -27,7 +28,7 @@ RESOLVER="${1:-${LAN_IP:?dns-check.sh: LAN_IP not set in .env and no resolver gi
 echo "Querying dns server at ${RESOLVER}:53..."
 echo
 
-for host in infra.famillelallier.net pgadmin.famillelallier.net; do
+for host in infra.famillelallier.net pgadmin.famillelallier.net keycloak.famillelallier.net; do
   answer="$(dig @"$RESOLVER" "$host" +short)"
   echo "$host -> ${answer:-<no answer>}"
 done

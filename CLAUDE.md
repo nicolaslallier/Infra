@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `Infra` is the shared "common group" backing stack for sibling application
-repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, and a
+repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, and a
 Technitium DNS server, run via Docker Compose. Application repos are meant
 to stay in their own repositories and connect in over a shared Docker
 network rather than being folded into this one.
@@ -31,25 +31,29 @@ running the stack (`make up`) and exercising it, per the checks below.
 
 ## Architecture
 
-Four services on one external Docker network (`infra-net`, created by
+Five services on one external Docker network (`infra-net`, created by
 `make net` / `make init`, not by Compose itself — `external: true` in
 `docker-compose.yml` so the network outlives `docker compose down` and
 never orphans another app that's still attached to it):
 
 - **`postgres`** — `postgres:18-alpine`. Publishes no host port.
 - **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
+- **`keycloak`** — `quay.io/keycloak/keycloak`. Publishes no host port;
+  uses the shared `postgres` cluster (database/role `keycloak`, via the
+  same generic per-app provisioning as any other app — see "Per-app
+  database provisioning" below), not a bundled DB of its own.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
-  the only one of those four with a `ports:` entry.
+  the only one of those services with a `ports:` entry.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
-  the same rule that keeps `postgres`/`pgadmin` unpublished.
+  the same rule that keeps `postgres`/`pgadmin`/`keycloak` unpublished.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
-oversight. Only `pgadmin` gets one (`pgadmin.famillelallier.net`, via
-`nginx/conf.d/pgadmin.conf`). When registering the Postgres server inside
-pgAdmin's own UI, the host is the Compose service name `postgres` (pgAdmin
-and `postgres` share `infra-net` directly), port `5432` — never a
+oversight. `pgadmin` (`pgadmin.famillelallier.net`) and `keycloak`
+(`keycloak.famillelallier.net`) do. When registering the Postgres server
+inside pgAdmin's own UI, the host is the Compose service name `postgres`
+(pgAdmin and `postgres` share `infra-net` directly), port `5432` — never a
 `*.famillelallier.net` hostname. A hostname like
 `postgresql.famillelallier.net` doesn't exist anywhere in this stack and
 produces connection-refused, not a DNS or reachability problem.
@@ -57,23 +61,24 @@ produces connection-refused, not a DNS or reachability problem.
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, and future apps) — not top-level infra processes
-that own a protocol NGINX can't meaningfully front. `postgres` and
-`pgadmin` deliberately have no `ports:` key. All host access to them —
-HTTP(S) *and* Postgres — goes through NGINX:
+(`postgres`, `pgadmin`, `keycloak`, and future apps) — not top-level infra
+processes that own a protocol NGINX can't meaningfully front. `postgres`,
+`pgadmin`, and `keycloak` deliberately have no `ports:` key. All host
+access to them — HTTP(S) *and* Postgres — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
-  proxying to `pgadmin:80` and, per-app, to whatever apps register.
+  proxying to `pgadmin:80`, `keycloak:8080`, and, per-app, to whatever
+  apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
 
-**Do not add a `ports:` entry to `postgres` or `pgadmin`.** If a backend
-service needs to be reachable from the host, add an NGINX server block
-instead (`nginx/conf.d/app.conf.example` is the template for HTTP; extend
-`nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
-oversight — keeping every backend-app host-facing port behind one process
-is the point of this stack.
+**Do not add a `ports:` entry to `postgres`, `pgadmin`, or `keycloak`.**
+If a backend service needs to be reachable from the host, add an NGINX
+server block instead (`nginx/conf.d/app.conf.example` is the template for
+HTTP; extend `nginx/stream.d/` for raw TCP). This is a deliberate
+constraint, not an oversight — keeping every backend-app host-facing port
+behind one process is the point of this stack.
 
 `nginx` (HTTP/S + Postgres TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own
@@ -140,9 +145,10 @@ regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
 
-pgAdmin is a deliberate exception to the `.infra.` subdomain convention:
-it's served at `pgadmin.famillelallier.net` (no `.infra.`), so that exact
-hostname is added as an extra SAN alongside the wildcard in
+pgAdmin and Keycloak are both deliberate exceptions to the `.infra.`
+subdomain convention: they're served at `pgadmin.famillelallier.net` and
+`keycloak.famillelallier.net` (no `.infra.`), so those exact hostnames are
+added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
 `gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
 Regenerate certs (`./scripts/gen-certs.sh --force`) after pulling this
 change if your local `certs/` predates it.
@@ -175,19 +181,21 @@ Zone/record data (which hostnames resolve to `LAN_IP`) is managed through
 Technitium's HTTP API by `scripts/dns-provision.sh`, not through env vars
 or a mounted config file — safe to re-run any time zones/records need to
 be recreated (e.g. after a `dns-config` volume wipe). It creates exactly
-two zones, **never** a `Primary` zone for `famillelallier.net` itself:
+three zones, **never** a `Primary` zone for `famillelallier.net` itself:
 
 - `infra.famillelallier.net` — apex + `*.infra.famillelallier.net`
   wildcard A records, both → `LAN_IP`. Covers every current/future app
   hostname automatically; no DNS config needed per new app.
 - `pgadmin.famillelallier.net` — apex A record → `LAN_IP`, mirroring its
   exception status in `gen-certs.sh` above.
+- `keycloak.famillelallier.net` — apex A record → `LAN_IP`, same
+  exception pattern as pgAdmin's zone.
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every
 name under it, including `beacon.famillelallier.net` /
 `dev.famillelallier.net`, which exist outside this repo and must keep
-resolving wherever they already do. **Never collapse the two scoped zones
+resolving wherever they already do. **Never collapse the scoped zones
 above into one wildcard covering all of `famillelallier.net`.**
 
 The Technitium web console (port 5380) is published directly rather than
