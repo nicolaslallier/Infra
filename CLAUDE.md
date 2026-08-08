@@ -13,17 +13,25 @@ network rather than being folded into this one.
 ## Commands
 
 ```bash
+make / make help                 # list targets (default goal)
 make init                        # create infra-net, generate dev certs, copy .env.example -> .env
 make up / make down / make restart
-make logs                        # tail all container logs
-make ps                          # service status
+make logs                        # tail logs (optional: s=<service>)
+make ps / make status            # service status
+make pull / make config          # pull images / validate compose + .env
+make shell s=<service>           # shell into a running service
 make psql                        # psql shell as the superuser (via docker compose exec)
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
-make certs                       # regenerate TLS certs
+make certs                       # generate TLS certs (FORCE=1 to regenerate)
 make hosts                       # print the /etc/hosts lines this stack needs
-make dns-provision                # create/update the DNS zones & records the dns service serves
-make dns-check                    # query the dns service to confirm it's answering correctly
+make dns-provision               # create/update the DNS zones & records the dns service serves
+make dns-check                   # query the dns service to confirm it's answering correctly
+make clean CONFIRM=1             # docker compose down -v (keeps infra-net and certs/)
 ```
+
+`up`, `config`, `provision-app`, `dns-provision`, and `dns-check` run
+`check-env` first: `.env` must exist, and password-like values must not
+still be the `change-me` placeholders from `.env.example`.
 
 There is no build/lint/test step — this repo is Compose config, NGINX
 config, and shell scripts, not an application. Validate changes by actually
