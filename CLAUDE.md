@@ -113,3 +113,10 @@ Either path produces a wildcard cert for `*.infra.famillelallier.net` plus
 regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
+
+pgAdmin is a deliberate exception to the `.infra.` subdomain convention:
+it's served at `pgadmin.famillelallier.net` (no `.infra.`), so that exact
+hostname is added as an extra SAN alongside the wildcard in
+`gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
+Regenerate certs (`./scripts/gen-certs.sh --force`) after pulling this
+change if your local `certs/` predates it.

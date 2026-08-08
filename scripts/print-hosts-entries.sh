@@ -5,18 +5,19 @@
 set -euo pipefail
 
 DOMAIN="infra.famillelallier.net"
+PGADMIN_HOST="pgadmin.famillelallier.net"
 
 cat <<EOF
 Add these lines to /etc/hosts (they don't conflict with your existing
 beacon.famillelallier.net / dev.famillelallier.net entries):
 
 127.0.0.1 $DOMAIN
-127.0.0.1 pgadmin.$DOMAIN
+127.0.0.1 $PGADMIN_HOST
 
 One way to append them:
 
   sudo tee -a /etc/hosts <<'HOSTS'
 127.0.0.1 $DOMAIN
-127.0.0.1 pgadmin.$DOMAIN
+127.0.0.1 $PGADMIN_HOST
 HOSTS
 EOF

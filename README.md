@@ -28,7 +28,7 @@ The cert script prints a `sudo security add-trusted-cert ...` command to
 trust the local CA in macOS's keychain — run that yourself if you want
 browsers to stop warning about the self-signed cert.
 
-pgAdmin: `https://pgadmin.infra.famillelallier.net`
+pgAdmin: `https://pgadmin.famillelallier.net`
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ## Common commands
