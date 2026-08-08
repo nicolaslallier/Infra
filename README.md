@@ -101,16 +101,23 @@ environment if you want to encrypt that session too.
 
 ## Common commands
 
+Run `make` / `make help` for the full list. Notable targets:
+
 | Command | What it does |
 |---|---|
-| `make up` / `make down` | Start / stop the stack |
-| `make logs` | Tail all container logs |
-| `make ps` | Show service status |
+| `make up` / `make down` | Start / stop the stack (`up` checks `.env` first) |
+| `make logs` / `make logs s=nginx` | Tail logs (all services, or one via `s=`) |
+| `make ps` / `make status` | Show service status |
+| `make restart` / `make restart s=keycloak` | Restart services (all, or one via `s=`) |
+| `make shell s=postgres` | Open a shell in a service |
 | `make psql` | Open a psql shell as the superuser |
+| `make pull` | Pull latest images |
+| `make config` | Validate `docker-compose.yml` + `.env` |
 | `make provision-app app=<name>` | Add a new app's database/role to an **already-running** cluster |
-| `make certs` | Regenerate certs (pass nothing; edit the script for `--force`) |
+| `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make dns-provision` | Create/update the DNS zones & records the `dns` service serves |
 | `make dns-check` | Query the `dns` service to confirm it's answering correctly |
+| `make clean CONFIRM=1` | Stop the stack and remove volumes (destructive; keeps `infra-net` and `certs/`) |
 
 ## Connecting an application repo
 
