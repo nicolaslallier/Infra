@@ -4,7 +4,8 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help init net certs up down restart logs ps status pull config \
-	shell psql provision-app hosts dns-provision dns-check clean check-env
+	shell psql provision-app hosts dns-provision dns-check clean check-env \
+	keycloak-seed-users
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -94,6 +95,9 @@ dns-provision: check-env ## Create/update DNS zones & records
 
 dns-check: check-env ## Query the dns service to verify answers
 	@./scripts/dns-check.sh
+
+keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
+	@./scripts/keycloak-seed-users.sh
 
 clean: ## Remove containers + volumes (CONFIRM=1 required)
 	@test "$(CONFIRM)" = "1" || { echo "usage: make clean CONFIRM=1" >&2; exit 1; }
