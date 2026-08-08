@@ -43,7 +43,11 @@ services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.0
     restart: unless-stopped
-    command: ["start"]
+    # --import-realm loads keycloak/realm-import/*.json on every boot; it's
+    # a no-op for a realm that already exists, so this is safe to leave on
+    # permanently (idempotent, same spirit as postgres/initdb's app
+    # provisioning script).
+    command: ["start", "--import-realm"]
     environment:
       KC_DB: postgres
       KC_DB_URL_HOST: postgres
@@ -56,6 +60,8 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    volumes:
+      - ./keycloak/realm-import:/opt/keycloak/data/import:ro
     networks:
       - infra-net
     depends_on:
