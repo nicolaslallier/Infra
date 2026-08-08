@@ -31,6 +31,22 @@ browsers to stop warning about the self-signed cert.
 pgAdmin: `https://pgadmin.famillelallier.net`
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
+### Registering the Postgres server inside pgAdmin
+
+`postgres` has no LAN hostname of its own — only pgAdmin does
+(`pgadmin.famillelallier.net`). Don't guess a hostname like
+`postgresql.famillelallier.net` in the "Register Server" dialog; it doesn't
+exist and the connection will be refused. pgAdmin and `postgres` are both
+containers on `infra-net`, so pgAdmin reaches Postgres directly by Compose
+service name:
+
+- **Host**: `postgres`
+- **Port**: `5432`
+- **Username / Password**: your `POSTGRES_USER` / `POSTGRES_PASSWORD`
+
+(The `127.0.0.1:5432` address above is for connecting from your host
+machine via `psql` — it's a different path than pgAdmin uses.)
+
 ## Common commands
 
 | Command | What it does |

@@ -38,6 +38,15 @@ never orphans another app that's still attached to it):
 - **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
 - **`nginx`** — `nginx:alpine`. **The only service with a `ports:` entry.**
 
+`postgres` has no LAN/browser-facing hostname — that's deliberate, not an
+oversight. Only `pgadmin` gets one (`pgadmin.famillelallier.net`, via
+`nginx/conf.d/pgadmin.conf`). When registering the Postgres server inside
+pgAdmin's own UI, the host is the Compose service name `postgres` (pgAdmin
+and `postgres` share `infra-net` directly), port `5432` — never a
+`*.famillelallier.net` hostname. A hostname like
+`postgresql.famillelallier.net` doesn't exist anywhere in this stack and
+produces connection-refused, not a DNS or reachability problem.
+
 ### Single-ingress rule
 
 `postgres` and `nginx`'s `pgadmin` services deliberately have no `ports:`
