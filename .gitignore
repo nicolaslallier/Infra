@@ -1,0 +1,4 @@
+.env
+certs/*
+!certs/.gitkeep
+.DS_Store
