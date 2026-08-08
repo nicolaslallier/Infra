@@ -1,0 +1,28 @@
+# Template for routing a new app through this NGINX.
+#
+# 1. Copy this file to <appname>.conf in this directory.
+# 2. Replace "myapp" below with the app's service name on infra-net.
+# 3. Point the app's container at port 80 (or whatever it listens on)
+#    and make sure it joins the external "infra-net" network.
+# 4. Add the hostname to /etc/hosts (see scripts/print-hosts-entries.sh)
+#    and, if needed, regenerate certs with a matching SAN.
+#
+# The resolver + $upstream variable pattern below is deliberate: it
+# resolves the upstream at request time instead of at nginx startup, so
+# a stopped/not-yet-started app container does not prevent nginx itself
+# from starting.
+
+server {
+    listen 443 ssl;
+    server_name myapp.infra.famillelallier.net;
+
+    include /etc/nginx/snippets/ssl.conf;
+
+    resolver 127.0.0.11 valid=10s;
+
+    location / {
+        set $upstream http://myapp:80;
+        proxy_pass $upstream;
+        include /etc/nginx/snippets/proxy.conf;
+    }
+}
