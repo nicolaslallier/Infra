@@ -58,8 +58,10 @@ never orphans another app that's still attached to it):
   the same rule that keeps `postgres`/`pgadmin`/`keycloak` unpublished.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
-oversight. `pgadmin` (`pgadmin.famillelallier.net`) and `keycloak`
-(`keycloak.famillelallier.net`) do. When registering the Postgres server
+oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
+(`keycloak.famillelallier.net`), and the Jarvis frontend
+(`jarvis.famillelallier.net`, also reachable at
+`jarvis.infra.famillelallier.net`) do. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
 (pgAdmin and `postgres` share `infra-net` directly), port `5432` — never a
 `*.famillelallier.net` hostname. A hostname like
@@ -153,13 +155,16 @@ regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
 
-pgAdmin and Keycloak are both deliberate exceptions to the `.infra.`
-subdomain convention: they're served at `pgadmin.famillelallier.net` and
-`keycloak.famillelallier.net` (no `.infra.`), so those exact hostnames are
+pgAdmin, Keycloak, and Jarvis are all deliberate exceptions to the
+`.infra.` subdomain convention: they're served at
+`pgadmin.famillelallier.net`, `keycloak.famillelallier.net`, and
+`jarvis.famillelallier.net` (no `.infra.`), so those exact hostnames are
 added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
 `gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
-Regenerate certs (`./scripts/gen-certs.sh --force`) after pulling this
-change if your local `certs/` predates it.
+Regenerating certs (`./scripts/gen-certs.sh --force`) always mints a new
+local CA too, so re-run the `sudo security add-trusted-cert` step it
+prints for every browser/keychain that had the old one trusted — the
+old CA's trust doesn't carry over.
 
 ### DNS (LAN resolver)
 
@@ -189,15 +194,20 @@ Zone/record data (which hostnames resolve to `LAN_IP`) is managed through
 Technitium's HTTP API by `scripts/dns-provision.sh`, not through env vars
 or a mounted config file — safe to re-run any time zones/records need to
 be recreated (e.g. after a `dns-config` volume wipe). It creates exactly
-three zones, **never** a `Primary` zone for `famillelallier.net` itself:
+four zones, **never** a `Primary` zone for `famillelallier.net` itself:
 
 - `infra.famillelallier.net` — apex + `*.infra.famillelallier.net`
   wildcard A records, both → `LAN_IP`. Covers every current/future app
-  hostname automatically; no DNS config needed per new app.
+  hostname automatically; no DNS config needed per new app. Jarvis is
+  also reachable this way, at `jarvis.infra.famillelallier.net`, with no
+  extra DNS/cert config.
 - `pgadmin.famillelallier.net` — apex A record → `LAN_IP`, mirroring its
   exception status in `gen-certs.sh` above.
 - `keycloak.famillelallier.net` — apex A record → `LAN_IP`, same
   exception pattern as pgAdmin's zone.
+- `jarvis.famillelallier.net` — apex A record → `LAN_IP`, same exception
+  pattern, requested in addition to the `.infra.` hostname above so
+  Jarvis is reachable at both.
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every
