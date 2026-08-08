@@ -61,6 +61,25 @@ services:
       pgadmin:
         condition: service_started
 
+  dns:
+    image: technitium/dns-server:latest
+    restart: unless-stopped
+    environment:
+      DNS_SERVER_DOMAIN: dns.infra.famillelallier.net
+      DNS_SERVER_ADMIN_PASSWORD: ${DNS_ADMIN_PASSWORD:?Set DNS_ADMIN_PASSWORD in .env}
+      DNS_SERVER_FORWARDERS: ${UPSTREAM_DNS:-1.1.1.1},${UPSTREAM_DNS_2:-1.0.0.1}
+      DNS_SERVER_RECURSION: AllowOnlyForPrivateNetworks
+      DNS_SERVER_LOG_FOLDER_PATH: /var/log/technitium/dns
+    ports:
+      - "${LAN_IP:?Set LAN_IP in .env}:53:53/udp"
+      - "${LAN_IP:?Set LAN_IP in .env}:53:53/tcp"
+      - "${LAN_IP:?Set LAN_IP in .env}:5380:5380/tcp"
+    volumes:
+      - dns-config:/etc/dns
+      - dns-logs:/var/log/technitium/dns
+    networks:
+      - infra-net
+
 networks:
   infra-net:
     external: true
@@ -68,3 +87,5 @@ networks:
 volumes:
   pgdata:
   pgadmin-data:
+  dns-config:
+  dns-logs:

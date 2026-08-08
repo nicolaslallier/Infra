@@ -5,10 +5,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `Infra` is the shared "common group" backing stack for sibling application
-repos (`Jarvis` and others): NGINX, PostgreSQL 18, and pgAdmin, run via
-Docker Compose. Application repos are meant to stay in their own
-repositories and connect in over a shared Docker network rather than being
-folded into this one.
+repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, and a
+Technitium DNS server, run via Docker Compose. Application repos are meant
+to stay in their own repositories and connect in over a shared Docker
+network rather than being folded into this one.
 
 ## Commands
 
@@ -21,6 +21,8 @@ make psql                        # psql shell as the superuser (via docker compo
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
 make certs                       # regenerate TLS certs
 make hosts                       # print the /etc/hosts lines this stack needs
+make dns-provision                # create/update the DNS zones & records the dns service serves
+make dns-check                    # query the dns service to confirm it's answering correctly
 ```
 
 There is no build/lint/test step — this repo is Compose config, NGINX
@@ -29,14 +31,19 @@ running the stack (`make up`) and exercising it, per the checks below.
 
 ## Architecture
 
-Three services on one external Docker network (`infra-net`, created by
+Four services on one external Docker network (`infra-net`, created by
 `make net` / `make init`, not by Compose itself — `external: true` in
 `docker-compose.yml` so the network outlives `docker compose down` and
 never orphans another app that's still attached to it):
 
 - **`postgres`** — `postgres:18-alpine`. Publishes no host port.
 - **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
-- **`nginx`** — `nginx:alpine`. **The only service with a `ports:` entry.**
+- **`nginx`** — `nginx:alpine`. Fronts every backend application service —
+  the only one of those four with a `ports:` entry.
+- **`dns`** — `technitium/dns-server`. A top-level infra service, not a
+  backend app — publishes its own ports (53 and 5380). See "Single-ingress
+  rule" and "DNS (LAN resolver)" below for why that's not a violation of
+  the same rule that keeps `postgres`/`pgadmin` unpublished.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. Only `pgadmin` gets one (`pgadmin.famillelallier.net`, via
@@ -49,8 +56,11 @@ produces connection-refused, not a DNS or reachability problem.
 
 ### Single-ingress rule
 
-`postgres` and `nginx`'s `pgadmin` services deliberately have no `ports:`
-key. All host access — HTTP(S) *and* Postgres — goes through NGINX:
+This rule governs *backend application services* — anything NGINX fronts
+(`postgres`, `pgadmin`, and future apps) — not top-level infra processes
+that own a protocol NGINX can't meaningfully front. `postgres` and
+`pgadmin` deliberately have no `ports:` key. All host access to them —
+HTTP(S) *and* Postgres — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
   proxying to `pgadmin:80` and, per-app, to whatever apps register.
@@ -58,12 +68,19 @@ key. All host access — HTTP(S) *and* Postgres — goes through NGINX:
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
 
-**Do not add a `ports:` entry to `postgres` or `pgadmin`.** If a service
-needs to be reachable from the host, add an NGINX server block instead
-(`nginx/conf.d/app.conf.example` is the template for HTTP; extend
+**Do not add a `ports:` entry to `postgres` or `pgadmin`.** If a backend
+service needs to be reachable from the host, add an NGINX server block
+instead (`nginx/conf.d/app.conf.example` is the template for HTTP; extend
 `nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
-oversight — keeping every host-facing port behind one process is the point
-of this stack.
+oversight — keeping every backend-app host-facing port behind one process
+is the point of this stack.
+
+`nginx` (HTTP/S + Postgres TCP) and `dns` (LAN DNS) are peers at a
+different, top tier: each is the sole host-facing process for its own
+protocol, not a backend NGINX fronts. `dns` publishing `ports:` for 53
+and 5380 is not a violation of the rule above and should not be "fixed" by
+routing DNS through NGINX or removing its `ports:` entry — see "DNS (LAN
+resolver)" below for why both of `dns`'s ports are deliberately direct.
 
 The stock `nginx:alpine` image's shipped `nginx.conf` only includes
 `conf.d/*.conf` inside `http{}`, so it can't host a stream proxy as-is.
@@ -129,3 +146,54 @@ hostname is added as an extra SAN alongside the wildcard in
 `gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
 Regenerate certs (`./scripts/gen-certs.sh --force`) after pulling this
 change if your local `certs/` predates it.
+
+### DNS (LAN resolver)
+
+`dns` runs Technitium's official `technitium/dns-server` image. Its
+environment variables (`DNS_SERVER_DOMAIN`, `DNS_SERVER_ADMIN_PASSWORD`,
+`DNS_SERVER_FORWARDERS`, `DNS_SERVER_RECURSION`, ...) are only read on
+first boot, when `/etc/dns` (the `dns-config` volume) is still empty — they
+bootstrap server-level settings, not zone data.
+
+`DNS_SERVER_RECURSION` is set explicitly to `AllowOnlyForPrivateNetworks`
+rather than left at its default. This is what makes "forward everything
+else upstream" actually work *for other LAN devices* — Technitium's
+fallback recursion policy denies recursion for networks that don't match
+any configured ACL, which would silently break resolution for every LAN
+client (phones, laptops) the moment they queried a non-local name, while
+still appearing to work fine from the Docker host itself.
+
+`LAN_IP` is never used to configure a listen/bind address *inside* the
+container — Technitium's web/DNS services stay on their default
+all-interfaces bind. Docker's `ports: ["${LAN_IP}:...", ...]` mapping is
+what restricts host-side exposure to `LAN_IP`, the same pattern
+`postgres`'s `127.0.0.1:5432` already uses. Setting an in-container
+bind address to `LAN_IP` would fail — the container only has Docker's
+bridge IP on its own interfaces, never the host's LAN IP.
+
+Zone/record data (which hostnames resolve to `LAN_IP`) is managed through
+Technitium's HTTP API by `scripts/dns-provision.sh`, not through env vars
+or a mounted config file — safe to re-run any time zones/records need to
+be recreated (e.g. after a `dns-config` volume wipe). It creates exactly
+two zones, **never** a `Primary` zone for `famillelallier.net` itself:
+
+- `infra.famillelallier.net` — apex + `*.infra.famillelallier.net`
+  wildcard A records, both → `LAN_IP`. Covers every current/future app
+  hostname automatically; no DNS config needed per new app.
+- `pgadmin.famillelallier.net` — apex A record → `LAN_IP`, mirroring its
+  exception status in `gen-certs.sh` above.
+
+DNS zone authority is absolute — owning a `Primary` zone for the whole
+`famillelallier.net` parent would make Technitium authoritative for every
+name under it, including `beacon.famillelallier.net` /
+`dev.famillelallier.net`, which exist outside this repo and must keep
+resolving wherever they already do. **Never collapse the two scoped zones
+above into one wildcard covering all of `famillelallier.net`.**
+
+The Technitium web console (port 5380) is published directly rather than
+fronted through NGINX like pgAdmin. This is deliberate: fronting it
+through NGINX would need a hostname (e.g. `dns.famillelallier.net`) to
+already resolve, but that can only happen *after* this DNS server exists
+and is provisioned — a bootstrap chicken-and-egg problem. `dns-provision.sh`
+drives the API directly by IP, so this is a one-time cost paid by the repo,
+not by whoever runs `make up`.

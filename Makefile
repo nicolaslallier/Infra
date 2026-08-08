@@ -1,7 +1,7 @@
-.PHONY: init net certs up down restart logs ps psql provision-app hosts
+.PHONY: init net certs up down restart logs ps psql provision-app hosts dns-provision dns-check
 
 init: net certs
-	@if [ ! -f .env ]; then cp .env.example .env; echo "Created .env — edit passwords before 'make up'."; fi
+	@if [ ! -f .env ]; then cp .env.example .env; echo "Created .env — edit passwords, LAN_IP, and DNS_ADMIN_PASSWORD before 'make up'."; fi
 
 net:
 	@docker network create infra-net >/dev/null 2>&1 || true
@@ -32,3 +32,9 @@ psql:
 
 provision-app:
 	@./scripts/provision-app.sh $(app)
+
+dns-provision:
+	@./scripts/dns-provision.sh
+
+dns-check:
+	@./scripts/dns-check.sh
