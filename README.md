@@ -2,15 +2,15 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18, pgAdmin, Keycloak, Technitium DNS, and an LGTM monitoring
-stack (Grafana, Prometheus, Loki, Tempo, Alloy). Application repos stay
-independent: they don't run their own database or proxy, they just join
-this stack's Docker network.
+PostgreSQL 18, pgAdmin, Keycloak, MinIO, Technitium DNS, and an LGTM
+monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy). Application
+repos stay independent: they don't run their own database or proxy, they
+just join this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), and 5432 (TCP
-passthrough) for Postgres. Postgres, pgAdmin, Keycloak, Grafana, and the
-rest of the monitoring backends publish nothing themselves; they're
+passthrough) for Postgres. Postgres, pgAdmin, Keycloak, MinIO, Grafana, and
+the rest of the monitoring backends publish nothing themselves; they're
 reachable only on the shared `infra-net` Docker network or through NGINX.
 A separate `dns` container publishes its own ports too — it's a top-level
 infra service in its own right, not something NGINX can front. See "DNS"
@@ -23,9 +23,9 @@ make init      # creates infra-net, generates local dev certs, copies .env.examp
 ```
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
-`KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD`,
-and one `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
-`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
+`KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `MINIO_ROOT_PASSWORD`,
+`MONITORING_DB_PASSWORD`, and one `<APPNAME>_DB_PASSWORD` per entry in
+`APP_DATABASES`, including `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
 
 ```bash
 make hosts     # prints /etc/hosts lines to add (not applied automatically)
@@ -40,6 +40,9 @@ pgAdmin: `https://pgadmin.famillelallier.net`
 Keycloak: `https://keycloak.famillelallier.net` (admin console at
 `/admin/master/console/`)
 Grafana: `https://grafana.infra.famillelallier.net`
+MinIO console: `https://minio-console.infra.famillelallier.net` (API at
+`https://minio.infra.famillelallier.net`; apps on `infra-net` can also use
+`http://minio:9000`)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
@@ -201,7 +204,7 @@ metrics and logs still work.
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, minio, nginx, dns, LGTM + exporters
 nginx/nginx.conf         http{} (web) + stream{} (Postgres TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
 nginx/stream.d/          the Postgres TCP proxy block
