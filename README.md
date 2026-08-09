@@ -2,14 +2,15 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, Technitium DNS, and
+PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Technitium DNS, and
 an LGTM monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy).
 Application repos stay independent: they don't run their own database or
 proxy, they just join this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
-container fronting backend services — 80/443 for HTTP(S), and 5432 (TCP
-passthrough) for Postgres. Postgres, pgAdmin, Keycloak, MinIO, Grafana, and
+container fronting backend services — 80/443 for HTTP(S), 5432 (TCP
+passthrough) for Postgres, and 5672 (TCP passthrough) for RabbitMQ AMQP.
+Postgres, pgAdmin, Keycloak, MinIO, RabbitMQ, Grafana, and
 the rest of the monitoring backends publish nothing themselves; they're
 reachable only on the shared `infra-net` Docker network or through NGINX.
 A separate `dns` container publishes its own ports too — it's a top-level
@@ -24,8 +25,9 @@ make init      # creates infra-net, generates local dev certs, copies .env.examp
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `MINIO_ROOT_PASSWORD`,
-`MONITORING_DB_PASSWORD`, and one `<APPNAME>_DB_PASSWORD` per entry in
-`APP_DATABASES`, including `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
+`RABBITMQ_DEFAULT_PASS`, `MONITORING_DB_PASSWORD`, and one
+`<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
+`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
 
 ```bash
 make hosts     # prints /etc/hosts lines to add (not applied automatically)
@@ -43,6 +45,8 @@ Grafana: `https://grafana.infra.famillelallier.net`
 MinIO console: `https://minio-console.famillelallier.net` (API at
 `https://minio.famillelallier.net`; apps on `infra-net` can also use
 `http://minio:9000`)
+RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
+`127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
@@ -140,8 +144,8 @@ What you get:
 
 - **Metrics** — host (node-exporter), containers (cAdvisor), Postgres,
   NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
-  Alloy, and sibling apps that expose `/metrics` (Jarvis API at
-  `jarvis-api:8000`, scraped as job `jarvis`)
+  MinIO, RabbitMQ (`:15692/metrics`), Alloy, and sibling apps that expose
+  `/metrics` (Jarvis API at `jarvis-api:8000`, scraped as job `jarvis`)
 - **Logs** — Alloy reads every container's stdout/stderr via the Docker
   socket (this stack and sibling Compose projects on the same host) and
   ships them to Loki
@@ -204,11 +208,12 @@ metrics and logs still work.
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, minio, nginx, dns, LGTM + exporters
-nginx/nginx.conf         http{} (web) + stream{} (Postgres TCP passthrough)
+docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, nginx, dns, LGTM + exporters
+nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
-nginx/stream.d/          the Postgres TCP proxy block
+nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
 postgres/initdb/         first-run schema/extension/provisioning scripts
+rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
 scripts/                 gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
 ```
