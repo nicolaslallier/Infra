@@ -6,10 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-a Technitium DNS server, and an LGTM monitoring stack (Grafana, Prometheus,
-Loki, Tempo, Alloy + exporters), run via Docker Compose. Application repos
-are meant to stay in their own repositories and connect in over a shared
-Docker network rather than being folded into this one.
+RabbitMQ, a Technitium DNS server, and an LGTM monitoring stack (Grafana,
+Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
+Application repos are meant to stay in their own repositories and connect in
+over a shared Docker network rather than being folded into this one.
 
 ## Commands
 
@@ -62,6 +62,10 @@ never orphans another app that's still attached to it):
   and browser console on `:9001`, both fronted by NGINX
   (`minio.famillelallier.net` / `minio-console.famillelallier.net`).
   Apps on `infra-net` reach the API at `http://minio:9000`.
+- **`rabbitmq`** — `rabbitmq:4-management`. Publishes no host port. AMQP
+  on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
+  `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
+  (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
@@ -84,6 +88,7 @@ oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
 (`keycloak.famillelallier.net`), Grafana
 (`grafana.infra.famillelallier.net`), MinIO
 (`minio.famillelallier.net` / `minio-console.famillelallier.net`),
+RabbitMQ management (`rabbitmq.infra.famillelallier.net`),
 and the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
 `jarvis.infra.famillelallier.net`) do. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
@@ -95,28 +100,32 @@ produces connection-refused, not a DNS or reachability problem.
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, `minio`, `grafana`, monitoring backends,
-and future apps) — not top-level infra processes that own a protocol NGINX
-can't meaningfully front. `postgres`, `pgadmin`, `keycloak`, `minio`,
-`grafana`, and the rest of LGTM/exporters deliberately have no `ports:`
-key. All host access to them — HTTP(S) *and* Postgres — goes through NGINX:
+(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `grafana`,
+monitoring backends, and future apps) — not top-level infra processes that
+own a protocol NGINX can't meaningfully front. `postgres`, `pgadmin`,
+`keycloak`, `minio`, `rabbitmq`, `grafana`, and the rest of LGTM/exporters
+deliberately have no `ports:` key. All host access to them — HTTP(S),
+Postgres, and AMQP — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
   proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `minio:9000`
-  / `minio:9001`, and, per-app, to whatever apps register.
+  / `minio:9001`, `rabbitmq:15672`, and, per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
+- Port 5672 → NGINX's `stream{}` block (`nginx/stream.d/rabbitmq.conf`),
+  a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
+  `127.0.0.1:5672` the same way.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `grafana`, or other monitoring backends.** If a backend service
-needs to be reachable from the host, add an NGINX server block instead
-(`nginx/conf.d/app.conf.example` is the template for HTTP; extend
+`minio`, `rabbitmq`, `grafana`, or other monitoring backends.** If a backend
+service needs to be reachable from the host, add an NGINX server block
+instead (`nginx/conf.d/app.conf.example` is the template for HTTP; extend
 `nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
 oversight — keeping every backend-app host-facing port behind one process
 is the point of this stack.
 
-`nginx` (HTTP/S + Postgres TCP) and `dns` (LAN DNS) are peers at a
+`nginx` (HTTP/S + Postgres/AMQP TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own
 protocol, not a backend NGINX fronts. `dns` publishing `ports:` for 53
 and 5380 is not a violation of the rule above and should not be "fixed" by
