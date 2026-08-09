@@ -70,4 +70,7 @@ add_a_record "keycloak.famillelallier.net" "keycloak.famillelallier.net"
 create_zone "jarvis.famillelallier.net"
 add_a_record "jarvis.famillelallier.net" "jarvis.famillelallier.net"
 
+create_zone "minio.famillelallier.net"
+add_a_record "minio.famillelallier.net" "minio.famillelallier.net"
+
 echo "Done. Run 'make dns-check' to verify."
