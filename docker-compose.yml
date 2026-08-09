@@ -272,6 +272,9 @@ services:
       # console to reach the public API URL from inside the container (via
       # LAN_IP), which hairpins/times out and surfaces as "invalid login".
       MINIO_BROWSER_REDIRECT_URL: https://minio-console.famillelallier.net
+      # Metrics stay on infra-net only (no host ports). Public scrapes let
+      # Prometheus pull /minio/v2/metrics/* without a JWT bearer token.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - minio-data:/data
     networks:

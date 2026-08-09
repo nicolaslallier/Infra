@@ -392,13 +392,336 @@
     {
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "id": 105,
+      "title": "MinIO (bucket jarvis)",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "DOWN" }, "1": { "color": "green", "text": "UP" } }, "type": "value" }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 40 },
+      "id": 17,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "textMode": "auto"
+      },
+      "title": "MinIO scrape",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "up{job=\"minio\"}",
+          "legendFormat": "up",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 4, "y": 40 },
+      "id": 18,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "title": "Objects (jarvis)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "minio_bucket_usage_object_total{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 9, "y": 40 },
+      "id": 19,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "title": "Bucket size (jarvis)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "minio_bucket_usage_total_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "blue", "value": null }]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 40 },
+      "id": 20,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "title": "S3 request rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(minio_bucket_requests_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.01 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 40 },
+      "id": 21,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "title": "S3 error rate (4xx+5xx)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(minio_bucket_requests_4xx_errors_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m])) + sum(rate(minio_bucket_requests_5xx_errors_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never", "stacking": { "mode": "none" } },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 44 },
+      "id": 22,
+      "title": "S3 requests / s by API (jarvis)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (api) (rate(minio_bucket_requests_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m]))",
+          "legendFormat": "{{api}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 44 },
+      "id": 23,
+      "title": "S3 traffic (jarvis)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(minio_bucket_traffic_received_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}[5m])",
+          "legendFormat": "rx",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(minio_bucket_traffic_sent_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}[5m])",
+          "legendFormat": "tx",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 52 },
+      "id": 24,
+      "title": "Bucket size (jarvis)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minio_bucket_usage_total_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "legendFormat": "size",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 52 },
+      "id": 25,
+      "title": "Objects (jarvis)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minio_bucket_usage_object_total{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "legendFormat": "objects",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 52 },
+      "id": 26,
+      "title": "Cluster capacity (usable)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "minio_cluster_capacity_usable_total_bytes{job=\"minio\"}",
+          "legendFormat": "total",
+          "refId": "A"
+        },
+        {
+          "expr": "minio_cluster_capacity_usable_free_bytes{job=\"minio\"}",
+          "legendFormat": "free",
+          "refId": "B"
+        },
+        {
+          "expr": "minio_cluster_usage_total_bytes{job=\"minio\"}",
+          "legendFormat": "used",
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
+      "id": 27,
+      "title": "MinIO container CPU",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\".*minio.*\"}[5m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 1, "showPoints": "never" },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
+      "id": 28,
+      "title": "MinIO container memory",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\".*minio.*\", image!=\"\"})",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 68 },
       "id": 103,
       "title": "Logs",
       "type": "row"
     },
     {
       "datasource": { "type": "loki", "uid": "loki" },
-      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 40 },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 69 },
       "id": 15,
       "options": {
         "dedupStrategy": "none",
@@ -420,15 +743,38 @@
       ]
     },
     {
+      "datasource": { "type": "loki", "uid": "loki" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 79 },
+      "id": 29,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "title": "MinIO logs",
+      "type": "logs",
+      "targets": [
+        {
+          "expr": "{compose_service=\"minio\"} |~ `$log_filter`",
+          "refId": "A"
+        }
+      ]
+    },
+    {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 50 },
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 87 },
       "id": 104,
       "title": "Traces",
       "type": "row"
     },
     {
       "datasource": { "type": "tempo", "uid": "tempo" },
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 51 },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 88 },
       "id": 16,
       "title": "Recent traces (jarvis-api)",
       "type": "traces",
@@ -444,7 +790,7 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["jarvis", "app"],
+  "tags": ["jarvis", "app", "minio"],
   "templating": {
     "list": [
       {
@@ -461,5 +807,5 @@
   "timezone": "browser",
   "title": "Jarvis",
   "uid": "jarvis-overview",
-  "version": 1
+  "version": 2
 }
