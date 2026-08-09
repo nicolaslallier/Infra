@@ -6,8 +6,8 @@ set -euo pipefail
 
 DOMAIN="infra.famillelallier.net"
 GRAFANA_HOST="grafana.infra.famillelallier.net"
-MINIO_HOST="minio.infra.famillelallier.net"
-MINIO_CONSOLE_HOST="minio-console.infra.famillelallier.net"
+MINIO_HOST="minio.famillelallier.net"
+MINIO_CONSOLE_HOST="minio-console.famillelallier.net"
 PGADMIN_HOST="pgadmin.famillelallier.net"
 KEYCLOAK_HOST="keycloak.famillelallier.net"
 JARVIS_HOST="jarvis.famillelallier.net"

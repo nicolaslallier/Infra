@@ -40,8 +40,8 @@ pgAdmin: `https://pgadmin.famillelallier.net`
 Keycloak: `https://keycloak.famillelallier.net` (admin console at
 `/admin/master/console/`)
 Grafana: `https://grafana.infra.famillelallier.net`
-MinIO console: `https://minio-console.infra.famillelallier.net` (API at
-`https://minio.infra.famillelallier.net`; apps on `infra-net` can also use
+MinIO console: `https://minio-console.famillelallier.net` (API at
+`https://minio.famillelallier.net`; apps on `infra-net` can also use
 `http://minio:9000`)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
