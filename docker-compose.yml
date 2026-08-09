@@ -1,6 +1,10 @@
 services:
   postgres:
-    image: postgres:18-alpine
+    # pgvector/pgvector:pg18 is the official Postgres 18 image plus the
+    # pgvector extension (needed by Jarvis RAG / file_chunks embeddings).
+    # No alpine tag exists for pg18; this is Debian bookworm-based.
+    # PGDATA layout matches stock postgres:18 (/var/lib/postgresql/18/docker).
+    image: pgvector/pgvector:pg18
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

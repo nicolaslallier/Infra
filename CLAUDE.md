@@ -46,7 +46,12 @@ Services on one external Docker network (`infra-net`, created by
 `docker-compose.yml` so the network outlives `docker compose down` and
 never orphans another app that's still attached to it):
 
-- **`postgres`** — `postgres:18-alpine`. Publishes no host port.
+- **`postgres`** — `pgvector/pgvector:pg18` (Postgres 18 + pgvector;
+  Debian bookworm — no alpine tag for pg18). Publishes no host port.
+  Per-app provisioning also runs `CREATE EXTENSION IF NOT EXISTS vector`
+  as the superuser in each app database, so app roles (e.g. Jarvis RAG
+  migrations) can use the `vector` type without needing CREATE EXTENSION
+  privilege themselves.
 - **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
 - **`keycloak`** — `quay.io/keycloak/keycloak`. Publishes no host port;
   uses the shared `postgres` cluster (database/role `keycloak`, via the
@@ -137,13 +142,13 @@ default is 10 minutes, which silently drops idle Postgres connections
 
 ### PostgreSQL 18's data directory moved
 
-The official image sets `PGDATA=/var/lib/postgresql/18/docker` (verified
-against both the `bookworm` and `alpine` variants) and declares
-`VOLUME /var/lib/postgresql` — **not** `/var/lib/postgresql/data` as in
-PG ≤17. `docker-compose.yml` mounts the named volume at
-`/var/lib/postgresql` accordingly. Mounting the pre-18 path here doesn't
-error — it just silently creates a database that doesn't persist across
-restarts, since data actually lands under `PGDATA`.
+The official image (and `pgvector/pgvector:pg18`, which is based on it)
+sets `PGDATA=/var/lib/postgresql/18/docker` (verified against both the
+`bookworm` and `alpine` variants) and declares `VOLUME /var/lib/postgresql`
+— **not** `/var/lib/postgresql/data` as in PG ≤17. `docker-compose.yml`
+mounts the named volume at `/var/lib/postgresql` accordingly. Mounting the
+pre-18 path here doesn't error — it just silently creates a database that
+doesn't persist across restarts, since data actually lands under `PGDATA`.
 
 ### Per-app database provisioning
 
@@ -164,7 +169,12 @@ code paths can't drift apart:
    cluster without wiping it.
 
 Provisioning revokes `CONNECT` from `PUBLIC` on each app's database, so
-apps can't see each other's data over the shared network.
+apps can't see each other's data over the shared network. It also creates
+the `vector` (pgvector) extension in each app database as the superuser —
+needed so apps like Jarvis can run RAG migrations without CREATE EXTENSION
+privilege. After swapping an existing cluster onto the pgvector image,
+re-run `make provision-app app=<name>` for each app (idempotent) so the
+extension is installed into already-existing databases.
 
 ### Certificates
 
