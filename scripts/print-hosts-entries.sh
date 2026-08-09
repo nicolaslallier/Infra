@@ -5,6 +5,7 @@
 set -euo pipefail
 
 DOMAIN="infra.famillelallier.net"
+GRAFANA_HOST="grafana.infra.famillelallier.net"
 PGADMIN_HOST="pgadmin.famillelallier.net"
 KEYCLOAK_HOST="keycloak.famillelallier.net"
 JARVIS_HOST="jarvis.famillelallier.net"
@@ -14,6 +15,7 @@ Add these lines to /etc/hosts (they don't conflict with your existing
 beacon.famillelallier.net / dev.famillelallier.net entries):
 
 127.0.0.1 $DOMAIN
+127.0.0.1 $GRAFANA_HOST
 127.0.0.1 $PGADMIN_HOST
 127.0.0.1 $KEYCLOAK_HOST
 127.0.0.1 $JARVIS_HOST
@@ -22,6 +24,7 @@ One way to append them:
 
   sudo tee -a /etc/hosts <<'HOSTS'
 127.0.0.1 $DOMAIN
+127.0.0.1 $GRAFANA_HOST
 127.0.0.1 $PGADMIN_HOST
 127.0.0.1 $KEYCLOAK_HOST
 127.0.0.1 $JARVIS_HOST

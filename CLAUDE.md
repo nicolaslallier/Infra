@@ -5,10 +5,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `Infra` is the shared "common group" backing stack for sibling application
-repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, and a
-Technitium DNS server, run via Docker Compose. Application repos are meant
-to stay in their own repositories and connect in over a shared Docker
-network rather than being folded into this one.
+repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, a
+Technitium DNS server, and an LGTM monitoring stack (Grafana, Prometheus,
+Loki, Tempo, Alloy + exporters), run via Docker Compose. Application repos
+are meant to stay in their own repositories and connect in over a shared
+Docker network rather than being folded into this one.
 
 ## Commands
 
@@ -22,6 +23,7 @@ make pull / make config          # pull images / validate compose + .env
 make shell s=<service>           # shell into a running service
 make psql                        # psql shell as the superuser (via docker compose exec)
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
+make provision-monitoring-role   # create/update postgres-exporter monitoring role
 make certs                       # generate TLS certs (FORCE=1 to regenerate)
 make hosts                       # print the /etc/hosts lines this stack needs
 make dns-provision               # create/update the DNS zones & records the dns service serves
@@ -39,7 +41,7 @@ running the stack (`make up`) and exercising it, per the checks below.
 
 ## Architecture
 
-Five services on one external Docker network (`infra-net`, created by
+Services on one external Docker network (`infra-net`, created by
 `make net` / `make init`, not by Compose itself — `external: true` in
 `docker-compose.yml` so the network outlives `docker compose down` and
 never orphans another app that's still attached to it):
@@ -49,17 +51,29 @@ never orphans another app that's still attached to it):
 - **`keycloak`** — `quay.io/keycloak/keycloak`. Publishes no host port;
   uses the shared `postgres` cluster (database/role `keycloak`, via the
   same generic per-app provisioning as any other app — see "Per-app
-  database provisioning" below), not a bundled DB of its own.
+  database provisioning" below), not a bundled DB of its own. Metrics
+  enabled on the management interface (`:9000/metrics`).
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
-  the only one of those services with a `ports:` entry.
+  the only one of those services with a `ports:` entry. Also listens on
+  internal `:8080/stub_status` for `nginx-exporter` (not published on the
+  host).
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
   the same rule that keeps `postgres`/`pgadmin`/`keycloak` unpublished.
+- **LGTM + exporters** — `grafana`, `prometheus`, `loki`, `tempo`,
+  `alloy`, `cadvisor`, `node-exporter`, `postgres-exporter`, `nginx-exporter`.
+  Only Grafana is fronted by NGINX (`grafana.infra.famillelallier.net`);
+  everything else stays on `infra-net` with no host `ports:`. Config lives
+  under `monitoring/`. Grafana stores its own state in the provisioned
+  Postgres database/role `grafana`. Alloy mounts the Docker socket to
+  collect container logs (all Compose projects on the host) and accepts
+  OTLP (`alloy:4317` / `alloy:4318`) for traces forwarded to Tempo.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
-(`keycloak.famillelallier.net`), and the Jarvis frontend
+(`keycloak.famillelallier.net`), Grafana
+(`grafana.infra.famillelallier.net`), and the Jarvis frontend
 (`jarvis.famillelallier.net`, also reachable at
 `jarvis.infra.famillelallier.net`) do. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
@@ -71,24 +85,26 @@ produces connection-refused, not a DNS or reachability problem.
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, and future apps) — not top-level infra
-processes that own a protocol NGINX can't meaningfully front. `postgres`,
-`pgadmin`, and `keycloak` deliberately have no `ports:` key. All host
+(`postgres`, `pgadmin`, `keycloak`, `grafana`, monitoring backends, and
+future apps) — not top-level infra processes that own a protocol NGINX
+can't meaningfully front. `postgres`, `pgadmin`, `keycloak`, `grafana`,
+and the rest of LGTM/exporters deliberately have no `ports:` key. All host
 access to them — HTTP(S) *and* Postgres — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
-  proxying to `pgadmin:80`, `keycloak:8080`, and, per-app, to whatever
-  apps register.
+  proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, and, per-app,
+  to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
 
-**Do not add a `ports:` entry to `postgres`, `pgadmin`, or `keycloak`.**
-If a backend service needs to be reachable from the host, add an NGINX
-server block instead (`nginx/conf.d/app.conf.example` is the template for
-HTTP; extend `nginx/stream.d/` for raw TCP). This is a deliberate
-constraint, not an oversight — keeping every backend-app host-facing port
-behind one process is the point of this stack.
+**Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
+`grafana`, or other monitoring backends.** If a backend service needs to
+be reachable from the host, add an NGINX server block instead
+(`nginx/conf.d/app.conf.example` is the template for HTTP; extend
+`nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
+oversight — keeping every backend-app host-facing port behind one process
+is the point of this stack.
 
 `nginx` (HTTP/S + Postgres TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own

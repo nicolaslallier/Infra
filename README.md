@@ -2,17 +2,19 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18, pgAdmin, and Keycloak. Application repos stay independent:
-they don't run their own database or proxy, they just join this stack's
-Docker network.
+PostgreSQL 18, pgAdmin, Keycloak, Technitium DNS, and an LGTM monitoring
+stack (Grafana, Prometheus, Loki, Tempo, Alloy). Application repos stay
+independent: they don't run their own database or proxy, they just join
+this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), and 5432 (TCP
-passthrough) for Postgres. Postgres, pgAdmin, and Keycloak publish nothing
-themselves; they're reachable only on the shared `infra-net` Docker network
-or through NGINX. A separate `dns` container publishes its own ports too —
-it's a top-level infra service in its own right, not something NGINX can
-front. See "DNS" below.
+passthrough) for Postgres. Postgres, pgAdmin, Keycloak, Grafana, and the
+rest of the monitoring backends publish nothing themselves; they're
+reachable only on the shared `infra-net` Docker network or through NGINX.
+A separate `dns` container publishes its own ports too — it's a top-level
+infra service in its own right, not something NGINX can front. See "DNS"
+below.
 
 ## First run
 
@@ -21,8 +23,9 @@ make init      # creates infra-net, generates local dev certs, copies .env.examp
 ```
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
-`KEYCLOAK_ADMIN_PASSWORD`, and one `<APPNAME>_DB_PASSWORD` per entry in
-`APP_DATABASES`, including `KEYCLOAK_DB_PASSWORD`).
+`KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD`,
+and one `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
+`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
 
 ```bash
 make hosts     # prints /etc/hosts lines to add (not applied automatically)
@@ -36,6 +39,7 @@ browsers to stop warning about the self-signed cert.
 pgAdmin: `https://pgadmin.famillelallier.net`
 Keycloak: `https://keycloak.famillelallier.net` (admin console at
 `/admin/master/console/`)
+Grafana: `https://grafana.infra.famillelallier.net`
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
@@ -114,10 +118,43 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make pull` | Pull latest images |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make provision-app app=<name>` | Add a new app's database/role to an **already-running** cluster |
+| `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make dns-provision` | Create/update the DNS zones & records the `dns` service serves |
 | `make dns-check` | Query the `dns` service to confirm it's answering correctly |
 | `make clean CONFIRM=1` | Stop the stack and remove volumes (destructive; keeps `infra-net` and `certs/`) |
+
+## Monitoring
+
+The LGTM stack (Grafana + Prometheus + Loki + Tempo + Alloy) plus
+exporters (cAdvisor, node-exporter, postgres-exporter, nginx-exporter) runs
+on `infra-net`. Only Grafana is browser-facing, at
+`https://grafana.infra.famillelallier.net` (admin password =
+`GRAFANA_ADMIN_PASSWORD`). Prometheus, Loki, Tempo, Alloy, and exporters
+have no host `ports:`.
+
+What you get:
+
+- **Metrics** — host (node-exporter), containers (cAdvisor), Postgres,
+  NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
+  Alloy
+- **Logs** — Alloy reads every container's stdout/stderr via the Docker
+  socket (this stack and sibling Compose projects on the same host) and
+  ships them to Loki
+- **Traces** — Alloy accepts OTLP on `alloy:4317` (gRPC) / `alloy:4318`
+  (HTTP); sibling apps on `infra-net` should export there
+
+On an **already-running** Postgres volume (init scripts won't re-run):
+
+```bash
+# After adding grafana to APP_DATABASES + GRAFANA_DB_PASSWORD in .env:
+make provision-app app=grafana
+make provision-monitoring-role   # postgres-exporter role (idempotent)
+```
+
+**macOS / Docker Desktop:** node-exporter and cAdvisor see the Linux VM,
+not the Mac host hardware — CPU/RAM/disk panels are best-effort. Container
+metrics and logs still work.
 
 ## Connecting an application repo
 
@@ -150,15 +187,20 @@ Run `make` / `make help` for the full list. Notable targets:
    you've set up the `dns` service (see "DNS" above), the hostname resolves
    automatically — the wildcard covers every `*.infra.famillelallier.net`
    name. Otherwise, add it manually (see `make hosts`).
+4. Optional: send OpenTelemetry traces to Alloy on `infra-net`
+   (`OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318`). Container logs are
+   collected automatically via the Docker socket — no app changes needed
+   for Loki.
 
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, nginx, dns — nginx and dns are the services with `ports:`
+docker-compose.yml       postgres, pgadmin, keycloak, nginx, dns, LGTM + exporters
 nginx/nginx.conf         http{} (web) + stream{} (Postgres TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
 nginx/stream.d/          the Postgres TCP proxy block
 postgres/initdb/         first-run schema/extension/provisioning scripts
+monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
 scripts/                 gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
 ```
 
