@@ -55,7 +55,7 @@ never orphans another app that's still attached to it):
   enabled on the management interface (`:9000/metrics`).
 - **`minio`** — `minio/minio`. Publishes no host port. S3 API on `:9000`
   and browser console on `:9001`, both fronted by NGINX
-  (`minio.infra.famillelallier.net` / `minio-console.infra.famillelallier.net`).
+  (`minio.famillelallier.net` / `minio-console.famillelallier.net`).
   Apps on `infra-net` reach the API at `http://minio:9000`.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
@@ -78,7 +78,7 @@ never orphans another app that's still attached to it):
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
 (`keycloak.famillelallier.net`), Grafana
 (`grafana.infra.famillelallier.net`), MinIO
-(`minio.infra.famillelallier.net` / `minio-console.infra.famillelallier.net`),
+(`minio.famillelallier.net` / `minio-console.famillelallier.net`),
 and the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
 `jarvis.infra.famillelallier.net`) do. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
@@ -176,11 +176,12 @@ regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
 
-pgAdmin, Keycloak, and Jarvis are all deliberate exceptions to the
-`.infra.` subdomain convention: they're served at
-`pgadmin.famillelallier.net`, `keycloak.famillelallier.net`, and
-`jarvis.famillelallier.net` (no `.infra.`), so those exact hostnames are
-added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
+pgAdmin, Keycloak, Jarvis, MinIO API, and MinIO console are all deliberate
+exceptions to the `.infra.` subdomain convention: they're served at
+`pgadmin.famillelallier.net`, `keycloak.famillelallier.net`,
+`jarvis.famillelallier.net`, `minio.famillelallier.net`, and
+`minio-console.famillelallier.net` (no `.infra.`), so those exact hostnames
+are added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
 `gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
 Regenerating certs (`./scripts/gen-certs.sh --force`) always mints a new
 local CA too, so re-run the `sudo security add-trusted-cert` step it
@@ -214,8 +215,8 @@ bridge IP on its own interfaces, never the host's LAN IP.
 Zone/record data (which hostnames resolve to `LAN_IP`) is managed through
 Technitium's HTTP API by `scripts/dns-provision.sh`, not through env vars
 or a mounted config file — safe to re-run any time zones/records need to
-be recreated (e.g. after a `dns-config` volume wipe). It creates exactly
-four zones, **never** a `Primary` zone for `famillelallier.net` itself:
+be recreated (e.g. after a `dns-config` volume wipe). It creates scoped
+zones, **never** a `Primary` zone for `famillelallier.net` itself:
 
 - `infra.famillelallier.net` — apex + `*.infra.famillelallier.net`
   wildcard A records, both → `LAN_IP`. Covers every current/future app
@@ -229,6 +230,8 @@ four zones, **never** a `Primary` zone for `famillelallier.net` itself:
 - `jarvis.famillelallier.net` — apex A record → `LAN_IP`, same exception
   pattern, requested in addition to the `.infra.` hostname above so
   Jarvis is reachable at both.
+- `minio.famillelallier.net` / `minio-console.famillelallier.net` — apex
+  A records → `LAN_IP`, same exception pattern (API + browser console).
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every

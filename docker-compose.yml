@@ -268,8 +268,10 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_SERVER_URL: https://minio.famillelallier.net
-      MINIO_BROWSER_REDIRECT_URL: https://minio-console.infra.famillelallier.net
+      # Do not set MINIO_SERVER_URL: on current MinIO releases it forces the
+      # console to reach the public API URL from inside the container (via
+      # LAN_IP), which hairpins/times out and surfaces as "invalid login".
+      MINIO_BROWSER_REDIRECT_URL: https://minio-console.famillelallier.net
     volumes:
       - minio-data:/data
     networks:
