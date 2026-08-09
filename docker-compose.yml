@@ -198,14 +198,20 @@ services:
         condition: service_started
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    # gcr.io/cadvisor moved; Docker 29's containerd snapshotter needs ≥ the
+    # fix in google/cadvisor#3709 (merged into 0.5x+/0.60).
+    image: ghcr.io/google/cadvisor:v0.60.5
     restart: unless-stopped
     privileged: true
     devices:
       - /dev/kmsg:/dev/kmsg
     volumes:
       - /:/rootfs:ro
-      - /var/run:/var/run:ro
+      # Mount the socket alone — on Docker Desktop, /var/run:/var/run
+      # brings a host symlink to ~/.docker/run/docker.sock that is broken
+      # inside the Linux VM and hides the real engine socket.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
     networks:
@@ -213,6 +219,10 @@ services:
     command:
       - --housekeeping_interval=30s
       - --docker_only=true
+      - --store_container_labels=false
+      # Disk/fs stats still need classic layerdb; skip them so CPU/mem/net
+      # per-container metrics can register (google/cadvisor#3749 / #3860).
+      - --disable_metrics=disk
 
   node-exporter:
     image: prom/node-exporter:v1.9.1
