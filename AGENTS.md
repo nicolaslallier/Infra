@@ -1,10 +1,10 @@
 # AGENTS.md
 
-This repo is a Docker Compose infrastructure stack (NGINX, PostgreSQL 18,
-pgAdmin, Keycloak, Technitium DNS, and the LGTM monitoring stack). There is
-no application code, build, lint, or unit-test step — the "test" is bringing
-the stack up and exercising it. See `README.md` and `CLAUDE.md` for the
-architecture and the full list of `make` targets.
+This repo is a Docker Compose infrastructure stack (NGINX, PostgreSQL 18
+with pgvector, pgAdmin, Keycloak, Technitium DNS, and the LGTM monitoring
+stack). There is no application code, build, lint, or unit-test step — the
+"test" is bringing the stack up and exercising it. See `README.md` and
+`CLAUDE.md` for the architecture and the full list of `make` targets.
 
 ## Cursor Cloud specific instructions
 

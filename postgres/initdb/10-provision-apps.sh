@@ -40,6 +40,14 @@ provision_one() {
 		GRANT CONNECT ON DATABASE :"appname" TO :"appname";
 	EOSQL
 
+  # Create pgvector as the superuser inside the app DB. App roles are not
+  # superusers, so Jarvis's migration `CREATE EXTENSION IF NOT EXISTS vector`
+  # would otherwise fail with a permissions error even though the image
+  # ships the extension files. Idempotent: safe when the extension already
+  # exists (e.g. re-running provision-app after an image swap).
+  psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$app" \
+    -c "CREATE EXTENSION IF NOT EXISTS vector;"
+
   echo "10-provision-apps.sh: provisioned database/role '$app'"
 }
 

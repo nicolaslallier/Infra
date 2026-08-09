@@ -2,10 +2,10 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18, pgAdmin, Keycloak, MinIO, Technitium DNS, and an LGTM
-monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy). Application
-repos stay independent: they don't run their own database or proxy, they
-just join this stack's Docker network.
+PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, Technitium DNS, and
+an LGTM monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy).
+Application repos stay independent: they don't run their own database or
+proxy, they just join this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), and 5432 (TCP
@@ -120,7 +120,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make pull` | Pull latest images |
 | `make config` | Validate `docker-compose.yml` + `.env` |
-| `make provision-app app=<name>` | Add a new app's database/role to an **already-running** cluster |
+| `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make dns-provision` | Create/update the DNS zones & records the `dns` service serves |
