@@ -4,8 +4,8 @@ SHELL := bash
 .DEFAULT_GOAL := help
 
 .PHONY: help init net certs up down restart logs ps status pull config \
-	shell psql provision-app hosts dns-provision dns-check clean check-env \
-	keycloak-seed-users
+	shell psql provision-app provision-monitoring-role hosts dns-provision \
+	dns-check clean check-env keycloak-seed-users
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -32,7 +32,7 @@ check-env:
 	fi
 	@set -a; . ./.env; set +a; \
 	bad=""; \
-	for var in POSTGRES_PASSWORD PGADMIN_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD DNS_ADMIN_PASSWORD; do \
+	for var in POSTGRES_PASSWORD PGADMIN_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD DNS_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD MONITORING_DB_PASSWORD; do \
 		if [ -z "$${!var:-}" ] || [ "$${!var}" = "change-me" ]; then \
 			bad="$$bad $$var"; \
 		fi; \
@@ -89,6 +89,9 @@ psql: ## Open a psql shell as the superuser
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
 	@./scripts/provision-app.sh "$(app)"
+
+provision-monitoring-role: check-env ## Create/update postgres-exporter monitoring role
+	@./scripts/provision-monitoring-role.sh
 
 dns-provision: check-env ## Create/update DNS zones & records
 	@./scripts/dns-provision.sh
