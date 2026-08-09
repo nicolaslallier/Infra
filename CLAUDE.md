@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `Infra` is the shared "common group" backing stack for sibling application
-repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, a
-Technitium DNS server, and an LGTM monitoring stack (Grafana, Prometheus,
+repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
+a Technitium DNS server, and an LGTM monitoring stack (Grafana, Prometheus,
 Loki, Tempo, Alloy + exporters), run via Docker Compose. Application repos
 are meant to stay in their own repositories and connect in over a shared
 Docker network rather than being folded into this one.
@@ -53,6 +53,10 @@ never orphans another app that's still attached to it):
   same generic per-app provisioning as any other app — see "Per-app
   database provisioning" below), not a bundled DB of its own. Metrics
   enabled on the management interface (`:9000/metrics`).
+- **`minio`** — `minio/minio`. Publishes no host port. S3 API on `:9000`
+  and browser console on `:9001`, both fronted by NGINX
+  (`minio.infra.famillelallier.net` / `minio-console.infra.famillelallier.net`).
+  Apps on `infra-net` reach the API at `http://minio:9000`.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
@@ -73,8 +77,9 @@ never orphans another app that's still attached to it):
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
 (`keycloak.famillelallier.net`), Grafana
-(`grafana.infra.famillelallier.net`), and the Jarvis frontend
-(`jarvis.famillelallier.net`, also reachable at
+(`grafana.infra.famillelallier.net`), MinIO
+(`minio.infra.famillelallier.net` / `minio-console.infra.famillelallier.net`),
+and the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
 `jarvis.infra.famillelallier.net`) do. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
 (pgAdmin and `postgres` share `infra-net` directly), port `5432` — never a
@@ -85,22 +90,22 @@ produces connection-refused, not a DNS or reachability problem.
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, `grafana`, monitoring backends, and
-future apps) — not top-level infra processes that own a protocol NGINX
-can't meaningfully front. `postgres`, `pgadmin`, `keycloak`, `grafana`,
-and the rest of LGTM/exporters deliberately have no `ports:` key. All host
-access to them — HTTP(S) *and* Postgres — goes through NGINX:
+(`postgres`, `pgadmin`, `keycloak`, `minio`, `grafana`, monitoring backends,
+and future apps) — not top-level infra processes that own a protocol NGINX
+can't meaningfully front. `postgres`, `pgadmin`, `keycloak`, `minio`,
+`grafana`, and the rest of LGTM/exporters deliberately have no `ports:`
+key. All host access to them — HTTP(S) *and* Postgres — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
-  proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, and, per-app,
-  to whatever apps register.
+  proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `minio:9000`
+  / `minio:9001`, and, per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`grafana`, or other monitoring backends.** If a backend service needs to
-be reachable from the host, add an NGINX server block instead
+`minio`, `grafana`, or other monitoring backends.** If a backend service
+needs to be reachable from the host, add an NGINX server block instead
 (`nginx/conf.d/app.conf.example` is the template for HTTP; extend
 `nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
 oversight — keeping every backend-app host-facing port behind one process

@@ -259,6 +259,28 @@ services:
     depends_on:
       - nginx
 
+  # --- Object storage (API + console via NGINX; no host ports) ---
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_SERVER_URL: https://minio.infra.famillelallier.net
+      MINIO_BROWSER_REDIRECT_URL: https://minio-console.infra.famillelallier.net
+    volumes:
+      - minio-data:/data
+    networks:
+      - infra-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
 networks:
   infra-net:
     external: true
@@ -272,3 +294,4 @@ volumes:
   loki-data:
   tempo-data:
   alloy-data:
+  minio-data:
