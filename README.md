@@ -65,6 +65,31 @@ service name:
 (The `127.0.0.1:5432` address above is for connecting from your host
 machine via `psql` — it's a different path than pgAdmin uses.)
 
+### Jarvis login (Keycloak + oauth2-proxy)
+
+`https://jarvis.famillelallier.net` requires a Keycloak login — it's the
+one application vhost in this repo currently gated this way (every other
+app listed above is unauthenticated at the NGINX layer). After `make up`:
+
+1. In the Keycloak admin console, open the `jarvis` realm → **Clients** →
+   `jarvis` → **Credentials** tab, copy the client secret into
+   `JARVIS_OAUTH_CLIENT_SECRET` in `.env`, then
+   `docker compose up -d oauth2-proxy` to pick it up.
+2. Still in the `jarvis` realm, **Users** → **Add user**, and set a
+   password on that user's **Credentials** tab. This is the one homelab
+   account that can log in — nothing in this repo creates it for you (see
+   `keycloak/realm-import/jarvis-realm.json` / CLAUDE.md for why).
+
+Set `JARVIS_OAUTH_COOKIE_SECRET` in `.env` before first boot (`openssl
+rand -base64 32`) — unlike the client secret, oauth2-proxy needs this at
+startup, not after.
+
+Note this only gates the frontend page itself; the Jarvis backend
+API/WebSocket are reached by the browser directly at their own published
+port, not through this vhost — see the "Jarvis: Keycloak login gate"
+section in [CLAUDE.md](CLAUDE.md) for the full explanation and what to
+verify manually.
+
 ### Keycloak admin bootstrap
 
 `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` in `.env` only take effect on
