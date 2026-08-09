@@ -137,12 +137,18 @@ What you get:
 
 - **Metrics** — host (node-exporter), containers (cAdvisor), Postgres,
   NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
-  Alloy
+  Alloy, and sibling apps that expose `/metrics` (Jarvis API at
+  `jarvis-api:8000`, scraped as job `jarvis`)
 - **Logs** — Alloy reads every container's stdout/stderr via the Docker
   socket (this stack and sibling Compose projects on the same host) and
   ships them to Loki
 - **Traces** — Alloy accepts OTLP on `alloy:4317` (gRPC) / `alloy:4318`
   (HTTP); sibling apps on `infra-net` should export there
+
+Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
+**Application logs**, and **Jarvis** (`uid: jarvis-overview`) covering
+API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs, and
+Tempo traces.
 
 On an **already-running** Postgres volume (init scripts won't re-run):
 
