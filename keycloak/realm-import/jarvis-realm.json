@@ -1,0 +1,20 @@
+{
+  "realm": "jarvis",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "clients": [
+    {
+      "clientId": "jarvis",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["https://jarvis.famillelallier.net/oauth2/callback"],
+      "webOrigins": ["https://jarvis.famillelallier.net"]
+    }
+  ]
+}

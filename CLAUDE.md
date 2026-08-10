@@ -149,6 +149,62 @@ default is 10 minutes, which silently drops idle Postgres connections
 (pooled connections, an idle `psql` session) and shows up as confusing
 "connection reset" errors far from the actual cause.
 
+### Jarvis: Keycloak login gate (oauth2-proxy)
+
+`jarvis.famillelallier.net` (and its `.infra.` alias) is the only
+application vhost in this repo that currently requires a login — every
+other backend app listed in "Single-ingress rule" above is reachable by
+anyone who can resolve its hostname. The gate is the standard
+`oauth2-proxy` + NGINX `auth_request` recipe:
+
+- **`keycloak/realm-import/jarvis-realm.json`** — a dedicated realm
+  (`jarvis`), separate from `nurse-realm.json`, holding one confidential
+  client (`clientId: jarvis`) with a single redirect URI
+  (`https://jarvis.famillelallier.net/oauth2/callback`, owned by
+  oauth2-proxy, not the Jarvis app itself). It deliberately omits both a
+  client `secret` (Keycloak auto-generates one for a confidential client
+  on import, so no secret value — even a placeholder — ever lands in git)
+  and a `users` array (a real login password shouldn't live in a
+  committed JSON file either). Both are manual admin-console steps after
+  the first `make up` — see the `JARVIS_OAUTH_CLIENT_SECRET` comment in
+  `.env.example`. This mirrors `nurse-realm.json`'s own seed-user
+  precedent: `NURSE_SEED_PASSWORD`/`EXAMINER_SEED_PASSWORD` are likewise
+  applied after boot via `make keycloak-seed-users`, not baked into the
+  realm JSON.
+- **`oauth2-proxy` service** (`docker-compose.yml`) — publishes no host
+  port; reached only by `nginx` over `infra-net` at
+  `oauth2-proxy:4180`. Its own `OAUTH2_PROXY_UPSTREAMS` is a dummy
+  (`static://202`) because it's never used as an actual reverse proxy
+  here, only as the `auth_request` subrequest target and the handler for
+  `/oauth2/*` (sign-in, callback, logout). Points at Keycloak via the
+  internal `http://keycloak:8080/realms/jarvis` issuer URL, not the
+  external `https://keycloak.famillelallier.net` one, for the same
+  same-network reason the `minio` service avoids `MINIO_SERVER_URL`
+  (hairpinning back out through NGINX from inside `infra-net`). If this
+  ever surfaces as an "issuer did not match" login error (a known
+  Keycloak hostname-v2 quirk depending on how the OIDC discovery document
+  is fetched), the documented fallback is
+  `OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true` — not
+  enabled by default since it relaxes a real security check.
+- **`nginx/conf.d/jarvis.conf`** — adds `location = /oauth2/auth`
+  (internal-only `auth_request` target), `location /oauth2/` (proxies
+  sign-in/callback/logout to oauth2-proxy), and gates the existing
+  `location /` with `auth_request` + `error_page 401 = /oauth2/sign_in`.
+  This only protects the frontend's static-file location — **it does
+  not cover the Jarvis backend API or its `GET /ws/ingest-status`
+  WebSocket.** Per the Jarvis repo's `frontend/src/useFiles.ts` and
+  `frontend/Dockerfile`, `VITE_API_URL` is a browser-facing build-time
+  value baked into the static bundle and pointed at the backend's own
+  published host port (e.g. `http://localhost:8000`) — the browser calls
+  `fetch()`/`new WebSocket()` against that URL directly, never through
+  this NGINX vhost. So the usual "`auth_request` breaks WebSocket
+  upgrades" failure mode doesn't apply here (there's no `auth_request` on
+  a WS route in this file), but it also means logging into the frontend
+  page does **not** by itself put the backend API/WebSocket behind
+  Keycloak. Verify manually post-deploy: confirm what `VITE_API_URL` the
+  deployed frontend was actually built with, and whether that backend
+  port is reachable unauthenticated from outside the LAN.
+
 ### PostgreSQL 18's data directory moved
 
 The official image (and `pgvector/pgvector:pg18`, which is based on it)
