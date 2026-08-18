@@ -14,7 +14,20 @@
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": ["https://jarvis.famillelallier.net/oauth2/callback"],
-      "webOrigins": ["https://jarvis.famillelallier.net"]
+      "webOrigins": ["https://jarvis.famillelallier.net"],
+      "protocolMappers": [
+        {
+          "name": "jarvis-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "jarvis",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ]
 }

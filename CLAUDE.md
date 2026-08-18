@@ -180,12 +180,36 @@ anyone who can resolve its hostname. The gate is the standard
   internal `http://keycloak:8080/realms/jarvis` issuer URL, not the
   external `https://keycloak.famillelallier.net` one, for the same
   same-network reason the `minio` service avoids `MINIO_SERVER_URL`
-  (hairpinning back out through NGINX from inside `infra-net`). If this
-  ever surfaces as an "issuer did not match" login error (a known
-  Keycloak hostname-v2 quirk depending on how the OIDC discovery document
-  is fetched), the documented fallback is
-  `OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true` — not
-  enabled by default since it relaxes a real security check.
+  (hairpinning back out through NGINX from inside `infra-net`). This
+  internal-URL/external-issuer split hits a real Keycloak hostname-v2
+  quirk — `KC_HOSTNAME` is set to the full external URL
+  (`https://keycloak.famillelallier.net`, not a bare hostname) so the
+  discovery document's `issuer` is stable regardless of which request
+  triggers it, but that issuer then never matches the internal
+  `OIDC_ISSUER_URL` used to fetch it, so strict verification always
+  fails. `OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true` is
+  therefore enabled — this is the documented escape hatch, deliberately
+  on here rather than the exceptional case. oauth2-proxy's own
+  server-to-server calls (token exchange, jwks) hit the endpoints named
+  in that discovery doc, i.e. the external `https://keycloak.famillelallier.net`
+  hostname — which otherwise has no route from inside `infra-net` — so
+  the `nginx` service carries a `keycloak.famillelallier.net` network
+  alias pointing that hostname back at itself (it already TLS-terminates
+  and proxies it via `nginx/conf.d/keycloak.conf`). Those calls then hit
+  the local dev CA (`certs/infra-ca.crt`), which isn't in oauth2-proxy's
+  default trust store and whose distroless image has no shell for a
+  `--provider-ca-file`-at-build-time trick; instead
+  `scripts/gen-certs.sh`'s `gen_oauth2proxy_bundle` bakes a
+  `certs/oauth2proxy-ca-bundle.crt` (the image's own CA bundle plus our
+  CA) that's bind-mounted over `/etc/ssl/certs/ca-certificates.crt`, so
+  every Go `http.Client` in the process picks it up via the system pool.
+  The `keycloak` service also carries a `healthcheck` (`/health/ready` on
+  its management port, probed with a `/dev/tcp` one-liner since the image
+  ships no curl/wget) so `oauth2-proxy` can `depends_on: condition:
+  service_healthy` instead of `service_started` — without it, oauth2-proxy
+  starts as soon as Keycloak's container process launches, long before its
+  HTTP listener is actually up, and its one-shot OIDC discovery call fails
+  with a DNS/connection error that only clears on a lucky restart.
 - **`nginx/conf.d/jarvis.conf`** — adds `location = /oauth2/auth`
   (internal-only `auth_request` target), `location /oauth2/` (proxies
   sign-in/callback/logout to oauth2-proxy), and gates the existing
