@@ -60,7 +60,16 @@ services:
       KC_DB_URL_DATABASE: keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
-      KC_HOSTNAME: keycloak.famillelallier.net
+      # Full URL (not a bare hostname) so scheme+port are pinned to the
+      # public https/443 route regardless of which request (internal
+      # oauth2-proxy call on :8080, or external NGINX one) triggers a
+      # discovery-document lookup. A bare hostname makes Keycloak's
+      # hostname-v2 logic resolve scheme/port from that request instead,
+      # which leaked http://keycloak.famillelallier.net:8080 (the internal
+      # scheme/port) into browser-facing URLs like authorization_endpoint —
+      # nothing listens on host port 8080 externally, so the browser got
+      # ERR_CONNECTION_REFUSED.
+      KC_HOSTNAME: https://keycloak.famillelallier.net
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
@@ -74,6 +83,28 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # KC_HEALTH_ENABLED above exposes /health/ready on the management
+    # interface (:9000). The image ships no curl/wget (RHEL-based, stripped
+    # down since Keycloak 23), but /bin/sh is bash under the hood, so a raw
+    # /dev/tcp probe works without extra tooling. This exists so oauth2-proxy
+    # (below) can depend_on service_healthy instead of service_started --
+    # without it, oauth2-proxy starts as soon as this container process
+    # launches, long before Keycloak's HTTP listener is actually up, fails
+    # its one-shot OIDC discovery, and crash-loops on DNS "no such host" /
+    # "connection refused" until a restart happens to land after Keycloak
+    # finishes booting (which can take a minute-plus for JVM start + realm
+    # import).
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          cat <&3 | grep -q '200 OK'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   # Nginx auth_request backend for the Jarvis vhost's Keycloak login gate
   # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself and
@@ -96,6 +127,10 @@ services:
       # OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true below — not
       # enabled by default since it relaxes a real security check.
       OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/jarvis
+      # Escape hatch documented above: Keycloak's discovery doc reports the
+      # external KC_HOSTNAME as issuer, which never matches the internal
+      # OIDC_ISSUER_URL used to fetch it, so strict verification always fails.
+      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
       OAUTH2_PROXY_CLIENT_ID: jarvis
       OAUTH2_PROXY_CLIENT_SECRET: ${JARVIS_OAUTH_CLIENT_SECRET}
       OAUTH2_PROXY_COOKIE_SECRET: ${JARVIS_OAUTH_COOKIE_SECRET}
@@ -118,11 +153,23 @@ services:
       # Single provider configured — skip the "choose a provider" screen and
       # go straight to Keycloak.
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    volumes:
+      # Token-exchange/jwks calls below route through NGINX (see the
+      # keycloak.famillelallier.net alias on the nginx service), which
+      # serves the self-signed certs/infra.crt, signed by our local
+      # certs/infra-ca.crt CA — not in this image's default trust store.
+      # --provider-ca-file isn't reliably wired into every internal HTTP
+      # client in this image (v7.6.0's keycloak-oidc token exchange still
+      # failed TLS verification with it set), so instead this replaces the
+      # container's whole system CA bundle with one that also trusts our
+      # CA (see scripts/gen-certs.sh's gen_oauth2proxy_bundle) — every Go
+      # http.Client here uses the system pool by default.
+      - ./certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
     networks:
       - infra-net
     depends_on:
       keycloak:
-        condition: service_started
+        condition: service_healthy
 
   nginx:
     image: nginx:alpine
@@ -139,7 +186,16 @@ services:
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - ./certs:/etc/nginx/certs:ro
     networks:
-      - infra-net
+      infra-net:
+        # oauth2-proxy's server-to-server calls (token exchange, jwks) hit
+        # the endpoints from Keycloak's discovery doc, which report the
+        # external https://keycloak.famillelallier.net hostname regardless
+        # of caller (see KC_HOSTNAME comment on the keycloak service below)
+        # — that hostname otherwise has no route from inside infra-net, so
+        # this alias points it at this container, which already
+        # TLS-terminates and proxies it (nginx/conf.d/keycloak.conf).
+        aliases:
+          - keycloak.famillelallier.net
     depends_on:
       postgres:
         condition: service_healthy
