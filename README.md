@@ -84,6 +84,29 @@ Set `JARVIS_OAUTH_COOKIE_SECRET` in `.env` before first boot (`openssl
 rand -base64 32`) — unlike the client secret, oauth2-proxy needs this at
 startup, not after.
 
+**Upgrading an existing install.** Two steps do not happen on their own,
+because both mechanisms only run against a blank slate:
+
+```bash
+make certs                       # builds certs/oauth2proxy-ca-bundle.crt
+```
+
+oauth2-proxy mounts that bundle over its system CA store. It is newer than
+`certs/infra.crt`, so a host whose certs predate it has no bundle; `make
+certs` now builds one even when the certs themselves are left alone. Run it
+**before** `make up` — the compose mount is declared `create_host_path:
+false` so a missing bundle is a loud startup error rather than an empty
+trust store, but it is still an error.
+
+```bash
+make keycloak-sync-jarvis-client # re-apply jarvis-realm.json to a live realm
+```
+
+`--import-realm` uses Keycloak's default `IGNORE_EXISTING` strategy, so
+edits to `keycloak/realm-import/jarvis-realm.json` (protocol mappers and
+the like) never reach a realm that already exists. This target re-applies
+them without touching users or passwords.
+
 Note this only gates the frontend page itself; the Jarvis backend
 API/WebSocket are reached by the browser directly at their own published
 port, not through this vhost — see the "Jarvis: Keycloak login gate"
@@ -240,7 +263,8 @@ nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
 postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
-scripts/                 gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
+scripts/                 gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh,
+                         dns-check.sh, keycloak-seed-users.sh, keycloak-sync-jarvis-client.sh
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the architecture notes and gotchas that

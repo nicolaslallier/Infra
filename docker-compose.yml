@@ -117,20 +117,25 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Internal infra-net hostname, not the public keycloak.famillelallier.net
-      # URL — both containers share infra-net, so there's no need to hairpin
-      # back out through NGINX (same reasoning as the MINIO_SERVER_URL note
-      # on the minio service above). If login ever fails with an "issuer did
-      # not match" error (a known Keycloak hostname-v2 quirk when the OIDC
-      # discovery document is fetched via this internal URL instead of the
-      # external KC_HOSTNAME), the documented escape hatch is setting
-      # OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true below — not
-      # enabled by default since it relaxes a real security check.
-      OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/jarvis
-      # Escape hatch documented above: Keycloak's discovery doc reports the
-      # external KC_HOSTNAME as issuer, which never matches the internal
-      # OIDC_ISSUER_URL used to fetch it, so strict verification always fails.
-      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
+      # The *external* URL, matching KC_HOSTNAME on the keycloak service, even
+      # though both containers share infra-net. Keycloak's hostname-v2 logic
+      # always reports KC_HOSTNAME as the discovery document's `issuer`, no
+      # matter which address the document was fetched from, so fetching it over
+      # the internal http://keycloak:8080 address guarantees a mismatch against
+      # the configured issuer and forces
+      # OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true — which does
+      # not merely relax the discovery check, it builds go-oidc's verifier with
+      # SkipIssuerCheck and stops validating the `iss` claim of every ID token.
+      # Naming the external URL here makes the two identical, so issuer
+      # verification stays on and no escape hatch is needed.
+      #
+      # This works from inside infra-net because the nginx service carries a
+      # keycloak.famillelallier.net network alias (see its `networks:` block),
+      # and its TLS is trusted because certs/oauth2proxy-ca-bundle.crt is
+      # mounted over this image's CA store below. Both are required anyway:
+      # oauth2-proxy's token-exchange and jwks calls hit the endpoints named in
+      # the discovery document, i.e. this same external hostname.
+      OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/jarvis
       OAUTH2_PROXY_CLIENT_ID: jarvis
       OAUTH2_PROXY_CLIENT_SECRET: ${JARVIS_OAUTH_CLIENT_SECRET}
       OAUTH2_PROXY_COOKIE_SECRET: ${JARVIS_OAUTH_COOKIE_SECRET}
@@ -154,8 +159,8 @@ services:
       # go straight to Keycloak.
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
     volumes:
-      # Token-exchange/jwks calls below route through NGINX (see the
-      # keycloak.famillelallier.net alias on the nginx service), which
+      # Discovery, token-exchange and jwks calls all route through NGINX (see
+      # the keycloak.famillelallier.net alias on the nginx service), which
       # serves the self-signed certs/infra.crt, signed by our local
       # certs/infra-ca.crt CA — not in this image's default trust store.
       # --provider-ca-file isn't reliably wired into every internal HTTP
@@ -164,11 +169,31 @@ services:
       # container's whole system CA bundle with one that also trusts our
       # CA (see scripts/gen-certs.sh's gen_oauth2proxy_bundle) — every Go
       # http.Client here uses the system pool by default.
-      - ./certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      #
+      # Long syntax with create_host_path: false on purpose. Short syntax
+      # implies create_host_path: true, so a missing bundle makes Docker
+      # silently create an empty *directory* here and mount it over the trust
+      # store — oauth2-proxy then fails every TLS handshake with "certificate
+      # signed by unknown authority" and nothing points at the real cause.
+      # This way a missing bundle is a loud startup error instead; `make certs`
+      # regenerates it.
+      - type: bind
+        source: ./certs/oauth2proxy-ca-bundle.crt
+        target: /etc/ssl/certs/ca-certificates.crt
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - infra-net
     depends_on:
       keycloak:
+        condition: service_healthy
+      # OIDC discovery at startup now goes to the external Keycloak URL, which
+      # resolves to nginx over infra-net — so nginx has to be serving before
+      # this container's one-shot discovery call, the same race the keycloak
+      # healthcheck above fixes. nginx no longer depends_on oauth2-proxy (it
+      # resolves that upstream lazily at request time), so this is not a cycle.
+      nginx:
         condition: service_healthy
 
   nginx:
@@ -187,13 +212,15 @@ services:
       - ./certs:/etc/nginx/certs:ro
     networks:
       infra-net:
-        # oauth2-proxy's server-to-server calls (token exchange, jwks) hit
-        # the endpoints from Keycloak's discovery doc, which report the
-        # external https://keycloak.famillelallier.net hostname regardless
-        # of caller (see KC_HOSTNAME comment on the keycloak service below)
-        # — that hostname otherwise has no route from inside infra-net, so
-        # this alias points it at this container, which already
-        # TLS-terminates and proxies it (nginx/conf.d/keycloak.conf).
+        # oauth2-proxy reaches Keycloak exclusively by its external
+        # https://keycloak.famillelallier.net hostname — for discovery
+        # because OAUTH2_PROXY_OIDC_ISSUER_URL names it (so the advertised
+        # and configured issuers match), and for token exchange and jwks
+        # because the discovery document reports that hostname regardless of
+        # caller (see the KC_HOSTNAME comment on the keycloak service above).
+        # That hostname otherwise has no route from inside infra-net, so this
+        # alias points it at this container, which already TLS-terminates and
+        # proxies it (nginx/conf.d/keycloak.conf).
         aliases:
           - keycloak.famillelallier.net
     depends_on:
@@ -203,8 +230,22 @@ services:
         condition: service_started
       keycloak:
         condition: service_started
-      oauth2-proxy:
-        condition: service_started
+      # No oauth2-proxy entry: that upstream is resolved lazily at request time
+      # (the `set $oauth2_upstream` pattern in conf.d/jarvis.conf), so nginx
+      # never needed it at boot — and oauth2-proxy now depends on nginx for its
+      # startup OIDC discovery, which would make this a cycle.
+    # nginx:alpine ships no curl, but busybox provides wget. Probes the
+    # internal stub_status vhost (conf.d/00-stub-status.conf, :8080) — it needs
+    # no TLS, no upstream, and no hostname, so it tests exactly "is nginx
+    # serving" and nothing else. Exists so oauth2-proxy can wait on
+    # service_healthy rather than service_started, which only means the
+    # container process was created.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/stub_status"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
 
   dns:
     image: technitium/dns-server:latest

@@ -5,7 +5,7 @@ SHELL := bash
 
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
-	dns-check clean check-env keycloak-seed-users
+	dns-check clean check-env keycloak-seed-users keycloak-sync-jarvis-client
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -101,6 +101,9 @@ dns-check: check-env ## Query the dns service to verify answers
 
 keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
+
+keycloak-sync-jarvis-client: check-env ## Re-apply jarvis-realm.json mappers to an existing realm
+	@./scripts/keycloak-sync-jarvis-client.sh
 
 clean: ## Remove containers + volumes (CONFIRM=1 required)
 	@test "$(CONFIRM)" = "1" || { echo "usage: make clean CONFIRM=1" >&2; exit 1; }

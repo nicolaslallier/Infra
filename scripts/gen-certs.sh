@@ -23,15 +23,17 @@ EXTRA_SANS=(
 )
 CERT_DIR="certs"
 FORCE="${1:-}"
-# Must match the oauth2-proxy image tag in docker-compose.yml.
-OAUTH2_PROXY_IMAGE="quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
+OAUTH2_PROXY_BUNDLE="$CERT_DIR/oauth2proxy-ca-bundle.crt"
+# Read out of docker-compose.yml rather than duplicated here: a comment
+# saying "keep these in sync" is not a mechanism, and a compose image bump
+# would otherwise keep building the bundle from the roots of an image that
+# is no longer the one running.
+OAUTH2_PROXY_IMAGE="$(
+  awk '/^[[:space:]]*image:[[:space:]]*quay\.io\/oauth2-proxy\/oauth2-proxy:/ { print $2; exit }' \
+    docker-compose.yml
+)"
 
 mkdir -p "$CERT_DIR"
-
-if [ -f "$CERT_DIR/infra.crt" ] && [ "$FORCE" != "--force" ]; then
-  echo "gen-certs.sh: $CERT_DIR/infra.crt already exists, skipping (use --force to regenerate)"
-  exit 0
-fi
 
 # oauth2-proxy's server-to-server calls to Keycloak (token exchange, jwks)
 # route through NGINX and hit this local CA (see the keycloak.famillelallier.net
@@ -44,20 +46,98 @@ fi
 # volumes in docker-compose.yml). Every Go http.Client in that process uses
 # the system pool by default, so this covers discovery, token exchange, and
 # jwks fetches alike, regardless of which internal code path each one takes.
+#
+# A missing bundle is not a benign "skip": Docker creates a *directory* at a
+# bind-mount source that doesn't exist, so oauth2-proxy would come up with an
+# empty root store and every outbound TLS call would die with "certificate
+# signed by unknown authority", far from the actual cause. Every failure path
+# below is therefore fatal and says exactly how to recover.
 gen_oauth2proxy_bundle() {
   local ca_crt="$1"
-  local bundle="$CERT_DIR/oauth2proxy-ca-bundle.crt"
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "gen-certs.sh: docker not found, skipping $bundle (oauth2-proxy needs it — run this script again once docker is available)"
+  local bundle="$OAUTH2_PROXY_BUNDLE"
+
+  if [ -d "$bundle" ]; then
+    echo "gen-certs.sh: $bundle is a DIRECTORY, not a file." >&2
+    echo "  Docker created it as a bind-mount stub because it was missing at" >&2
+    echo "  'docker compose up' time. Remove it and re-run:" >&2
+    echo "" >&2
+    echo "    docker compose rm -sf oauth2-proxy && rm -rf $bundle && make certs" >&2
+    exit 1
+  fi
+
+  # A --force run mints a new CA, so any existing bundle embeds the old one.
+  # Drop it up front rather than merely overwriting it on success: if the
+  # rebuild below fails, a later plain `make certs` must not find a leftover
+  # bundle, conclude it is current, and leave oauth2-proxy trusting a CA that
+  # nginx no longer serves.
+  if [ "$FORCE" = "--force" ]; then
+    rm -f "$bundle"
+  fi
+
+  if [ -s "$bundle" ]; then
+    echo "gen-certs.sh: $bundle already exists, skipping"
     return 0
   fi
+
+  if [ -z "$OAUTH2_PROXY_IMAGE" ]; then
+    echo "gen-certs.sh: could not read the oauth2-proxy image tag from docker-compose.yml." >&2
+    echo "  Expected a line like 'image: quay.io/oauth2-proxy/oauth2-proxy:vX.Y.Z'." >&2
+    exit 1
+  fi
+
+  if ! docker info >/dev/null 2>&1; then
+    echo "gen-certs.sh: cannot build $bundle — the Docker daemon is not reachable." >&2
+    echo "  oauth2-proxy mounts this file over its system CA bundle; leaving it" >&2
+    echo "  missing makes Docker mount an empty directory in its place and breaks" >&2
+    echo "  every TLS call it makes. Start Docker, then re-run:  make certs" >&2
+    exit 1
+  fi
+
   echo "gen-certs.sh: building $bundle from $OAUTH2_PROXY_IMAGE's CA bundle + $ca_crt"
-  local cid
-  cid="$(docker create "$OAUTH2_PROXY_IMAGE" 2>/dev/null)"
-  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle"
-  docker rm "$cid" >/dev/null
+
+  local cid err
+  # Keep stderr: without it a failed pull/daemon error is invisible and the
+  # script just dies with a bare non-zero exit under `set -e`.
+  if ! cid="$(docker create "$OAUTH2_PROXY_IMAGE" 2>"$CERT_DIR/.docker-create.err")"; then
+    err="$(cat "$CERT_DIR/.docker-create.err")"
+    rm -f "$CERT_DIR/.docker-create.err"
+    echo "gen-certs.sh: 'docker create $OAUTH2_PROXY_IMAGE' failed:" >&2
+    echo "  ${err:-(no output)}" >&2
+    exit 1
+  fi
+  rm -f "$CERT_DIR/.docker-create.err"
+
+  if [ -z "$cid" ]; then
+    echo "gen-certs.sh: 'docker create $OAUTH2_PROXY_IMAGE' printed no container id" >&2
+    exit 1
+  fi
+
+  # Clean up the scratch container on both paths, explicitly rather than via a
+  # RETURN trap: a RETURN trap does not fire when the function leaves through
+  # `exit`, so the failure branch below would still leak one container per run.
+  if ! docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle"; then
+    docker rm -f "$cid" >/dev/null 2>&1 || true
+    echo "gen-certs.sh: could not copy /etc/ssl/certs/ca-certificates.crt out of" >&2
+    echo "  $OAUTH2_PROXY_IMAGE — has the image moved its CA bundle?" >&2
+    rm -f "$bundle"
+    exit 1
+  fi
+  docker rm -f "$cid" >/dev/null 2>&1 || true
+
   cat "$ca_crt" >> "$bundle"
 }
+
+# Deliberately *after* gen_oauth2proxy_bundle so the early exit can still build
+# it. The bundle is a newer addition than the certs themselves, so every host
+# whose certs/infra.crt predates it would otherwise take this branch, be told
+# "skipping", exit 0, and get an empty CA store in oauth2-proxy on the next
+# `make up`. `make up` does not depend on this target and certs/ is gitignored,
+# so this is the only place that can notice.
+if [ -f "$CERT_DIR/infra.crt" ] && [ "$FORCE" != "--force" ]; then
+  echo "gen-certs.sh: $CERT_DIR/infra.crt already exists, skipping (use --force to regenerate)"
+  gen_oauth2proxy_bundle "$CERT_DIR/infra-ca.crt"
+  exit 0
+fi
 
 if command -v mkcert >/dev/null 2>&1; then
   echo "gen-certs.sh: using mkcert"

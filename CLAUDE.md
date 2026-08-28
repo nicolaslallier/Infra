@@ -24,6 +24,8 @@ make shell s=<service>           # shell into a running service
 make psql                        # psql shell as the superuser (via docker compose exec)
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
 make provision-monitoring-role   # create/update postgres-exporter monitoring role
+make keycloak-seed-users         # set the nurse-realm demo user passwords
+make keycloak-sync-jarvis-client # re-apply jarvis-realm.json mappers to a live realm
 make certs                       # generate TLS certs (FORCE=1 to regenerate)
 make hosts                       # print the /etc/hosts lines this stack needs
 make dns-provision               # create/update the DNS zones & records the dns service serves
@@ -170,46 +172,78 @@ anyone who can resolve its hostname. The gate is the standard
   `.env.example`. This mirrors `nurse-realm.json`'s own seed-user
   precedent: `NURSE_SEED_PASSWORD`/`EXAMINER_SEED_PASSWORD` are likewise
   applied after boot via `make keycloak-seed-users`, not baked into the
-  realm JSON.
+  realm JSON. Note the import strategy is Keycloak's default
+  `IGNORE_EXISTING`: the JSON is read only when the realm does not exist
+  yet, so **any later edit to `jarvis-realm.json` is a silent no-op on a
+  host that already booted the realm**. `OVERWRITE_EXISTING` is not an
+  option (it would wipe the hand-created login user), so client-level
+  edits are re-applied with `make keycloak-sync-jarvis-client`
+  (`scripts/keycloak-sync-jarvis-client.sh`), which drives `kcadm.sh` the
+  same way `keycloak-seed-users.sh` does and reads the mapper definitions
+  straight out of the realm JSON so the two can't drift.
 - **`oauth2-proxy` service** (`docker-compose.yml`) — publishes no host
   port; reached only by `nginx` over `infra-net` at
   `oauth2-proxy:4180`. Its own `OAUTH2_PROXY_UPSTREAMS` is a dummy
   (`static://202`) because it's never used as an actual reverse proxy
   here, only as the `auth_request` subrequest target and the handler for
-  `/oauth2/*` (sign-in, callback, logout). Points at Keycloak via the
-  internal `http://keycloak:8080/realms/jarvis` issuer URL, not the
-  external `https://keycloak.famillelallier.net` one, for the same
-  same-network reason the `minio` service avoids `MINIO_SERVER_URL`
-  (hairpinning back out through NGINX from inside `infra-net`). This
-  internal-URL/external-issuer split hits a real Keycloak hostname-v2
-  quirk — `KC_HOSTNAME` is set to the full external URL
-  (`https://keycloak.famillelallier.net`, not a bare hostname) so the
-  discovery document's `issuer` is stable regardless of which request
-  triggers it, but that issuer then never matches the internal
-  `OIDC_ISSUER_URL` used to fetch it, so strict verification always
-  fails. `OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true` is
-  therefore enabled — this is the documented escape hatch, deliberately
-  on here rather than the exceptional case. oauth2-proxy's own
-  server-to-server calls (token exchange, jwks) hit the endpoints named
-  in that discovery doc, i.e. the external `https://keycloak.famillelallier.net`
-  hostname — which otherwise has no route from inside `infra-net` — so
-  the `nginx` service carries a `keycloak.famillelallier.net` network
-  alias pointing that hostname back at itself (it already TLS-terminates
-  and proxies it via `nginx/conf.d/keycloak.conf`). Those calls then hit
-  the local dev CA (`certs/infra-ca.crt`), which isn't in oauth2-proxy's
-  default trust store and whose distroless image has no shell for a
-  `--provider-ca-file`-at-build-time trick; instead
-  `scripts/gen-certs.sh`'s `gen_oauth2proxy_bundle` bakes a
-  `certs/oauth2proxy-ca-bundle.crt` (the image's own CA bundle plus our
-  CA) that's bind-mounted over `/etc/ssl/certs/ca-certificates.crt`, so
-  every Go `http.Client` in the process picks it up via the system pool.
-  The `keycloak` service also carries a `healthcheck` (`/health/ready` on
+  `/oauth2/*` (sign-in, callback, logout).
+
+  `OAUTH2_PROXY_OIDC_ISSUER_URL` is the **external**
+  `https://keycloak.famillelallier.net/realms/jarvis`, even though both
+  containers share `infra-net`. That is deliberate and is the opposite of
+  the `MINIO_SERVER_URL` reasoning elsewhere in this file: Keycloak's
+  hostname-v2 logic always reports `KC_HOSTNAME` as the discovery
+  document's `issuer` no matter which address the document was fetched
+  from, so naming the internal `http://keycloak:8080` URL here guarantees
+  a mismatch and forces
+  `OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true` — which does
+  not merely relax the discovery check, it builds go-oidc's verifier with
+  `SkipIssuerCheck` and stops validating the `iss` claim of every ID
+  token. Naming the external URL makes configured and advertised issuer
+  identical, so issuer verification stays on and no escape hatch is
+  needed. `KC_HOSTNAME` is set to the full URL
+  (`https://keycloak.famillelallier.net`, not a bare hostname) so that
+  advertised issuer, and the browser-facing `authorization_endpoint`, are
+  pinned to the public https/443 route rather than being derived from
+  whichever request triggered the lookup.
+
+  Two things make the external URL reachable from inside `infra-net`, and
+  both are needed regardless, since oauth2-proxy's token-exchange and jwks
+  calls hit the endpoints named in the discovery document anyway:
+
+  1. The `nginx` service carries a `keycloak.famillelallier.net` network
+     alias pointing that hostname back at itself (it already
+     TLS-terminates and proxies it via `nginx/conf.d/keycloak.conf`).
+  2. Those calls then hit the local dev CA (`certs/infra-ca.crt`), which
+     isn't in oauth2-proxy's default trust store, and its distroless image
+     has no shell for a `--provider-ca-file`-at-build-time trick; instead
+     `scripts/gen-certs.sh`'s `gen_oauth2proxy_bundle` bakes a
+     `certs/oauth2proxy-ca-bundle.crt` (the image's own CA bundle plus our
+     CA) that's bind-mounted over `/etc/ssl/certs/ca-certificates.crt`, so
+     every Go `http.Client` in the process picks it up via the system
+     pool. That mount uses **long syntax with `create_host_path: false`**
+     on purpose: short syntax implies `create_host_path: true`, so a
+     missing bundle would make Docker silently create an empty *directory*
+     over the trust store and every TLS handshake would fail with
+     "certificate signed by unknown authority" with nothing pointing at
+     the cause. For the same reason `gen_oauth2proxy_bundle` runs *before*
+     `gen-certs.sh`'s "certs already exist, skipping" early exit (the
+     bundle is newer than the certs, so hosts predating it would otherwise
+     never get one) and treats every failure as fatal rather than
+     returning 0.
+
+  Startup ordering: `keycloak` carries a `healthcheck` (`/health/ready` on
   its management port, probed with a `/dev/tcp` one-liner since the image
-  ships no curl/wget) so `oauth2-proxy` can `depends_on: condition:
-  service_healthy` instead of `service_started` — without it, oauth2-proxy
-  starts as soon as Keycloak's container process launches, long before its
-  HTTP listener is actually up, and its one-shot OIDC discovery call fails
-  with a DNS/connection error that only clears on a lucky restart.
+  ships no curl/wget) and `nginx` carries one too (busybox `wget` against
+  the internal `:8080/stub_status` vhost), so `oauth2-proxy` can
+  `depends_on` both with `condition: service_healthy` instead of
+  `service_started`. Without that, oauth2-proxy starts as soon as those
+  container processes launch, long before either HTTP listener is up, and
+  its one-shot OIDC discovery call fails with a DNS/connection error that
+  only clears on a lucky restart. `nginx` deliberately does **not**
+  `depends_on` `oauth2-proxy` — it resolves that upstream lazily at
+  request time via the `set $oauth2_upstream` pattern, and an entry there
+  would make the graph a cycle.
 - **`nginx/conf.d/jarvis.conf`** — adds `location = /oauth2/auth`
   (internal-only `auth_request` target), `location /oauth2/` (proxies
   sign-in/callback/logout to oauth2-proxy), and gates the existing
@@ -228,6 +262,21 @@ anyone who can resolve its hostname. The gate is the standard
   Keycloak. Verify manually post-deploy: confirm what `VITE_API_URL` the
   deployed frontend was actually built with, and whether that backend
   port is reachable unauthenticated from outside the LAN.
+- **NGINX buffer sizing** — a real Keycloak session with realm roles
+  overflows three different nginx defaults, each with a misleading
+  symptom, so all three are raised together and should be kept in step:
+  `proxy_buffer_size`/`proxy_buffers` on the two oauth2-proxy locations in
+  `nginx/conf.d/jarvis.conf` (oauth2-proxy's multi-cookie `Set-Cookie`
+  response), the same on `nginx/conf.d/keycloak.conf` (Keycloak's own
+  `AUTH_SESSION_ID`/`KC_RESTART`/`KEYCLOAK_IDENTITY`/`KEYCLOAK_SESSION`
+  headers — this is the vhost the browser's login flow actually traverses,
+  and overflow here is a 502 "upstream sent too big header"), and
+  `large_client_header_buffers` in `nginx/nginx.conf` for the request
+  side: oauth2-proxy chunks a large session into `_oauth2_proxy_0`,
+  `_oauth2_proxy_1`, ... cookies, and the browser sends them back
+  concatenated into one `Cookie:` header line that must fit in a single
+  buffer or nginx answers 400 *before* proxying — which looks like the
+  login silently failing and "fixes itself" when cookies are cleared.
 
 ### PostgreSQL 18's data directory moved
 
