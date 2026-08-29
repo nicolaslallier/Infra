@@ -5,7 +5,7 @@ SHELL := bash
 
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
-	dns-check clean check-env keycloak-seed-users
+	dns-check clean check-env check-vm keycloak-seed-users
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -56,7 +56,19 @@ check-env:
 		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
 	fi
 
-up: check-env net ## Start the stack
+check-vm:
+	@if [ ! -d "$$HOME/.colima/_lima" ]; then \
+		echo "make check-vm: $$HOME/.colima/_lima does not resolve." >&2; \
+		echo "  The Colima VM's disks live on an external volume (see 'Runtime: Colima'" >&2; \
+		echo "  in CLAUDE.md). Mount it, then retry." >&2; \
+		exit 1; \
+	fi
+	@if ! colima status >/dev/null 2>&1; then \
+		echo "make check-vm: the Colima VM is not running -- start it with 'colima start'" >&2; \
+		exit 1; \
+	fi
+
+up: check-env check-vm net ## Start the stack
 	docker compose up -d
 
 down: ## Stop the stack (keeps volumes)
@@ -76,7 +88,7 @@ status: ## Show service status (alias: ps)
 pull: ## Pull latest images
 	docker compose pull
 
-config: check-env ## Validate docker-compose.yml + .env
+config: check-env check-vm ## Validate docker-compose.yml + .env
 	docker compose config
 
 shell: ## Open a shell in a service (s=<service>)

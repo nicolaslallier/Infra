@@ -319,9 +319,12 @@ services:
       - /dev/kmsg:/dev/kmsg
     volumes:
       - /:/rootfs:ro
-      # Mount the socket alone — on Docker Desktop, /var/run:/var/run
-      # brings a host symlink to ~/.docker/run/docker.sock that is broken
-      # inside the Linux VM and hides the real engine socket.
+      # Mount the socket alone, never /var/run:/var/run. Under Docker
+      # Desktop the latter brought in a host symlink to
+      # ~/.docker/run/docker.sock that dangled inside the Linux VM and hid
+      # the real engine socket. Under Colima /var/run is the VM's own and
+      # would not break that way, but the narrow mount is still correct:
+      # cadvisor needs this one socket, nothing else in /var/run.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
       - /sys:/sys:ro

@@ -17,6 +17,25 @@ A separate `dns` container publishes its own ports too — it's a top-level
 infra service in its own right, not something NGINX can front. See "DNS"
 below.
 
+## Runtime
+
+This stack runs on **Colima**, not Docker Desktop. The VM is sized 6 CPU /
+12 GB / 100 GB, its disks live on the external `/Volumes/Docker` volume via
+a `~/.colima/_lima` symlink, and it is started in **bridged** network mode so
+it holds its own LAN IP — which is what `LAN_IP` in `.env` refers to, and
+what makes Technitium's UDP/53 reachable from phones and laptops at all.
+
+```bash
+colima start --cpu 6 --memory 12 --disk 100 --vm-type vz \
+  --mount-type virtiofs --network-address --network-mode bridged \
+  --network-interface en1
+brew services start colima   # bring the VM up at login
+```
+
+`make check-vm` verifies both the VM and the external volume before `make up`
+runs. See "Runtime: Colima, not Docker Desktop" in `CLAUDE.md` for why each
+of those flags is load-bearing.
+
 ## First run
 
 ```bash
@@ -190,9 +209,10 @@ make provision-app app=grafana
 make provision-monitoring-role   # postgres-exporter role (idempotent)
 ```
 
-**macOS / Docker Desktop:** node-exporter and cAdvisor see the Linux VM,
-not the Mac host hardware — CPU/RAM/disk panels are best-effort. Container
-metrics and logs still work.
+**macOS / Colima:** node-exporter and cAdvisor see the Colima VM, not the
+Mac host hardware — CPU/RAM/disk panels are best-effort and describe the
+VM's 6 vCPU / 12 GB / 100 GB, not the Mac's. Container metrics and logs
+still work.
 
 ## Connecting an application repo
 

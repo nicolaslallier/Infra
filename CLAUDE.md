@@ -97,6 +97,86 @@ inside pgAdmin's own UI, the host is the Compose service name `postgres`
 `postgresql.famillelallier.net` doesn't exist anywhere in this stack and
 produces connection-refused, not a DNS or reachability problem.
 
+### Runtime: Colima, not Docker Desktop
+
+The stack runs on a **Colima** VM (`vm-type vz`, `mount-type virtiofs`),
+sized **6 CPU / 12 GB / 100 GB** — the 2 CPU / 2 GB default cannot hold
+Keycloak's JVM, Postgres, the whole LGTM stack, MinIO and RabbitMQ at once.
+Sibling app repos (Jarvis and others) share this same daemon and context
+automatically; there is no per-repo VM.
+
+**The VM's disks live on the external volume `/Volumes/Docker`**, reached
+through a symlink:
+
+```
+~/.colima/_lima -> /Volumes/Docker/colima/_lima
+```
+
+The Mac's internal SSD has under 90 GB free, and Colima's two sparse images
+(a 20 GB root disk plus the 100 GB `datadisk` backing `/var/lib/docker`)
+would eventually fill it. Docker Desktop used the same arrangement on this
+machine before the migration (`~/Library/Containers/com.docker.docker/Data`
+was itself a symlink to `/Volumes/Docker`). Colima still computes every path
+as `~/.colima/...` and resolves through the symlink, so the docker context
+endpoint, `brew services`, and every script stay unchanged — which is why
+this is a symlink rather than `COLIMA_HOME`.
+
+**`colima delete` removes that symlink.** After any delete, recreate it
+before `colima start`, or the VM is silently rebuilt on the internal SSD:
+
+```bash
+mkdir -p /Volumes/Docker/colima/_lima
+ln -s /Volumes/Docker/colima/_lima ~/.colima/_lima
+```
+
+`make check-vm` (a prerequisite of `up` and `config`) fails fast when either
+the volume is unmounted — `~/.colima/_lima` then dangles — or the VM is not
+running, so an unplugged disk surfaces as a clear error instead of as
+mysterious LAN DNS outages.
+
+#### Bridged networking is mandatory
+
+Colima is started with `--network-address --network-mode bridged
+--network-interface en1`, giving the VM **its own DHCP lease on the LAN**.
+Containers then publish directly onto that address with no forwarding in the
+path. This is not a preference — it is the only arrangement that works here:
+
+- Colima's default `ssh` port-forwarder **does not forward UDP at all**, so
+  Technitium's `53/udp` would never reach LAN clients. Lima's newer `grpc`
+  forwarder nominally supports UDP but has a documented history of dropping
+  packets, so it is not relied on.
+- The default forwarder also binds host loopback only, so 80/443 would be
+  unreachable from phones and laptops.
+
+**`LAN_IP` in `.env` is therefore the VM's address, not the Mac's.** It is
+what the `dns` service binds its `ports:` on, and the answer
+`scripts/dns-provision.sh` writes into every zone. Give the VM's MAC a static
+DHCP reservation on the router; find the current address with `colima list`
+(ADDRESS column). Do not "simplify" this back to default networking — LAN DNS
+breaks silently, and the failure looks like a DNS problem rather than a
+port-forwarding one. The `--network-interface` is `en1` because that is this
+Mac's active LAN interface (Wi-Fi); Colima's own default is `en0`.
+
+Bridged mode needs `/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima`,
+which Colima installs itself on the first `--network-address` start after
+prompting for a password. Homebrew's `socket_vmnet` formula is **not** used —
+Colima ships and manages its own copy.
+
+`127.0.0.1:5432` and `127.0.0.1:5672` on the `nginx` service now bind the
+*VM's* loopback. Lima's port forwarder still surfaces them on the Mac's
+loopback; if that ever stops working, tunnel over Colima's generated SSH
+config rather than binding those ports to the VM's LAN address, which would
+expose Postgres and AMQP to the LAN and defeat the single-ingress rule.
+
+#### Autostart
+
+`brew services start colima` brings the VM up at login, and the containers'
+`restart: unless-stopped` follows. If `/Volumes/Docker` is not mounted yet,
+Colima fails to start rather than rebuilding on the internal disk — the stack
+stays down, which is the safe outcome. Turn off "put hard disks to sleep when
+possible" in Energy settings: a spin-down under a live `/var/lib/docker`
+stalls every container.
+
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
