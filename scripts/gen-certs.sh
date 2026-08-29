@@ -23,6 +23,8 @@ EXTRA_SANS=(
 )
 CERT_DIR="certs"
 FORCE="${1:-}"
+# Must match the oauth2-proxy image tag in docker-compose.yml.
+OAUTH2_PROXY_IMAGE="quay.io/oauth2-proxy/oauth2-proxy:v7.6.0"
 
 mkdir -p "$CERT_DIR"
 
@@ -31,12 +33,39 @@ if [ -f "$CERT_DIR/infra.crt" ] && [ "$FORCE" != "--force" ]; then
   exit 0
 fi
 
+# oauth2-proxy's server-to-server calls to Keycloak (token exchange, jwks)
+# route through NGINX and hit this local CA (see the keycloak.famillelallier.net
+# alias on the nginx service in docker-compose.yml). Its image is distroless
+# (no shell, so no --provider-ca-file+RUN cat trick at build time, and
+# --provider-ca-file isn't wired into every internal HTTP client anyway as
+# of v7.6.0) — so instead we replace its baked-in system CA bundle wholesale
+# with one that also trusts our CA, mounted over
+# /etc/ssl/certs/ca-certificates.crt (see the oauth2-proxy service's
+# volumes in docker-compose.yml). Every Go http.Client in that process uses
+# the system pool by default, so this covers discovery, token exchange, and
+# jwks fetches alike, regardless of which internal code path each one takes.
+gen_oauth2proxy_bundle() {
+  local ca_crt="$1"
+  local bundle="$CERT_DIR/oauth2proxy-ca-bundle.crt"
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "gen-certs.sh: docker not found, skipping $bundle (oauth2-proxy needs it — run this script again once docker is available)"
+    return 0
+  fi
+  echo "gen-certs.sh: building $bundle from $OAUTH2_PROXY_IMAGE's CA bundle + $ca_crt"
+  local cid
+  cid="$(docker create "$OAUTH2_PROXY_IMAGE" 2>/dev/null)"
+  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle"
+  docker rm "$cid" >/dev/null
+  cat "$ca_crt" >> "$bundle"
+}
+
 if command -v mkcert >/dev/null 2>&1; then
   echo "gen-certs.sh: using mkcert"
   CAROOT="$(mkcert -CAROOT)"
   mkcert -cert-file "$CERT_DIR/infra.crt" -key-file "$CERT_DIR/infra.key" \
     "$DOMAIN" "*.$DOMAIN" "${EXTRA_SANS[@]}" localhost 127.0.0.1
   cp "$CAROOT/rootCA.pem" "$CERT_DIR/infra-ca.crt"
+  gen_oauth2proxy_bundle "$CERT_DIR/infra-ca.crt"
   echo "gen-certs.sh: done. mkcert already trusts its CA in your system store."
   exit 0
 fi
@@ -96,6 +125,8 @@ openssl x509 -req -in "$LEAF_CSR" -CA "$CA_CRT" -CAkey "$CA_KEY" \
   -out "$LEAF_CRT"
 
 rm -f "$LEAF_CSR" "$SAN_CONF" "$CERT_DIR/infra-ca.srl"
+
+gen_oauth2proxy_bundle "$CA_CRT"
 
 echo "gen-certs.sh: done."
 echo ""
