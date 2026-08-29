@@ -157,10 +157,17 @@ breaks silently, and the failure looks like a DNS problem rather than a
 port-forwarding one. The `--network-interface` is `en1` because that is this
 Mac's active LAN interface (Wi-Fi); Colima's own default is `en0`.
 
-Bridged mode needs `/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima`,
-which Colima installs itself on the first `--network-address` start after
-prompting for a password. Homebrew's `socket_vmnet` formula is **not** used —
-Colima ships and manages its own copy.
+`make vm-start` encodes all of these flags; use it rather than typing
+`colima start` by hand. Bridged mode needs `/opt/colima/bin/socket_vmnet` and
+`/etc/sudoers.d/colima`, which Colima installs itself on the first bridged
+start after prompting for a password. Homebrew's `socket_vmnet` formula is
+**not** used — Colima ships and manages its own copy.
+
+**A start that does not prompt for a password did not go bridged.** Passing
+`--network-address` without `--network-mode bridged` silently yields *vzNAT*
+instead: the VM comes up on `192.168.64.x`, reachable from this Mac and from
+nothing else on the LAN, with no error anywhere. `colima list` is the check —
+the ADDRESS column must be on the Mac's own LAN subnet.
 
 `127.0.0.1:5432` and `127.0.0.1:5672` on the `nginx` service now bind the
 *VM's* loopback. Lima's port forwarder still surfaces them on the Mac's

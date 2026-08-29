@@ -26,11 +26,15 @@ it holds its own LAN IP — which is what `LAN_IP` in `.env` refers to, and
 what makes Technitium's UDP/53 reachable from phones and laptops at all.
 
 ```bash
-colima start --cpu 6 --memory 12 --disk 100 --vm-type vz \
-  --mount-type virtiofs --network-address --network-mode bridged \
-  --network-interface en1
+make vm-start                # colima start with the flags above; prompts for sudo
 brew services start colima   # bring the VM up at login
 ```
+
+`make vm-start` prompts for your password the first time — that is Colima
+installing `/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima`, which
+bridged mode needs. **No prompt means it fell back to vzNAT**: the VM comes up
+on 192.168.64.x, reachable from this Mac but from nothing else on the LAN.
+The target prints the address afterwards so you can check.
 
 `make check-vm` verifies both the VM and the external volume before `make up`
 runs. See "Runtime: Colima, not Docker Desktop" in `CLAUDE.md` for why each

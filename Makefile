@@ -5,7 +5,11 @@ SHELL := bash
 
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
-	dns-check clean check-env check-vm keycloak-seed-users
+	dns-check clean check-env check-vm vm-start vm-stop keycloak-seed-users
+
+# The Mac's LAN interface, bridged into the Colima VM by 'make vm-start'.
+# Colima's own default is en0; this Mac's active interface is Wi-Fi en1.
+COLIMA_LAN_IF ?= en1
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -55,6 +59,26 @@ check-env:
 	if [ "$${LAN_IP:-}" = "192.168.1.50" ]; then \
 		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
 	fi
+
+vm-start: ## Start the Colima VM with bridged LAN networking (prompts for sudo)
+	@if [ ! -d "$$HOME/.colima/_lima" ]; then \
+		echo "make vm-start: $$HOME/.colima/_lima does not resolve -- mount the volume" >&2; \
+		echo "  holding the VM disks, or recreate the symlink first." >&2; \
+		echo "  See 'Runtime: Colima' in CLAUDE.md." >&2; \
+		exit 1; \
+	fi
+	colima start --cpu 6 --memory 12 --disk 100 --vm-type vz --mount-type virtiofs \
+		--network-address --network-mode bridged --network-interface $(COLIMA_LAN_IF)
+	@echo
+	@colima list
+	@echo
+	@echo "The ADDRESS column above must be a LAN address (same subnet as this Mac)."
+	@echo "If it is 192.168.64.x, bridged silently fell back to vzNAT and the stack"
+	@echo "will not be reachable from other LAN devices. Set LAN_IP in .env to that"
+	@echo "address, then re-run 'make dns-provision'."
+
+vm-stop: ## Stop the Colima VM (takes the whole stack down with it)
+	colima stop
 
 check-vm:
 	@if [ ! -d "$$HOME/.colima/_lima" ]; then \
