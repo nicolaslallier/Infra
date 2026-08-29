@@ -88,8 +88,26 @@ check-vm:
 		exit 1; \
 	fi
 	@if ! colima status >/dev/null 2>&1; then \
-		echo "make check-vm: the Colima VM is not running -- start it with 'colima start'" >&2; \
+		echo "make check-vm: the Colima VM is not running -- start it with 'make vm-start'" >&2; \
 		exit 1; \
+	fi
+	@if ! colima ssh -- test -f "$(CURDIR)/docker-compose.yml" >/dev/null 2>&1; then \
+		echo "make check-vm: the Colima VM cannot see $(CURDIR)." >&2; \
+		echo "  Every bind mount in docker-compose.yml is resolved inside the VM, so a VM" >&2; \
+		echo "  with no host mount fails on the first file mount with a confusing OCI" >&2; \
+		echo "  'not a directory' error -- and silently starts the services whose mounts" >&2; \
+		echo "  are directories with empty config instead." >&2; \
+		echo "  A bare 'colima start' -- including the one 'brew services' runs at login" >&2; \
+		echo "  -- drops the host mount along with the CPU/memory sizing and the bridged" >&2; \
+		echo "  LAN address. Rebuild the VM's runtime config with:" >&2; \
+		echo "      colima stop && make vm-start" >&2; \
+		echo "  See 'Runtime: Colima' in CLAUDE.md." >&2; \
+		exit 1; \
+	fi
+	@if ! colima list 2>/dev/null | awk 'NR>1 && $$2 == "Running" { print $$NF }' | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "make check-vm: warning: the Colima VM has no bridged LAN address." >&2; \
+		echo "  The stack comes up, but the dns service cannot serve other LAN devices." >&2; \
+		echo "  Restart it with 'colima stop && make vm-start' (see CLAUDE.md)." >&2; \
 	fi
 
 up: check-env check-vm net ## Start the stack

@@ -184,6 +184,37 @@ stays down, which is the safe outcome. Turn off "put hard disks to sleep when
 possible" in Energy settings: a spin-down under a live `/var/lib/docker`
 stalls every container.
 
+`brew services` runs a **bare `colima start`**, with none of `vm-start`'s
+flags. That is fine while `~/.colima/default/colima.yaml` still holds the
+values from the last flagged start, but after a `colima delete` (or anything
+else that resets that file back to `cpu: 0` / `disk: 0` / `mounts: null`) the
+flagless start silently rebuilds a **2 CPU / 2 GB VM with no host mount and no
+LAN address**, reattaching the existing 100 GB `datadisk`, so container data
+survives and nothing looks obviously wrong.
+
+That VM breaks the stack in two different ways at once, neither of which names
+the real cause:
+
+- Bind mounts are resolved *inside* the VM, and with no host mount none of the
+  repo's paths exist there. Docker auto-creates a **directory** for each
+  missing source, so the services mounting a single file (`loki`, `tempo`,
+  `prometheus`, `alloy`, `nginx`, `oauth2-proxy`, `rabbitmq`) die with
+  `error mounting ".../monitoring/loki/config.yml": ... not a directory`,
+  while the services mounting a directory (`grafana` provisioning,
+  `postgres` initdb, `keycloak` realm-import) start **successfully against
+  empty config**.
+- Without `--network-address --network-mode bridged`, the `dns` service stops
+  answering LAN clients, exactly as described above.
+
+`make check-vm` therefore does more than ask whether the VM is running: it
+runs `colima ssh -- test -f $(CURDIR)/docker-compose.yml` to prove the repo is
+actually visible inside the VM, and warns when `colima list` shows no address.
+The recovery is always `colima stop && make vm-start` — the VM keeps its
+`datadisk`, so no volume data is lost. `/opt/colima/bin/socket_vmnet` and
+`/etc/sudoers.d/colima` missing is the tell that no bridged start has ever
+succeeded on this machine; the next `make vm-start` prompts for a password to
+install them.
+
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
