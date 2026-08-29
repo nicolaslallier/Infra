@@ -129,10 +129,12 @@ mkdir -p /Volumes/Docker/colima/_lima
 ln -s /Volumes/Docker/colima/_lima ~/.colima/_lima
 ```
 
-`make check-vm` (a prerequisite of `up` and `config`) fails fast when either
-the volume is unmounted — `~/.colima/_lima` then dangles — or the VM is not
-running, so an unplugged disk surfaces as a clear error instead of as
-mysterious LAN DNS outages.
+`make check-vm` (a prerequisite of `up` and `config`) fails fast when the
+volume is unmounted — `~/.colima/_lima` then dangles — when the VM is not
+running, and when it is running but unusable, so an unplugged disk surfaces
+as a clear error instead of as mysterious LAN DNS outages. See "Autostart"
+below for what "running but unusable" means and how `scripts/check-vm.sh`
+detects it.
 
 #### Bridged networking is mandatory
 
@@ -206,14 +208,25 @@ the real cause:
 - Without `--network-address --network-mode bridged`, the `dns` service stops
   answering LAN clients, exactly as described above.
 
-`make check-vm` therefore does more than ask whether the VM is running: it
-runs `colima ssh -- test -f $(CURDIR)/docker-compose.yml` to prove the repo is
-actually visible inside the VM, and warns when `colima list` shows no address.
-The recovery is always `colima stop && make vm-start` — the VM keeps its
-`datadisk`, so no volume data is lost. `/opt/colima/bin/socket_vmnet` and
-`/etc/sudoers.d/colima` missing is the tell that no bridged start has ever
-succeeded on this machine; the next `make vm-start` prompts for a password to
-install them.
+`scripts/check-vm.sh` therefore asks more than whether the VM is running. It
+runs `colima ssh -- test -f <repo>/docker-compose.yml` to prove the repo is
+actually visible inside the VM, and checks `colima list` for a LAN address,
+reporting the state as an exit code (`0` ok, `1` no `_lima`, `2` not running,
+`3` no host mount, `4` no LAN address). `make check-vm` fails the build on
+1–3 and only warns on 4, since a missing address costs LAN clients but not
+the stack itself.
+
+`make vm-start` reads the same exit code, because **`colima start` applies
+none of its flags to an already-running VM** — it prints `already running,
+ignoring` and leaves the wrong config in place, so re-running `make vm-start`
+against a drifted VM used to be a silent no-op. It now no-ops only when the
+VM is already correct, and otherwise stops the VM first (saying so) before
+starting it with the flags. The VM keeps its `datadisk` across that restart,
+so no volume data is lost.
+
+`/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima` missing is the tell
+that no bridged start has ever succeeded on this machine; the next
+`make vm-start` prompts for a password to install them.
 
 ### Single-ingress rule
 

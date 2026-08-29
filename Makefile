@@ -60,13 +60,24 @@ check-env:
 		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
 	fi
 
-vm-start: ## Start the Colima VM with bridged LAN networking (prompts for sudo)
-	@if [ ! -d "$$HOME/.colima/_lima" ]; then \
-		echo "make vm-start: $$HOME/.colima/_lima does not resolve -- mount the volume" >&2; \
-		echo "  holding the VM disks, or recreate the symlink first." >&2; \
-		echo "  See 'Runtime: Colima' in CLAUDE.md." >&2; \
-		exit 1; \
-	fi
+vm-start: ## Start the Colima VM, restarting it if its config drifted (prompts for sudo)
+	@./scripts/check-vm.sh "$(CURDIR)" && state=0 || state=$$?; \
+	case $$state in \
+	  0) echo "make vm-start: the VM already has the host mount and a LAN address -- nothing to do."; \
+	     exit 0 ;; \
+	  1) echo "  Mount the volume holding the VM disks, or recreate the symlink," >&2; \
+	     echo "  then retry. See 'Runtime: Colima' in CLAUDE.md." >&2; \
+	     exit 1 ;; \
+	  2) ;; \
+	  *) echo; \
+	     echo "make vm-start: the running VM does not match this stack's requirements."; \
+	     echo "  'colima start' prints 'already running, ignoring' and applies none of"; \
+	     echo "  its flags to a live VM, so the VM has to be stopped first. Doing that"; \
+	     echo "  now -- this takes the stack down with it, and keeps the datadisk."; \
+	     echo; \
+	     colima stop ;; \
+	esac; \
+	set -x; \
 	colima start --cpu 6 --memory 12 --disk 100 --vm-type vz --mount-type virtiofs \
 		--network-address --network-mode bridged --network-interface $(COLIMA_LAN_IF)
 	@echo
@@ -81,34 +92,13 @@ vm-stop: ## Stop the Colima VM (takes the whole stack down with it)
 	colima stop
 
 check-vm:
-	@if [ ! -d "$$HOME/.colima/_lima" ]; then \
-		echo "make check-vm: $$HOME/.colima/_lima does not resolve." >&2; \
-		echo "  The Colima VM's disks live on an external volume (see 'Runtime: Colima'" >&2; \
-		echo "  in CLAUDE.md). Mount it, then retry." >&2; \
-		exit 1; \
-	fi
-	@if ! colima status >/dev/null 2>&1; then \
-		echo "make check-vm: the Colima VM is not running -- start it with 'make vm-start'" >&2; \
-		exit 1; \
-	fi
-	@if ! colima ssh -- test -f "$(CURDIR)/docker-compose.yml" >/dev/null 2>&1; then \
-		echo "make check-vm: the Colima VM cannot see $(CURDIR)." >&2; \
-		echo "  Every bind mount in docker-compose.yml is resolved inside the VM, so a VM" >&2; \
-		echo "  with no host mount fails on the first file mount with a confusing OCI" >&2; \
-		echo "  'not a directory' error -- and silently starts the services whose mounts" >&2; \
-		echo "  are directories with empty config instead." >&2; \
-		echo "  A bare 'colima start' -- including the one 'brew services' runs at login" >&2; \
-		echo "  -- drops the host mount along with the CPU/memory sizing and the bridged" >&2; \
-		echo "  LAN address. Rebuild the VM's runtime config with:" >&2; \
-		echo "      colima stop && make vm-start" >&2; \
-		echo "  See 'Runtime: Colima' in CLAUDE.md." >&2; \
-		exit 1; \
-	fi
-	@if ! colima list 2>/dev/null | awk 'NR>1 && $$2 == "Running" { print $$NF }' | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$$'; then \
-		echo "make check-vm: warning: the Colima VM has no bridged LAN address." >&2; \
-		echo "  The stack comes up, but the dns service cannot serve other LAN devices." >&2; \
-		echo "  Restart it with 'colima stop && make vm-start' (see CLAUDE.md)." >&2; \
-	fi
+	@./scripts/check-vm.sh "$(CURDIR)" && exit 0 || state=$$?; \
+	if [ $$state -eq 4 ]; then \
+		echo "make check-vm: warning: starting anyway; only LAN clients are affected." >&2; \
+		exit 0; \
+	fi; \
+	echo "make check-vm: rebuild the VM's runtime config with 'make vm-start'." >&2; \
+	exit 1
 
 up: check-env check-vm net ## Start the stack
 	docker compose up -d
