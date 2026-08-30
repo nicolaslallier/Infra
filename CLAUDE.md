@@ -129,10 +129,12 @@ mkdir -p /Volumes/Docker/colima/_lima
 ln -s /Volumes/Docker/colima/_lima ~/.colima/_lima
 ```
 
-`make check-vm` (a prerequisite of `up` and `config`) fails fast when either
-the volume is unmounted — `~/.colima/_lima` then dangles — or the VM is not
-running, so an unplugged disk surfaces as a clear error instead of as
-mysterious LAN DNS outages.
+`make check-vm` (a prerequisite of `up` and `config`) fails fast when the
+volume is unmounted — `~/.colima/_lima` then dangles — when the VM is not
+running, and when it is running but unusable, so an unplugged disk surfaces
+as a clear error instead of as mysterious LAN DNS outages. See "Autostart"
+below for what "running but unusable" means and how `scripts/check-vm.sh`
+detects it.
 
 #### Bridged networking is mandatory
 
@@ -163,6 +165,19 @@ Mac's active LAN interface (Wi-Fi); Colima's own default is `en0`.
 start after prompting for a password. Homebrew's `socket_vmnet` formula is
 **not** used — Colima ships and manages its own copy.
 
+`vm-start` passes the host mount explicitly, as `--mount "$HOME:w"`.
+`--mount-type virtiofs` alone is not enough — it only selects the driver, and
+mounts *nothing*. Colima's documented default is "$HOME is mounted as
+writable", but that default applies only while `colima.yaml` has no opinion;
+once the file holds `mounts: null` (what `--mount none` and various resets
+leave behind) that null wins on every later start, and the generated
+`lima.yaml` comes back with an empty `mounts:` section. The VM then boots with
+the right CPU/memory *and the right LAN address* while `/proc/mounts` contains
+no virtiofs entry at all — so restarting with the network flags looks like it
+fixed things and changes nothing about the mount. Confirm with
+`colima ssh -- grep virtiofs /proc/mounts`, which must show
+`... /Users/<you> virtiofs rw`.
+
 **A start that does not prompt for a password did not go bridged.** Passing
 `--network-address` without `--network-mode bridged` silently yields *vzNAT*
 instead: the VM comes up on `192.168.64.x`, reachable from this Mac and from
@@ -183,6 +198,48 @@ Colima fails to start rather than rebuilding on the internal disk — the stack
 stays down, which is the safe outcome. Turn off "put hard disks to sleep when
 possible" in Energy settings: a spin-down under a live `/var/lib/docker`
 stalls every container.
+
+`brew services` runs a **bare `colima start`**, with none of `vm-start`'s
+flags. That is fine while `~/.colima/default/colima.yaml` still holds the
+values from the last flagged start, but after a `colima delete` (or anything
+else that resets that file back to `cpu: 0` / `disk: 0` / `mounts: null`) the
+flagless start silently rebuilds a **2 CPU / 2 GB VM with no host mount and no
+LAN address**, reattaching the existing 100 GB `datadisk`, so container data
+survives and nothing looks obviously wrong.
+
+That VM breaks the stack in two different ways at once, neither of which names
+the real cause:
+
+- Bind mounts are resolved *inside* the VM, and with no host mount none of the
+  repo's paths exist there. Docker auto-creates a **directory** for each
+  missing source, so the services mounting a single file (`loki`, `tempo`,
+  `prometheus`, `alloy`, `nginx`, `oauth2-proxy`, `rabbitmq`) die with
+  `error mounting ".../monitoring/loki/config.yml": ... not a directory`,
+  while the services mounting a directory (`grafana` provisioning,
+  `postgres` initdb, `keycloak` realm-import) start **successfully against
+  empty config**.
+- Without `--network-address --network-mode bridged`, the `dns` service stops
+  answering LAN clients, exactly as described above.
+
+`scripts/check-vm.sh` therefore asks more than whether the VM is running. It
+runs `colima ssh -- test -f <repo>/docker-compose.yml` to prove the repo is
+actually visible inside the VM, and checks `colima list` for a LAN address,
+reporting the state as an exit code (`0` ok, `1` no `_lima`, `2` not running,
+`3` no host mount, `4` no LAN address). `make check-vm` fails the build on
+1–3 and only warns on 4, since a missing address costs LAN clients but not
+the stack itself.
+
+`make vm-start` reads the same exit code, because **`colima start` applies
+none of its flags to an already-running VM** — it prints `already running,
+ignoring` and leaves the wrong config in place, so re-running `make vm-start`
+against a drifted VM used to be a silent no-op. It now no-ops only when the
+VM is already correct, and otherwise stops the VM first (saying so) before
+starting it with the flags. The VM keeps its `datadisk` across that restart,
+so no volume data is lost.
+
+`/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima` missing is the tell
+that no bridged start has ever succeeded on this machine; the next
+`make vm-start` prompts for a password to install them.
 
 ### Single-ingress rule
 
