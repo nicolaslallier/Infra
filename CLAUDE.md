@@ -99,6 +99,150 @@ inside pgAdmin's own UI, the host is the Compose service name `postgres`
 `postgresql.famillelallier.net` doesn't exist anywhere in this stack and
 produces connection-refused, not a DNS or reachability problem.
 
+### Runtime: Colima, not Docker Desktop
+
+The stack runs on a **Colima** VM (`vm-type vz`, `mount-type virtiofs`),
+sized **6 CPU / 12 GB / 100 GB** — the 2 CPU / 2 GB default cannot hold
+Keycloak's JVM, Postgres, the whole LGTM stack, MinIO and RabbitMQ at once.
+Sibling app repos (Jarvis and others) share this same daemon and context
+automatically; there is no per-repo VM.
+
+**The VM's disks live on the external volume `/Volumes/Docker`**, reached
+through a symlink:
+
+```
+~/.colima/_lima -> /Volumes/Docker/colima/_lima
+```
+
+The Mac's internal SSD has under 90 GB free, and Colima's two sparse images
+(a 20 GB root disk plus the 100 GB `datadisk` backing `/var/lib/docker`)
+would eventually fill it. Docker Desktop used the same arrangement on this
+machine before the migration (`~/Library/Containers/com.docker.docker/Data`
+was itself a symlink to `/Volumes/Docker`). Colima still computes every path
+as `~/.colima/...` and resolves through the symlink, so the docker context
+endpoint, `brew services`, and every script stay unchanged — which is why
+this is a symlink rather than `COLIMA_HOME`.
+
+**`colima delete` removes that symlink.** After any delete, recreate it
+before `colima start`, or the VM is silently rebuilt on the internal SSD:
+
+```bash
+mkdir -p /Volumes/Docker/colima/_lima
+ln -s /Volumes/Docker/colima/_lima ~/.colima/_lima
+```
+
+`make check-vm` (a prerequisite of `up` and `config`) fails fast when the
+volume is unmounted — `~/.colima/_lima` then dangles — when the VM is not
+running, and when it is running but unusable, so an unplugged disk surfaces
+as a clear error instead of as mysterious LAN DNS outages. See "Autostart"
+below for what "running but unusable" means and how `scripts/check-vm.sh`
+detects it.
+
+#### Bridged networking is mandatory
+
+Colima is started with `--network-address --network-mode bridged
+--network-interface en1`, giving the VM **its own DHCP lease on the LAN**.
+Containers then publish directly onto that address with no forwarding in the
+path. This is not a preference — it is the only arrangement that works here:
+
+- Colima's default `ssh` port-forwarder **does not forward UDP at all**, so
+  Technitium's `53/udp` would never reach LAN clients. Lima's newer `grpc`
+  forwarder nominally supports UDP but has a documented history of dropping
+  packets, so it is not relied on.
+- The default forwarder also binds host loopback only, so 80/443 would be
+  unreachable from phones and laptops.
+
+**`LAN_IP` in `.env` is therefore the VM's address, not the Mac's.** It is
+what the `dns` service binds its `ports:` on, and the answer
+`scripts/dns-provision.sh` writes into every zone. Give the VM's MAC a static
+DHCP reservation on the router; find the current address with `colima list`
+(ADDRESS column). Do not "simplify" this back to default networking — LAN DNS
+breaks silently, and the failure looks like a DNS problem rather than a
+port-forwarding one. The `--network-interface` is `en1` because that is this
+Mac's active LAN interface (Wi-Fi); Colima's own default is `en0`.
+
+`make vm-start` encodes all of these flags; use it rather than typing
+`colima start` by hand. Bridged mode needs `/opt/colima/bin/socket_vmnet` and
+`/etc/sudoers.d/colima`, which Colima installs itself on the first bridged
+start after prompting for a password. Homebrew's `socket_vmnet` formula is
+**not** used — Colima ships and manages its own copy.
+
+`vm-start` passes the host mount explicitly, as `--mount "$HOME:w"`.
+`--mount-type virtiofs` alone is not enough — it only selects the driver, and
+mounts *nothing*. Colima's documented default is "$HOME is mounted as
+writable", but that default applies only while `colima.yaml` has no opinion;
+once the file holds `mounts: null` (what `--mount none` and various resets
+leave behind) that null wins on every later start, and the generated
+`lima.yaml` comes back with an empty `mounts:` section. The VM then boots with
+the right CPU/memory *and the right LAN address* while `/proc/mounts` contains
+no virtiofs entry at all — so restarting with the network flags looks like it
+fixed things and changes nothing about the mount. Confirm with
+`colima ssh -- grep virtiofs /proc/mounts`, which must show
+`... /Users/<you> virtiofs rw`.
+
+**A start that does not prompt for a password did not go bridged.** Passing
+`--network-address` without `--network-mode bridged` silently yields *vzNAT*
+instead: the VM comes up on `192.168.64.x`, reachable from this Mac and from
+nothing else on the LAN, with no error anywhere. `colima list` is the check —
+the ADDRESS column must be on the Mac's own LAN subnet.
+
+`127.0.0.1:5432` and `127.0.0.1:5672` on the `nginx` service now bind the
+*VM's* loopback. Lima's port forwarder still surfaces them on the Mac's
+loopback; if that ever stops working, tunnel over Colima's generated SSH
+config rather than binding those ports to the VM's LAN address, which would
+expose Postgres and AMQP to the LAN and defeat the single-ingress rule.
+
+#### Autostart
+
+`brew services start colima` brings the VM up at login, and the containers'
+`restart: unless-stopped` follows. If `/Volumes/Docker` is not mounted yet,
+Colima fails to start rather than rebuilding on the internal disk — the stack
+stays down, which is the safe outcome. Turn off "put hard disks to sleep when
+possible" in Energy settings: a spin-down under a live `/var/lib/docker`
+stalls every container.
+
+`brew services` runs a **bare `colima start`**, with none of `vm-start`'s
+flags. That is fine while `~/.colima/default/colima.yaml` still holds the
+values from the last flagged start, but after a `colima delete` (or anything
+else that resets that file back to `cpu: 0` / `disk: 0` / `mounts: null`) the
+flagless start silently rebuilds a **2 CPU / 2 GB VM with no host mount and no
+LAN address**, reattaching the existing 100 GB `datadisk`, so container data
+survives and nothing looks obviously wrong.
+
+That VM breaks the stack in two different ways at once, neither of which names
+the real cause:
+
+- Bind mounts are resolved *inside* the VM, and with no host mount none of the
+  repo's paths exist there. Docker auto-creates a **directory** for each
+  missing source, so the services mounting a single file (`loki`, `tempo`,
+  `prometheus`, `alloy`, `nginx`, `oauth2-proxy`, `rabbitmq`) die with
+  `error mounting ".../monitoring/loki/config.yml": ... not a directory`,
+  while the services mounting a directory (`grafana` provisioning,
+  `postgres` initdb, `keycloak` realm-import) start **successfully against
+  empty config**.
+- Without `--network-address --network-mode bridged`, the `dns` service stops
+  answering LAN clients, exactly as described above.
+
+`scripts/check-vm.sh` therefore asks more than whether the VM is running. It
+runs `colima ssh -- test -f <repo>/docker-compose.yml` to prove the repo is
+actually visible inside the VM, and checks `colima list` for a LAN address,
+reporting the state as an exit code (`0` ok, `1` no `_lima`, `2` not running,
+`3` no host mount, `4` no LAN address). `make check-vm` fails the build on
+1–3 and only warns on 4, since a missing address costs LAN clients but not
+the stack itself.
+
+`make vm-start` reads the same exit code, because **`colima start` applies
+none of its flags to an already-running VM** — it prints `already running,
+ignoring` and leaves the wrong config in place, so re-running `make vm-start`
+against a drifted VM used to be a silent no-op. It now no-ops only when the
+VM is already correct, and otherwise stops the VM first (saying so) before
+starting it with the flags. The VM keeps its `datadisk` across that restart,
+so no volume data is lost.
+
+`/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima` missing is the tell
+that no bridged start has ever succeeded on this machine; the next
+`make vm-start` prompts for a password to install them.
+
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts

@@ -56,7 +56,54 @@ check-env:
 		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
 	fi
 
-up: check-env net ## Start the stack
+# '--mount-type virtiofs' only picks the driver; it does not mount anything.
+# The list of mounts is '--mount', and once colima.yaml holds 'mounts: null'
+# -- which is what 'colima start --mount none' and some resets leave behind --
+# that null wins over Colima's "$HOME is mounted by default" behaviour on every
+# subsequent start, host mount silently gone. Passing $HOME explicitly here
+# rewrites that key instead of relying on the default.
+vm-start: ## Start the Colima VM, restarting it if its config drifted (prompts for sudo)
+	@./scripts/check-vm.sh "$(CURDIR)" && state=0 || state=$$?; \
+	case $$state in \
+	  0) echo "make vm-start: the VM already has the host mount and a LAN address -- nothing to do."; \
+	     exit 0 ;; \
+	  1) echo "  Mount the volume holding the VM disks, or recreate the symlink," >&2; \
+	     echo "  then retry. See 'Runtime: Colima' in CLAUDE.md." >&2; \
+	     exit 1 ;; \
+	  2) ;; \
+	  *) echo; \
+	     echo "make vm-start: the running VM does not match this stack's requirements."; \
+	     echo "  'colima start' prints 'already running, ignoring' and applies none of"; \
+	     echo "  its flags to a live VM, so the VM has to be stopped first. Doing that"; \
+	     echo "  now -- this takes the stack down with it, and keeps the datadisk."; \
+	     echo; \
+	     colima stop ;; \
+	esac; \
+	set -x; \
+	colima start --cpu 6 --memory 12 --disk 100 --vm-type vz --mount-type virtiofs \
+		--mount "$$HOME:w" \
+		--network-address --network-mode bridged --network-interface $(COLIMA_LAN_IF)
+	@echo
+	@colima list
+	@echo
+	@echo "The ADDRESS column above must be a LAN address (same subnet as this Mac)."
+	@echo "If it is 192.168.64.x, bridged silently fell back to vzNAT and the stack"
+	@echo "will not be reachable from other LAN devices. Set LAN_IP in .env to that"
+	@echo "address, then re-run 'make dns-provision'."
+
+vm-stop: ## Stop the Colima VM (takes the whole stack down with it)
+	colima stop
+
+check-vm:
+	@./scripts/check-vm.sh "$(CURDIR)" && exit 0 || state=$$?; \
+	if [ $$state -eq 4 ]; then \
+		echo "make check-vm: warning: starting anyway; only LAN clients are affected." >&2; \
+		exit 0; \
+	fi; \
+	echo "make check-vm: rebuild the VM's runtime config with 'make vm-start'." >&2; \
+	exit 1
+
+up: check-env check-vm net ## Start the stack
 	docker compose up -d
 
 down: ## Stop the stack (keeps volumes)
@@ -76,7 +123,7 @@ status: ## Show service status (alias: ps)
 pull: ## Pull latest images
 	docker compose pull
 
-config: check-env ## Validate docker-compose.yml + .env
+config: check-env check-vm ## Validate docker-compose.yml + .env
 	docker compose config
 
 shell: ## Open a shell in a service (s=<service>)
