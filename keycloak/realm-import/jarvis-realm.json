@@ -13,8 +13,14 @@
       "directAccessGrantsEnabled": false,
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
-      "redirectUris": ["https://jarvis.famillelallier.net/oauth2/callback"],
-      "webOrigins": ["https://jarvis.famillelallier.net"],
+        "redirectUris": [
+          "https://jarvis.famillelallier.net/oauth2/callback",
+          "https://jarvis.infra.famillelallier.net/oauth2/callback"
+        ],
+        "webOrigins": [
+          "https://jarvis.famillelallier.net",
+          "https://jarvis.infra.famillelallier.net"
+        ],
       "protocolMappers": [
         {
           "name": "jarvis-audience",

@@ -26,7 +26,7 @@ kc() {
 }
 
 kc config credentials --server http://localhost:8080 --realm master \
-  --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"
+   --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"
 
 kc set-password -r nurse --username nurse.demo --new-password "$NURSE_SEED_PASSWORD"
 kc set-password -r nurse --username examiner.demo --new-password "$EXAMINER_SEED_PASSWORD"
