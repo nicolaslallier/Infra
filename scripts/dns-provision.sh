@@ -29,7 +29,13 @@ set -a; source .env; set +a
 
 BASE="http://${LAN_IP}:5380"
 
-login_response="$(curl -sf --data-urlencode "user=admin" --data-urlencode "pass=${DNS_ADMIN_PASSWORD}" "${BASE}/api/user/login")"
+# Send the long-lived .env secret over stdin (--data-urlencode "pass@-"),
+# not on the command line, so it can't be read from another local user's
+# `ps`. The session token minted from this response is transient and
+# operator-controlled, so it stays in the query string of the later GETs.
+login_response="$(printf '%s' "$DNS_ADMIN_PASSWORD" \
+     | curl -sf --data-urlencode "user=admin" --data-urlencode "pass@-" \
+        "${BASE}/api/user/login")"
 TOKEN="$(echo "$login_response" | grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)"
 
 if [ -z "$TOKEN" ]; then

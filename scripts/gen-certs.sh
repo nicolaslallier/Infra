@@ -52,10 +52,25 @@ gen_oauth2proxy_bundle() {
     return 0
   fi
   echo "gen-certs.sh: building $bundle from $OAUTH2_PROXY_IMAGE's CA bundle + $ca_crt"
-  local cid
-  cid="$(docker create "$OAUTH2_PROXY_IMAGE" 2>/dev/null)"
-  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle"
+  local cid=""
+  # Clean up the throwaway container on any early exit so a failed run doesn't
+  # leak it; only meaningful while cid is set.
+  trap '[ -n "$cid" ] && docker rm "$cid" >/dev/null 2>&1' RETURN
+  # Don't swallow docker create's stderr — surface the real reason on failure.
+  cid="$(docker create "$OAUTH2_PROXY_IMAGE")" || {
+    echo "gen-certs.sh: 'docker create $OAUTH2_PROXY_IMAGE' failed; $bundle not built" >&2
+    return 1
+  }
+  if [ -z "$cid" ]; then
+    echo "gen-certs.sh: docker create returned no container id; $bundle not built" >&2
+    return 1
+  fi
+  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle" || {
+    echo "gen-certs.sh: 'docker cp' of the image CA bundle failed" >&2
+    return 1
+  }
   docker rm "$cid" >/dev/null
+  cid=""
   cat "$ca_crt" >> "$bundle"
 }
 

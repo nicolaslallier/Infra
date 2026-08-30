@@ -67,13 +67,24 @@ old_ifs=$IFS
 IFS=','
 for app in $APP_DATABASES; do
   IFS=$old_ifs
-  app=$(echo "$app" | tr -d '[:space:]')
-  [ -z "$app" ] && continue
+  app=$(printf '%s' "$app" | tr -d '[:space:]')
+   [ -z "$app" ] && continue
+   # Restrict to Postgres role/db name chars. This also makes the eval below
+   # provably safe: var_name is the uppercasing of '[a-z0-9_]+' + "_DB_PASSWORD",
+   # i.e. always a clean [A-Z0-9_]+ identifier, so "eval pass=${$var_name}"
+   # can never execute attacker-controlled SQL. We use eval (not "${!var_name}")
+   # because this is /bin/sh (dash), which has no indirect expansion.
+  if ! printf '%s' "$app" | grep -qE '^[a-z0-9_]+$'; then
+    echo "10-provision-apps.sh: invalid app name '$app' (must match [a-z0-9_]+), skipping" >&2
+    IFS=','
+    continue
+  fi
 
-  var_name=$(echo "${app}_DB_PASSWORD" | tr '[:lower:]' '[:upper:]')
+  var_name=$(printf '%s' "${app}_DB_PASSWORD" | tr '[:lower:]' '[:upper:]')
   eval "pass=\${$var_name:-}"
   if [ -z "$pass" ]; then
     echo "10-provision-apps.sh: missing $var_name for app '$app', skipping" >&2
+    IFS=','
     continue
   fi
 
