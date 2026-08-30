@@ -165,6 +165,19 @@ Mac's active LAN interface (Wi-Fi); Colima's own default is `en0`.
 start after prompting for a password. Homebrew's `socket_vmnet` formula is
 **not** used — Colima ships and manages its own copy.
 
+`vm-start` passes the host mount explicitly, as `--mount "$HOME:w"`.
+`--mount-type virtiofs` alone is not enough — it only selects the driver, and
+mounts *nothing*. Colima's documented default is "$HOME is mounted as
+writable", but that default applies only while `colima.yaml` has no opinion;
+once the file holds `mounts: null` (what `--mount none` and various resets
+leave behind) that null wins on every later start, and the generated
+`lima.yaml` comes back with an empty `mounts:` section. The VM then boots with
+the right CPU/memory *and the right LAN address* while `/proc/mounts` contains
+no virtiofs entry at all — so restarting with the network flags looks like it
+fixed things and changes nothing about the mount. Confirm with
+`colima ssh -- grep virtiofs /proc/mounts`, which must show
+`... /Users/<you> virtiofs rw`.
+
 **A start that does not prompt for a password did not go bridged.** Passing
 `--network-address` without `--network-mode bridged` silently yields *vzNAT*
 instead: the VM comes up on `192.168.64.x`, reachable from this Mac and from

@@ -60,6 +60,12 @@ check-env:
 		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
 	fi
 
+# '--mount-type virtiofs' only picks the driver; it does not mount anything.
+# The list of mounts is '--mount', and once colima.yaml holds 'mounts: null'
+# -- which is what 'colima start --mount none' and some resets leave behind --
+# that null wins over Colima's "$HOME is mounted by default" behaviour on every
+# subsequent start, host mount silently gone. Passing $HOME explicitly here
+# rewrites that key instead of relying on the default.
 vm-start: ## Start the Colima VM, restarting it if its config drifted (prompts for sudo)
 	@./scripts/check-vm.sh "$(CURDIR)" && state=0 || state=$$?; \
 	case $$state in \
@@ -79,6 +85,7 @@ vm-start: ## Start the Colima VM, restarting it if its config drifted (prompts f
 	esac; \
 	set -x; \
 	colima start --cpu 6 --memory 12 --disk 100 --vm-type vz --mount-type virtiofs \
+		--mount "$$HOME:w" \
 		--network-address --network-mode bridged --network-interface $(COLIMA_LAN_IF)
 	@echo
 	@colima list
