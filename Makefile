@@ -119,11 +119,11 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
-up: check-env check-docker net ## Start the stack
-	docker compose up -d
+up: check-env check-docker net ## Deploy/redeploy the stack via Portainer (Git main)
+	./scripts/portainer-stack.sh up
 
-down: ## Stop the stack (keeps volumes)
-	docker compose down
+down: ## Stop the stack via Portainer (keeps volumes)
+	./scripts/portainer-stack.sh down
 
 restart: ## Restart services (optional: s=<service>)
 	docker compose restart $(if $(s),"$(s)",)
@@ -136,8 +136,8 @@ ps: status
 status: ## Show service status (alias: ps)
 	docker compose ps
 
-pull: ## Pull latest images
-	docker compose pull
+pull: ## Redeploy via Portainer, re-pulling images
+	./scripts/portainer-stack.sh pull
 
 config: check-env check-docker ## Validate docker-compose.yml + .env
 	docker compose config
@@ -189,6 +189,10 @@ dns-check: check-env ## Query the dns service to verify answers
 keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
 
-clean: ## Remove containers + volumes (CONFIRM=1 required)
+# Deleting the Portainer stack only removes its containers; 'down -v' then
+# drops the volumes docker-compose.yml declares -- infra_portainer-data is
+# no longer one of them, so Portainer keeps its data.
+clean: ## Delete the stack and its volumes (CONFIRM=1 required)
 	@test "$(CONFIRM)" = "1" || { echo "usage: make clean CONFIRM=1" >&2; exit 1; }
+	./scripts/portainer-stack.sh delete
 	docker compose down -v
