@@ -13,7 +13,7 @@ Makefile. Existing data (`infra_*` volumes) is kept.
 - Relative bind-mount paths in Git stacks ("relative path volumes") are
   Business Edition only. In CE, Portainer runs compose from
   `/data/compose/<id>` inside its own container, so `./nginx/...` would
-  mount an empty directory. The compose file has 17 relative bind mounts.
+  mount an empty directory. The compose file has 14 relative bind mounts.
 - `certs/` and `.env` are gitignored, so a host checkout is required
   regardless: the compose comes from GitHub, mounted files from the host.
 - Portainer cannot manage the stack that contains itself (a redeploy would
