@@ -67,7 +67,7 @@ never orphans another app that's still attached to it):
   same generic per-app provisioning as any other app — see "Per-app
   database provisioning" below), not a bundled DB of its own. Metrics
   enabled on the management interface (`:9000/metrics`).
-- **`minio`** — `minio/minio`. Publishes no host port. S3 API on `:9000`
+- **`minio`** — `quay.io/minio/minio` (pinned; gone from Docker Hub). Publishes no host port. S3 API on `:9000`
   and browser console on `:9001`, both fronted by NGINX
   (`minio.famillelallier.net` / `minio-console.famillelallier.net`).
   Apps on `infra-net` reach the API at `http://minio:9000`.
