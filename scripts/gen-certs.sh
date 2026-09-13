@@ -66,13 +66,24 @@ gen_oauth2proxy_bundle() {
     echo "gen-certs.sh: docker create returned no container id; $bundle not built" >&2
     return 1
   fi
-  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle" || {
+  # docker cp keeps the image file's read-only mode, so appending to the copy
+  # fails ("Permission denied") and used to leave a bundle without our CA.
+  # Stage it, make it writable, append, then replace the old bundle (itself
+  # read-only). The replacement is a new inode: restart oauth2-proxy, whose
+  # single-file bind mount only picks it up when the container starts.
+  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle.tmp" || {
     echo "gen-certs.sh: 'docker cp' of the image CA bundle failed" >&2
     return 1
   }
   docker rm "$cid" >/dev/null
   cid=""
-  cat "$ca_crt" >> "$bundle"
+  chmod u+w "$bundle.tmp"
+  cat "$ca_crt" >> "$bundle.tmp"
+  mv -f "$bundle.tmp" "$bundle"
+  grep -qF "$(sed -n 2p "$ca_crt")" "$bundle" || {
+    echo "gen-certs.sh: $bundle does not contain $ca_crt" >&2
+    return 1
+  }
 }
 
 if command -v mkcert >/dev/null 2>&1; then
