@@ -1,4 +1,5 @@
 .env
+.portainer.env
 certs/*
 !certs/.gitkeep
 .DS_Store

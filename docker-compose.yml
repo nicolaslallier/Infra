@@ -1,3 +1,15 @@
+# No top-level `name:` here on purpose: the CLI project name comes from the
+# checkout directory (the main checkout is `Infra`, so `infra` -- don't
+# rename it), while Portainer names its stack `infra` itself. A worktree
+# checkout therefore gets its own compose project instead of colliding with
+# the live one; scripts/portainer-stack.sh also refuses to run from a
+# worktree. See CLAUDE.md "Portainer-managed stack".
+
+# Repo bind mounts are ${INFRA_DIR:-.}/...: Portainer CE runs compose from
+# its own Git clone inside its container, where ./ is not on the host
+# (relative-path volumes are Business Edition only). make up passes
+# INFRA_DIR=<this checkout>; plain CLI use falls back to ./.
+
 services:
   postgres:
     # pgvector/pgvector:pg18 is the official Postgres 18 image plus the
@@ -13,11 +25,17 @@ services:
       POSTGRES_INITDB_ARGS: "--data-checksums"
       APP_DATABASES: ${APP_DATABASES}
       MONITORING_DB_PASSWORD: ${MONITORING_DB_PASSWORD}
+    # .env under the CLI, stack.env (written by Portainer from the stack's
+    # env) under Portainer -- the per-app <APP>_DB_PASSWORD names are
+    # dynamic, so they can't be listed under environment:.
     env_file:
-      - .env
+      - path: .env
+        required: false
+      - path: stack.env
+        required: false
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ${INFRA_DIR:-.}/postgres/initdb:/docker-entrypoint-initdb.d:ro
     networks:
       - infra-net
     healthcheck:
@@ -77,7 +95,7 @@ services:
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
     volumes:
-      - ./keycloak/realm-import:/opt/keycloak/data/import:ro
+      - ${INFRA_DIR:-.}/keycloak/realm-import:/opt/keycloak/data/import:ro
     networks:
       - infra-net
     depends_on:
@@ -164,7 +182,7 @@ services:
       # container's whole system CA bundle with one that also trusts our
       # CA (see scripts/gen-certs.sh's gen_oauth2proxy_bundle) — every Go
       # http.Client here uses the system pool by default.
-      - ./certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
     networks:
       - infra-net
     depends_on:
@@ -184,11 +202,11 @@ services:
       - "${LAN_IP:?Set LAN_IP in .env}:9000:9000"
       - "${LAN_IP:?Set LAN_IP in .env}:8000:8000"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./nginx/stream.d:/etc/nginx/stream.d:ro
-      - ./nginx/snippets:/etc/nginx/snippets:ro
-      - ./certs:/etc/nginx/certs:ro
+      - ${INFRA_DIR:-.}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ${INFRA_DIR:-.}/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ${INFRA_DIR:-.}/nginx/stream.d:/etc/nginx/stream.d:ro
+      - ${INFRA_DIR:-.}/nginx/snippets:/etc/nginx/snippets:ro
+      - ${INFRA_DIR:-.}/certs:/etc/nginx/certs:ro
     networks:
       infra-net:
         # oauth2-proxy's server-to-server calls (token exchange, jwks) hit
@@ -240,7 +258,7 @@ services:
       - --storage.tsdb.retention.time=15d
       - --web.enable-lifecycle
     volumes:
-      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${INFRA_DIR:-.}/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks:
       - infra-net
@@ -250,7 +268,7 @@ services:
     restart: unless-stopped
     command: ["-config.file=/etc/loki/config.yml"]
     volumes:
-      - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
+      - ${INFRA_DIR:-.}/monitoring/loki/config.yml:/etc/loki/config.yml:ro
       - loki-data:/loki
     networks:
       - infra-net
@@ -260,7 +278,7 @@ services:
     restart: unless-stopped
     command: ["-config.file=/etc/tempo/config.yml"]
     volumes:
-      - ./monitoring/tempo/config.yml:/etc/tempo/config.yml:ro
+      - ${INFRA_DIR:-.}/monitoring/tempo/config.yml:/etc/tempo/config.yml:ro
       - tempo-data:/var/tempo
     networks:
       - infra-net
@@ -274,7 +292,7 @@ services:
       - --storage.path=/var/lib/alloy/data
       - --server.http.listen-addr=0.0.0.0:12345
     volumes:
-      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - ${INFRA_DIR:-.}/monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
       - alloy-data:/var/lib/alloy/data
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
@@ -300,7 +318,7 @@ services:
       GF_DATABASE_SSL_MODE: disable
       GF_INSTALL_PLUGINS: ""
     volumes:
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ${INFRA_DIR:-.}/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
       - infra-net
     depends_on:
@@ -422,7 +440,7 @@ services:
       - rabbitmq-data:/var/lib/rabbitmq
       # management + prometheus plugins (image already ships both; this file
       # is what actually enables them on boot).
-      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - ${INFRA_DIR:-.}/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     networks:
       - infra-net
     healthcheck:
@@ -431,25 +449,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 40s
-
-  # --- Docker management UI (via NGINX; no host ports) ---
-
-  portainer:
-    # 'lts' is Portainer's own long-term-support channel tag -- same
-    # moving-tag tradeoff as minio/dns above, and the tag Portainer
-    # documents for anything that isn't a throwaway test.
-    image: portainer/portainer-ce:lts
-    restart: unless-stopped
-    # Read-write on purpose: Portainer *is* a Docker control plane, so it
-    # needs to start/stop/exec containers, not just read their state. That
-    # makes the UI equivalent to root on this host's Docker daemon -- it is
-    # reachable only through NGINX (no 'ports:' here, per the single-ingress
-    # rule) and behind Portainer's own admin account.
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer-data:/data
-    networks:
-      - infra-net
 
 networks:
   infra-net:
@@ -466,4 +465,3 @@ volumes:
   alloy-data:
   minio-data:
   rabbitmq-data:
-  portainer-data:

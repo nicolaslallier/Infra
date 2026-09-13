@@ -17,10 +17,12 @@ over a shared Docker network rather than being folded into this one.
 make / make help                 # list targets (default goal)
 make init                        # create infra-net, generate dev certs, copy .env.example -> .env
 make docker-start / make docker-stop  # launch / quit Docker Desktop (and wait for its daemon)
-make up / make down / make restart
+make up / make down              # deploy-or-redeploy / stop the stack via Portainer (Git main)
+make restart                     # docker compose restart (optional: s=<service>)
 make logs                        # tail logs (optional: s=<service>)
 make ps / make status            # service status
-make pull / make config          # pull images / validate compose + .env
+make pull / make config          # redeploy re-pulling images / validate compose + .env
+make portainer-up / -down        # Portainer itself (its own compose project)
 make shell s=<service>           # shell into a running service
 make psql                        # psql shell as the superuser (via docker compose exec)
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
@@ -30,7 +32,7 @@ make hosts                       # print the /etc/hosts lines this stack needs
 make dns-provision               # create/update the DNS zones & records the dns service serves
 make dns-check                   # query the dns service to confirm it's answering correctly
 make migrate-volumes             # copy the stack's volumes off the old Colima VM (DRY=1 previews)
-make clean CONFIRM=1             # docker compose down -v (keeps infra-net and certs/)
+make clean CONFIRM=1             # delete the Portainer stack + its volumes (keeps Portainer, infra-net, certs/)
 ```
 
 `up`, `config`, `provision-app`, `dns-provision`, and `dns-check` run
@@ -85,9 +87,11 @@ never orphans another app that's still attached to it):
   gated only by Portainer's own admin account — this vhost is not behind
   oauth2-proxy. Its admin account must be created within a few minutes of
   the container's first start or Portainer disables the form;
-  `make portainer-restart` reopens that window. `make portainer-up` /
-  `-down` / `-restart` / `-logs` drive it on its own without touching the
-  rest of the stack.
+  `make portainer-restart` reopens that window. It is **not** part of
+  `docker-compose.yml`: it lives in `docker-compose.portainer.yml` (project
+  `portainer`, volume `infra_portainer-data`) because it deploys the
+  `infra` stack and a redeploy must never stop it. `make portainer-up` /
+  `-down` / `-restart` / `-logs` drive it.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
@@ -267,6 +271,77 @@ lives in the working tree.
 After migrating, re-run `make provision-app app=<name>` for each app — it is
 idempotent, and it is what re-asserts the `vector` extension and the
 `CONNECT` revocation if anything was missed.
+
+### Portainer-managed stack
+
+The `infra` stack is a **Portainer CE Git stack**: Portainer clones
+`https://github.com/nicolaslallier/Infra` at `main` and runs
+`docker-compose.yml` itself. `make up` / `down` / `pull` / `clean` call
+Portainer's API through `scripts/portainer-stack.sh`; nobody runs
+`docker compose up` for this stack any more. GitOps polling is off on
+purpose.
+
+Things that look odd and are load-bearing:
+
+- **`${INFRA_DIR:-.}` on every repo bind mount.** Portainer runs compose
+  from its clone in `/data/compose/<id>` *inside its container*, so a bare
+  `./nginx` would be mounted from a path that doesn't exist on the Mac and
+  arrive empty. Relative-path volumes are Business Edition only. The script
+  passes `INFRA_DIR=<the checkout make ran from>`, so **the compose comes
+  from GitHub and the mounted files from that checkout**. `certs/` and
+  `.env` are gitignored and could not come from Git anyway.
+- **The drift guard.** Because of that split, `make up` / `pull` refuse
+  unless the checkout is on `main`, clean, and at `origin/main`. Merge,
+  `git pull --ff-only`, then `make up`. It is also why polling stays off:
+  a push would redeploy against configs that haven't been pulled yet.
+- **No `name:` pin in `docker-compose.yml`.** The CLI project name comes
+  from the checkout directory instead — the main checkout is `Infra`, so
+  the CLI project is `infra` there, and it must not be renamed. Portainer
+  names its stack `infra` itself, independent of any directory name. A
+  worktree checkout gets its *own* compose project (a different name), by
+  design: `scripts/portainer-stack.sh` also refuses outright to run
+  `up`/`pull`/`down`/`delete` from a linked worktree (`check_main_checkout`),
+  since it would otherwise mount files from a directory that can later be
+  deleted and address the one live stack from any number of worktrees.
+- **The drift guard checks for untracked files too.** `check_synced` uses
+  `git status --porcelain`, not `git diff --quiet HEAD` — a stray untracked
+  file (e.g. a new `nginx/conf.d/*.conf` not yet `git add`ed) would
+  otherwise be silently mounted into the deploy without tripping the guard.
+  `.env`, `.portainer.env`, and `certs/` are gitignored, so they never
+  trip it.
+- **Every `up`/`pull` force-recreates every container.** Portainer's
+  git-redeploy always sets `forceCreate=true`; there's no "only what
+  changed" mode here like plain `docker compose up -d` had. Expect a brief
+  outage on every `make up`, including a momentary LAN DNS drop from
+  `dns` — this is a real behavior change from the pre-Portainer stack, not
+  a bug.
+- **`.env` stays the source of truth for the stack itself.** Every `up` /
+  `pull` sends it as the stack env (Portainer writes it to `stack.env`,
+  hence the two optional `env_file` entries on `postgres`). Edits made in
+  Portainer's env editor are overwritten on the next `make up`.
+- **`PORTAINER_API_KEY` / `PORTAINER_ENDPOINT_ID` live in `.portainer.env`,
+  not `.env`.** `.env` is handed to containers via `env_file` (`postgres`),
+  and the API key is a Docker-daemon-root token that must never reach one
+  — `scripts/portainer-stack.sh` sources `.portainer.env` on its own and
+  dies if it's missing. `env_json`'s `PORTAINER_*` filter on `.env` stays
+  in place as defence in depth.
+- **API calls go through a throwaway `curlimages/curl` container on
+  `infra-net`** to `https://portainer:9443`, not through NGINX or a hostname:
+  both nginx and dns are *in* the stack being deployed. The API key
+  reaches curl via a `-K` config file written inside that container, never
+  on curl's command line, so it doesn't show up in that container's
+  process list.
+- **Portainer refuses to create a stack whose name matches a compose
+  project it already knows about, stopped or not** — it lists containers
+  regardless of state, so `docker compose stop` isn't enough; containers
+  started by the CLI as project `infra` must be `docker compose down`
+  first (volumes untouched).
+- **`make clean`** deletes the Portainer stack, then `docker compose down
+  -v`, which only removes volumes `docker-compose.yml` declares.
+  `infra_portainer-data` still carries the `infra` project label from
+  before the split, so never clean up by label.
+- **Non-Mac environments** (CI, the cloud VM in `AGENTS.md`) have no
+  Portainer stack: run `docker compose up -d` directly there.
 
 ### Single-ingress rule
 

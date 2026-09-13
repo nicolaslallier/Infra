@@ -119,11 +119,11 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
-up: check-env check-docker net ## Start the stack
-	docker compose up -d
+up: check-env check-docker net ## Deploy/redeploy the stack via Portainer (Git main)
+	./scripts/portainer-stack.sh up
 
-down: ## Stop the stack (keeps volumes)
-	docker compose down
+down: ## Stop the stack via Portainer (keeps volumes)
+	./scripts/portainer-stack.sh down
 
 restart: ## Restart services (optional: s=<service>)
 	docker compose restart $(if $(s),"$(s)",)
@@ -136,8 +136,8 @@ ps: status
 status: ## Show service status (alias: ps)
 	docker compose ps
 
-pull: ## Pull latest images
-	docker compose pull
+pull: ## Redeploy via Portainer, re-pulling images
+	./scripts/portainer-stack.sh pull
 
 config: check-env check-docker ## Validate docker-compose.yml + .env
 	docker compose config
@@ -149,26 +149,29 @@ shell: ## Open a shell in a service (s=<service>)
 psql: ## Open a psql shell as the superuser
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
 
-portainer-up: check-env check-docker net ## Start Portainer alone (Docker UI)
-	docker compose up -d portainer
+PORTAINER_COMPOSE := docker compose -f docker-compose.portainer.yml
+
+portainer-up: check-docker net ## Start Portainer (its own compose project)
+	@docker volume create infra_portainer-data >/dev/null
+	$(PORTAINER_COMPOSE) up -d
 	@echo
 	@echo "Portainer -> https://$(PORTAINER_HOST)"
 	@echo
 	@echo "It publishes no host port (single-ingress rule), so nginx has to be"
-	@echo "running to reach it: 'make ps' to check, 'make up' to bring the stack up."
+	@echo "running to reach it in a browser; 'make up' itself talks to it"
+	@echo "directly over infra-net and does not need nginx."
 	@echo "On a first start, create the admin account within a few minutes --"
 	@echo "Portainer locks itself out otherwise, and 'make portainer-restart'"
 	@echo "reopens that window."
 
-portainer-down: ## Stop Portainer alone (keeps its volume)
-	docker compose stop portainer
-	docker compose rm -f portainer
+portainer-down: ## Stop Portainer (keeps its volume)
+	$(PORTAINER_COMPOSE) down
 
-portainer-restart: ## Restart Portainer alone
-	docker compose restart portainer
+portainer-restart: ## Restart Portainer
+	$(PORTAINER_COMPOSE) restart
 
 portainer-logs: ## Tail Portainer's logs
-	docker compose logs -f portainer
+	$(PORTAINER_COMPOSE) logs -f
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
@@ -186,6 +189,10 @@ dns-check: check-env ## Query the dns service to verify answers
 keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
 
-clean: ## Remove containers + volumes (CONFIRM=1 required)
+# Deleting the Portainer stack only removes its containers; 'down -v' then
+# drops the volumes docker-compose.yml declares -- infra_portainer-data is
+# no longer one of them, so Portainer keeps its data.
+clean: ## Delete the stack and its volumes (CONFIRM=1 required)
 	@test "$(CONFIRM)" = "1" || { echo "usage: make clean CONFIRM=1" >&2; exit 1; }
+	./scripts/portainer-stack.sh delete
 	docker compose down -v

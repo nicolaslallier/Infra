@@ -78,9 +78,45 @@ Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
 
 ```bash
-make hosts     # prints /etc/hosts lines to add (not applied automatically)
-make up
+make hosts        # prints /etc/hosts lines to add (not applied automatically)
 ```
+
+`make up` deploys this stack through Portainer's API (see "Portainer" below
+and CLAUDE.md "Portainer-managed stack"), so Portainer needs to exist and
+hold an API key before `make up` can run. On a machine where this stack has
+never run before, bootstrap that with a one-time plain-compose bring-up —
+it's what gets NGINX (and so the Portainer UI) reachable in the first
+place:
+
+```bash
+docker compose up -d   # one-time bootstrap only, so nginx/dns exist
+make portainer-up      # start Portainer itself (its own compose project)
+```
+
+Within a few minutes of that first start, create the admin account at
+`https://portainer.infra.famillelallier.net` (it locks the signup form
+after that window; `make portainer-restart` reopens it), then create an
+access token (My account → Access tokens) and put it in `.portainer.env`
+(gitignored, not `.env` — see "Portainer" below):
+
+```
+PORTAINER_API_KEY=<the token>
+```
+
+Now stop the bootstrap containers — Portainer won't create a stack whose
+name matches a compose project it already knows about, even a stopped one
+— and let Portainer deploy for real:
+
+```bash
+docker compose down   # no -v: keeps the volumes/data step 2 initialised
+make up               # Portainer creates stack `infra` from GitHub main
+```
+
+`make up` also refuses to run unless this checkout is on `main`, clean,
+and at `origin/main`, since Portainer deploys from GitHub rather than your
+working tree, and only from the main checkout (not a worktree). Every
+`make up` recreates every container, so expect a brief outage (including a
+momentary LAN DNS drop) on each redeploy, not just the first one.
 
 The cert script prints a `sudo security add-trusted-cert ...` command to
 trust the local CA in macOS's keychain — run that yourself if you want
@@ -95,8 +131,8 @@ MinIO console: `https://minio-console.famillelallier.net` (API at
 `http://minio:9000`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
-Portainer: `https://portainer.infra.famillelallier.net` (set its admin
-password on the first visit — see "Portainer" below)
+Portainer: `https://portainer.infra.famillelallier.net` (admin account and
+access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
@@ -192,15 +228,15 @@ Run `make` / `make help` for the full list. Notable targets:
 | Command | What it does |
 |---|---|
 | `make docker-start` / `make docker-stop` | Launch / quit Docker Desktop (see "Runtime" above) |
-| `make up` / `make down` | Start / stop the stack (`up` checks `.env` and Docker Desktop first) |
+| `make up` / `make down` | Deploy-or-redeploy / stop the stack **via Portainer** (Git `main`; `up` checks `.env`, Docker Desktop and that this checkout is at `origin/main`; every `up` recreates every container — brief outage expected) |
 | `make logs` / `make logs s=nginx` | Tail logs (all services, or one via `s=`) |
 | `make ps` / `make status` | Show service status |
 | `make restart` / `make restart s=keycloak` | Restart services (all, or one via `s=`) |
 | `make shell s=postgres` | Open a shell in a service |
 | `make psql` | Open a psql shell as the superuser |
-| `make portainer-up` / `make portainer-down` | Start / stop Portainer on its own (see "Portainer" below) |
+| `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make pull` | Pull latest images |
+| `make pull` | Redeploy via Portainer, re-pulling images |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
@@ -208,7 +244,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make dns-provision` | Create/update the DNS zones & records the `dns` service serves |
 | `make dns-check` | Query the `dns` service to confirm it's answering correctly |
 | `make migrate-volumes` / `make migrate-volumes DRY=1` | Copy the stack's volumes off the old Colima VM (`DRY=1` previews) |
-| `make clean CONFIRM=1` | Stop the stack and remove volumes (destructive; keeps `infra-net` and `certs/`) |
+| `make clean CONFIRM=1` | Delete the Portainer stack and its volumes (destructive; keeps Portainer, `infra-net` and `certs/`) |
 
 ## Monitoring
 
@@ -263,8 +299,13 @@ make portainer-logs
 make portainer-down      # stop + remove the container, keep portainer-data
 ```
 
-`make up` starts it along with everything else; the targets above exist for
-when you only want this one service.
+Portainer is not part of `docker-compose.yml`: it *deploys* that stack.
+Start it first, create the admin account, then create an access token
+(My account → Access tokens) and put it in `.portainer.env` (gitignored,
+`PORTAINER_API_KEY=...`, next to `.env` but never sent to a container) —
+`make up` needs it. See CLAUDE.md "Portainer-managed stack" for why bind
+mounts use `${INFRA_DIR}`, why `make up` insists on `origin/main`, and why
+it also insists on the main checkout rather than a worktree.
 
 It follows the single-ingress rule — no host `ports:`, reached through NGINX
 (`nginx/conf.d/portainer.conf`), which proxies to the container's own TLS
@@ -324,7 +365,8 @@ Two things worth knowing:
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, portainer, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, nginx, dns, LGTM + exporters
+docker-compose.portainer.yml  portainer (deploys the stack above)
 nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
 nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
@@ -332,6 +374,7 @@ postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
 scripts/                 check-docker.sh, migrate-volumes.sh, gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
+scripts/portainer-stack.sh    make up/down/pull/clean via Portainer's API
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the architecture notes and gotchas that
