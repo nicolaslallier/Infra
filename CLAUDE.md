@@ -508,14 +508,33 @@ anyone who can resolve its hostname. The gate is the standard
 separate from `jarvis`/`nurse`, for the EA application in the `EA` repo.
 It holds three clients — `ea-spa` (public, PKCE, the SPA's browser
 sessions), `ea-mcp` (public, PKCE, an agent talking to `/mcp` via the same
-authorization-code flow but with a loopback redirect — `http://localhost:*`
-— since there is no browser origin to restrict it to) and `ea-pipelines`
-(confidential, service account only — no human ever logs in as it) — plus
-one realm role, `ea-editor`, that gates writes
-(reading the catalogue needs no role). All three clients carry an
-`oidc-audience-mapper` stamping `ea-api` into the access token, because the
-EA API validates that audience rather than trusting whichever client
-requested the token.
+authorization-code flow but with a loopback redirect since there is no
+browser origin to restrict it to) and `ea-pipelines` (confidential, service
+account only — no human ever logs in as it) — plus one realm role,
+`ea-editor`, that gates writes (reading the catalogue needs no role). All
+three clients carry an `oidc-audience-mapper` stamping `ea-api` into the
+access token, because the EA API validates that audience rather than
+trusting whichever client requested the token.
+
+Every `redirectUris` entry is an **exact** callback, never a trailing
+`*`: Keycloak's match for a trailing `*` is a plain string prefix, so
+`http://localhost:*` also matches
+`http://localhost:1234@evil.example/callback` (a browser reads `1234` as
+userinfo and goes to `evil.example`) — a wildcard redirect is an open
+redirect. `ea-spa` lists `https://ea.infra.famillelallier.net/auth/callback`
+plus the two Vite-dev loopback forms, all at the SPA's one callback path;
+its `post.logout.redirect.uris` attribute holds the matching bare origins,
+`##`-joined (Keycloak's multi-value separator for that attribute, not a
+JSON array); `webOrigins` stays `["+"]`, which derives allowed CORS origins
+from those exact redirect URIs rather than naming its own wildcard. Adding
+a LAN origin for the Vite dev server means adding both its
+`/auth/callback` redirect URI and its bare origin to the `##` list, in the
+console, by hand. `ea-mcp` lists exactly one redirect URI,
+`http://localhost:33418/callback` — Claude Code (2.1.270) opens a loopback
+callback on the port its own `.mcp.json` pins as `callbackPort` for
+`clientId: ea-mcp`; the two numbers must always agree, so changing EA's
+`.mcp.json` means changing this realm file (and the live realm) to match,
+never the other way only.
 
 Unlike Jarvis, there is **no oauth2-proxy and no `auth_request`** here:
 the EA API and its `/mcp` transport verify the JWT themselves (EA

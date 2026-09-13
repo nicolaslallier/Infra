@@ -191,9 +191,16 @@ gate: the EA API and its `/mcp` verify the token themselves, so
    (reading the catalogue needs no role).
 2. **Clients** → `ea-pipelines` → **Credentials**, copy the client secret
    into EA's `pipelines/.env` as `PIPELINES_EA_CLIENT_SECRET`.
-3. **Clients** → `ea-spa` → add each LAN origin that serves the Vite dev
-   server (`http://192.168.x.y:5173/*`) to **Valid redirect URIs** — the
-   same exact list EA's `EA_CORS_ORIGINS` needs.
+3. **Clients** → `ea-spa` → redirect URIs are exact, not wildcarded — each
+   LAN origin that serves the Vite dev server needs its own
+   `http://192.168.x.y:5173/auth/callback` added to **Valid redirect
+   URIs**, and the bare origin (`http://192.168.x.y:5173`) added to the
+   `post.logout.redirect.uris` attribute's `##`-separated list, matching
+   the exact origins EA's `EA_CORS_ORIGINS` needs.
+
+`ea-mcp`'s one redirect URI (`http://localhost:33418/callback`) follows
+EA's `.mcp.json` `callbackPort` for the Claude Code MCP OAuth flow — change
+one and the other stops working.
 
 `--import-realm` only seeds a realm that doesn't exist yet (see "Keycloak
 admin bootstrap" below); changing `ea-realm.json` later means repeating the
