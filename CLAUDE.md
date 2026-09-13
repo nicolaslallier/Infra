@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-RabbitMQ, a Technitium DNS server, and an LGTM monitoring stack (Grafana,
-Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
+RabbitMQ, Portainer, a Technitium DNS server, and an LGTM monitoring stack
+(Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
 over a shared Docker network rather than being folded into this one.
 
@@ -66,6 +66,21 @@ never orphans another app that's still attached to it):
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
+- **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
+  UI, at `portainer.infra.famillelallier.net`. Publishes no host port;
+  NGINX proxies to `https://portainer:9443` rather than
+  `http://portainer:9000`, because Portainer's self-signed TLS listener is
+  present on every release while the plain-HTTP one is version-dependent
+  and can be off by default (`proxy_ssl_verify off` — that certificate is
+  container-generated and the hop never leaves `infra-net`). It mounts
+  `/var/run/docker.sock` **read-write** on purpose: managing containers is
+  what it is for. That makes the UI equivalent to root on the daemon,
+  gated only by Portainer's own admin account — this vhost is not behind
+  oauth2-proxy. Its admin account must be created within a few minutes of
+  the container's first start or Portainer disables the form;
+  `make portainer-restart` reopens that window. `make portainer-up` /
+  `-down` / `-restart` / `-logs` drive it on its own without touching the
+  rest of the stack.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
@@ -244,16 +259,17 @@ that no bridged start has ever succeeded on this machine; the next
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `grafana`,
-monitoring backends, and future apps) — not top-level infra processes that
-own a protocol NGINX can't meaningfully front. `postgres`, `pgadmin`,
-`keycloak`, `minio`, `rabbitmq`, `grafana`, and the rest of LGTM/exporters
-deliberately have no `ports:` key. All host access to them — HTTP(S),
-Postgres, and AMQP — goes through NGINX:
+(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`,
+`grafana`, monitoring backends, and future apps) — not top-level infra
+processes that own a protocol NGINX can't meaningfully front. `postgres`,
+`pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`, `grafana`, and the
+rest of LGTM/exporters deliberately have no `ports:` key. All host access
+to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
   proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `minio:9000`
-  / `minio:9001`, `rabbitmq:15672`, and, per-app, to whatever apps register.
+  / `minio:9001`, `rabbitmq:15672`, `portainer:9443` (https upstream), and,
+  per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
@@ -262,12 +278,12 @@ Postgres, and AMQP — goes through NGINX:
   `127.0.0.1:5672` the same way.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `grafana`, or other monitoring backends.** If a backend
-service needs to be reachable from the host, add an NGINX server block
-instead (`nginx/conf.d/app.conf.example` is the template for HTTP; extend
-`nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
-oversight — keeping every backend-app host-facing port behind one process
-is the point of this stack.
+`minio`, `rabbitmq`, `portainer`, `grafana`, or other monitoring
+backends.** If a backend service needs to be reachable from the host, add
+an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
+template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
+deliberate constraint, not an oversight — keeping every backend-app
+host-facing port behind one process is the point of this stack.
 
 `nginx` (HTTP/S + Postgres/AMQP TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own

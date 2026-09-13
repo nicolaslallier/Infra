@@ -5,11 +5,16 @@ SHELL := bash
 
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
-	dns-check clean check-env check-vm vm-start vm-stop keycloak-seed-users
+	dns-check clean check-env check-vm vm-start vm-stop keycloak-seed-users \
+	portainer-up portainer-down portainer-restart portainer-logs
 
 # The Mac's LAN interface, bridged into the Colima VM by 'make vm-start'.
 # Colima's own default is en0; this Mac's active interface is Wi-Fi en1.
 COLIMA_LAN_IF ?= en1
+
+# Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
+# the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
+PORTAINER_HOST ?= portainer.infra.famillelallier.net
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -136,6 +141,27 @@ shell: ## Open a shell in a service (s=<service>)
 
 psql: ## Open a psql shell as the superuser
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
+
+portainer-up: check-env check-vm net ## Start Portainer alone (Docker UI)
+	docker compose up -d portainer
+	@echo
+	@echo "Portainer -> https://$(PORTAINER_HOST)"
+	@echo
+	@echo "It publishes no host port (single-ingress rule), so nginx has to be"
+	@echo "running to reach it: 'make ps' to check, 'make up' to bring the stack up."
+	@echo "On a first start, create the admin account within a few minutes --"
+	@echo "Portainer locks itself out otherwise, and 'make portainer-restart'"
+	@echo "reopens that window."
+
+portainer-down: ## Stop Portainer alone (keeps its volume)
+	docker compose stop portainer
+	docker compose rm -f portainer
+
+portainer-restart: ## Restart Portainer alone
+	docker compose restart portainer
+
+portainer-logs: ## Tail Portainer's logs
+	docker compose logs -f portainer
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }

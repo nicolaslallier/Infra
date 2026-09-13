@@ -2,15 +2,16 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Technitium DNS, and
-an LGTM monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy).
+PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Portainer,
+Technitium DNS, and an LGTM monitoring stack (Grafana, Prometheus, Loki,
+Tempo, Alloy).
 Application repos stay independent: they don't run their own database or
 proxy, they just join this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), 5432 (TCP
 passthrough) for Postgres, and 5672 (TCP passthrough) for RabbitMQ AMQP.
-Postgres, pgAdmin, Keycloak, MinIO, RabbitMQ, Grafana, and
+Postgres, pgAdmin, Keycloak, MinIO, RabbitMQ, Portainer, Grafana, and
 the rest of the monitoring backends publish nothing themselves; they're
 reachable only on the shared `infra-net` Docker network or through NGINX.
 A separate `dns` container publishes its own ports too — it's a top-level
@@ -70,6 +71,8 @@ MinIO console: `https://minio-console.famillelallier.net` (API at
 `http://minio:9000`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
+Portainer: `https://portainer.infra.famillelallier.net` (set its admin
+password on the first visit — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
@@ -170,6 +173,8 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make restart` / `make restart s=keycloak` | Restart services (all, or one via `s=`) |
 | `make shell s=postgres` | Open a shell in a service |
 | `make psql` | Open a psql shell as the superuser |
+| `make portainer-up` / `make portainer-down` | Start / stop Portainer on its own (see "Portainer" below) |
+| `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
 | `make pull` | Pull latest images |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
@@ -218,6 +223,40 @@ Mac host hardware — CPU/RAM/disk panels are best-effort and describe the
 VM's 6 vCPU / 12 GB / 100 GB, not the Mac's. Container metrics and logs
 still work.
 
+## Portainer
+
+Web UI for this host's Docker daemon — containers, images, volumes,
+networks, logs, and an exec console — at
+`https://portainer.infra.famillelallier.net`.
+
+```bash
+make portainer-up        # start it on its own (nginx must be running too)
+make portainer-logs
+make portainer-down      # stop + remove the container, keep portainer-data
+```
+
+`make up` starts it along with everything else; the targets above exist for
+when you only want this one service.
+
+It follows the single-ingress rule — no host `ports:`, reached through NGINX
+(`nginx/conf.d/portainer.conf`), which proxies to the container's own TLS
+listener on `portainer:9443`. The hostname is covered by the existing
+`*.infra.famillelallier.net` cert and DNS wildcard, so no `gen-certs.sh` SAN
+or `dns-provision.sh` zone is needed.
+
+Two things worth knowing:
+
+- **First visit creates the admin account, and the window is short.** If you
+  don't set the password within a few minutes of the container's first
+  start, Portainer disables that form as a security measure and the UI says
+  so; `make portainer-restart` reopens it.
+- **The UI is root on the Docker daemon.** Portainer mounts
+  `/var/run/docker.sock` read-write because managing containers is the whole
+  point of it, so anyone who reaches the page and gets past its login can
+  start a privileged container. Its own admin account is the only gate —
+  unlike `jarvis.famillelallier.net`, this vhost is not behind
+  oauth2-proxy/Keycloak.
+
 ## Connecting an application repo
 
 1. Add a database + role for the app: put its name in `APP_DATABASES` in
@@ -257,7 +296,7 @@ still work.
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, portainer, nginx, dns, LGTM + exporters
 nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
 nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
