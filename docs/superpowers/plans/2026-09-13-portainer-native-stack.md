@@ -624,7 +624,7 @@ docker rm -f infra-portainer-1
 make portainer-up
 docker ps --filter name=portainer-portainer-1 --format '{{.Names}} {{.Status}}'
 ```
-Expected: `portainer-portainer-1 Up`. User logs in at `https://portainer.infra.famillelallier.net` with the existing admin account (same volume), creates an access token, adds `PORTAINER_API_KEY=...` to `.env`. Then run Task 3 Step 7.
+Expected: `portainer-portainer-1 Up`. User logs in at `https://portainer.infra.famillelallier.net` with the existing admin account (same volume), creates an access token, adds `PORTAINER_API_KEY=...` to `.portainer.env`. Then run Task 3 Step 7.
 
 - [ ] **Step 3: Snapshot pre-migration state**
 ```bash
@@ -663,6 +663,9 @@ Expected: same containers; all up; mount source `/Users/nicolaslallier/Claude/In
 ```bash
 make up
 ```
-Expected: `redeployed stack 'infra' at <sha>`, containers stay up.
+Expected: `redeployed stack 'infra' at <sha>`; every container is recreated
+(Portainer's git-redeploy always forces this — expect a brief outage
+including a momentary LAN DNS drop), so verify they all come back up
+rather than expecting them to stay up.
 
 **Rollback** (if Step 5/6 fails): `scripts/portainer-stack.sh delete` (volumes kept), then `docker compose up -d` from the main checkout, and `git revert` the merge if needed.

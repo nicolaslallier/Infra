@@ -40,7 +40,11 @@ Makefile. Existing data (`infra_*` volumes) is kept.
   polling is **off** — an auto-redeploy on push would run a new compose
   against a not-yet-pulled local checkout.
 - `docker-compose.yml` changes:
-  - top-level `name: infra` (pins the project name from any worktree);
+  - no top-level `name:` pin: the CLI project name comes from the main
+    checkout's directory (`Infra` → `infra`, which must not be renamed),
+    Portainer names its stack `infra` itself, and a worktree checkout gets
+    its own compose project by design — `scripts/portainer-stack.sh`
+    refuses to deploy from one;
   - every `./x` bind mount becomes `${INFRA_DIR:-.}/x`; CLI use is
     unchanged, Portainer is given `INFRA_DIR=/Users/nicolaslallier/Claude/Infra`;
   - `postgres` `env_file` lists `.env` and `stack.env`, both
@@ -50,9 +54,11 @@ Makefile. Existing data (`infra_*` volumes) is kept.
 
 - `.env` stays the source of truth. The script sends its variables plus
   `INFRA_DIR` as the stack's env on every create/redeploy.
-- New `.env` key `PORTAINER_API_KEY` (access token created by the user in
-  the Portainer UI). `PORTAINER_ENDPOINT_ID` defaults to the local
-  environment id.
+- New gitignored `.portainer.env` file holding `PORTAINER_API_KEY` (access
+  token created by the user in the Portainer UI) — not `.env`, since `.env`
+  is handed to containers via `env_file` and this key is a Docker-daemon-
+  root token. `PORTAINER_ENDPOINT_ID` (optional, also in `.portainer.env`)
+  defaults to the local environment id.
 - API calls run from a throwaway `curlimages/curl` container on
   `infra-net` against `https://portainer:9443` (`-k`): no new host port,
   no dependency on NGINX or DNS, which belong to the stack being deployed.
