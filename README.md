@@ -191,12 +191,14 @@ gate: the EA API and its `/mcp` verify the token themselves, so
    (reading the catalogue needs no role).
 2. **Clients** → `ea-pipelines` → **Credentials**, copy the client secret
    into EA's `pipelines/.env` as `PIPELINES_EA_CLIENT_SECRET`.
-3. **Clients** → `ea-spa` → redirect URIs are exact, not wildcarded — each
-   LAN origin that serves the Vite dev server needs its own
-   `http://192.168.x.y:5173/auth/callback` added to **Valid redirect
-   URIs**, and the bare origin (`http://192.168.x.y:5173`) added to the
-   `post.logout.redirect.uris` attribute's `##`-separated list, matching
-   the exact origins EA's `EA_CORS_ORIGINS` needs.
+3. **Do not add LAN origins to `ea-spa`.** A plain-http LAN origin such as
+   `http://192.168.x.y:5173` cannot log in whatever its redirect URIs say:
+   the SPA builds PKCE with `crypto.subtle`, which browsers only expose in a
+   secure context. Open the Vite dev server as `http://localhost:5173` —
+   from another machine through
+   `ssh -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 <host>` — or use the
+   https vhost; both are already among `ea-spa`'s exact redirect URIs (EA
+   `docs/adr/0031`).
 
 `ea-mcp`'s one redirect URI (`http://localhost:33418/callback`) follows
 EA's `.mcp.json` `callbackPort` for the Claude Code MCP OAuth flow — change

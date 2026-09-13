@@ -526,10 +526,14 @@ plus the two Vite-dev loopback forms, all at the SPA's one callback path;
 its `post.logout.redirect.uris` attribute holds the matching bare origins,
 `##`-joined (Keycloak's multi-value separator for that attribute, not a
 JSON array); `webOrigins` stays `["+"]`, which derives allowed CORS origins
-from those exact redirect URIs rather than naming its own wildcard. Adding
-a LAN origin for the Vite dev server means adding both its
-`/auth/callback` redirect URI and its bare origin to the `##` list, in the
-console, by hand. `ea-mcp` lists exactly one redirect URI,
+from those exact redirect URIs rather than naming its own wildcard. A LAN
+origin for the Vite dev server is **not** a missing redirect URI: on plain
+http (`http://192.168.x.y:5173`) the SPA cannot even start the login,
+because PKCE needs `crypto.subtle` and browsers only expose it in a secure
+context — so reach Vite as `http://localhost:5173` (from another machine,
+`ssh -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 <host>`) or through the
+https vhost, never by adding the LAN origin in the console (EA
+`docs/adr/0031`). `ea-mcp` lists exactly one redirect URI,
 `http://localhost:33418/callback` — Claude Code (2.1.270) opens a loopback
 callback on the port its own `.mcp.json` pins as `callbackPort` for
 `clientId: ea-mcp`; the two numbers must always agree, so changing EA's
