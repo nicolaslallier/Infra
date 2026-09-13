@@ -117,8 +117,13 @@ oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
 (`grafana.infra.famillelallier.net`), MinIO
 (`minio.famillelallier.net` / `minio-console.famillelallier.net`),
 RabbitMQ management (`rabbitmq.infra.famillelallier.net`),
-and the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
-`jarvis.infra.famillelallier.net`) do. When registering the Postgres server
+the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
+`jarvis.infra.famillelallier.net`), and LibreChat (`chat.famillelallier.net`,
+admin panel at `chat-admin.infra.famillelallier.net`) do. LibreChat is a
+Portainer stack of its own (compose in `~/OpenCode/LibreChat`), not a service
+of this repo: its `api` and `admin-panel` join `infra-net` under the aliases
+`librechat` / `librechat-admin` (`nginx/conf.d/librechat.conf`), and nothing
+else of it publishes a port. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
 (pgAdmin and `postgres` share `infra-net` directly), port `5432` — never a
 `*.famillelallier.net` hostname. A hostname like
@@ -533,17 +538,21 @@ regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
 
-pgAdmin, Keycloak, Jarvis, MinIO API, and MinIO console are all deliberate
-exceptions to the `.infra.` subdomain convention: they're served at
+pgAdmin, Keycloak, Jarvis, LibreChat, MinIO API, and MinIO console are all
+deliberate exceptions to the `.infra.` subdomain convention: they're served at
 `pgadmin.famillelallier.net`, `keycloak.famillelallier.net`,
-`jarvis.famillelallier.net`, `minio.famillelallier.net`, and
+`jarvis.famillelallier.net`, `chat.famillelallier.net`,
+`minio.famillelallier.net`, and
 `minio-console.famillelallier.net` (no `.infra.`), so those exact hostnames
 are added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
 `gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
-Regenerating certs (`./scripts/gen-certs.sh --force`) always mints a new
-local CA too, so re-run the `sudo security add-trusted-cert` step it
-prints for every browser/keychain that had the old one trusted — the
-old CA's trust doesn't carry over.
+Regenerating certs (`./scripts/gen-certs.sh --force`) re-issues the leaf
+and **keeps the local CA** when `certs/infra-ca.key` and `infra-ca.crt`
+exist, so adding a SAN needs no re-trust on any device. To mint a new CA,
+delete `certs/infra-ca.*` first — then re-run the `sudo security
+add-trusted-cert` step it prints for every browser/keychain that had the
+old one trusted, since the old CA's trust doesn't carry over. (The mkcert
+path always signs with mkcert's own CA.)
 
 ### DNS (LAN resolver)
 
@@ -594,6 +603,8 @@ zones, **never** a `Primary` zone for `famillelallier.net` itself:
   Jarvis is reachable at both.
 - `minio.famillelallier.net` / `minio-console.famillelallier.net` — apex
   A records → `LAN_IP`, same exception pattern (API + browser console).
+- `chat.famillelallier.net` — apex A record → `LAN_IP`, same exception
+  pattern (LibreChat; its admin panel rides the `.infra.` wildcard).
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every
