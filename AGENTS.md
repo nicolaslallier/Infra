@@ -39,19 +39,21 @@ startup caveats that the update script deliberately does NOT handle.
   already filled in (no `change-me` values), so `make check-env` / `make up`
   pass out of the box.
 
-- **`make up` needs `SKIP_DOCKER_CHECK=1` here.** The stack's normal runtime
-  is Docker Desktop on a Mac, and `make up` / `make config` / `make
+- **`make config` needs `SKIP_DOCKER_CHECK=1` here.** The stack's normal
+  runtime is Docker Desktop on a Mac, and `make config` / `make
   portainer-up` run `scripts/check-docker.sh` first (it asserts the daemon is
   Docker Desktop, its disk image volume is mounted, and the repo is under a
   shared directory). None of that applies to this VM's plain `dockerd`, so
   export `SKIP_DOCKER_CHECK=1` for the session — the compose stack itself is
   portable and needs no other change.
 
-- **Bring the stack up / down:** `make up` (runs `check-env` first) and
-  `make down`. `make ps` for status, `make logs s=<service>` to tail one
-  service. First `make up` provisions the per-app databases listed in
-  `APP_DATABASES` (`jarvis`, `nurse`, `keycloak`, `grafana`). To add a DB to
-  the already-running cluster, add `<APP>_DB_PASSWORD` to `.env` then run
+- **Bring the stack up / down here with plain compose:** on the Mac `make up`
+  deploys through Portainer's API, which this VM doesn't run — use
+  `docker compose up -d` / `docker compose down` instead (`make ps`,
+  `make logs s=<service>` still work). First bringing the stack up
+  provisions the per-app databases listed in `APP_DATABASES` (`jarvis`,
+  `nurse`, `keycloak`, `grafana`). To add a DB to the already-running
+  cluster, add `<APP>_DB_PASSWORD` to `.env` then run
   `make provision-app app=<name>` (init scripts only run once on an empty
   volume).
 

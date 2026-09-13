@@ -192,15 +192,15 @@ Run `make` / `make help` for the full list. Notable targets:
 | Command | What it does |
 |---|---|
 | `make docker-start` / `make docker-stop` | Launch / quit Docker Desktop (see "Runtime" above) |
-| `make up` / `make down` | Start / stop the stack (`up` checks `.env` and Docker Desktop first) |
+| `make up` / `make down` | Deploy-or-redeploy / stop the stack **via Portainer** (Git `main`; `up` checks `.env`, Docker Desktop and that this checkout is at `origin/main`) |
 | `make logs` / `make logs s=nginx` | Tail logs (all services, or one via `s=`) |
 | `make ps` / `make status` | Show service status |
 | `make restart` / `make restart s=keycloak` | Restart services (all, or one via `s=`) |
 | `make shell s=postgres` | Open a shell in a service |
 | `make psql` | Open a psql shell as the superuser |
-| `make portainer-up` / `make portainer-down` | Start / stop Portainer on its own (see "Portainer" below) |
+| `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make pull` | Pull latest images |
+| `make pull` | Redeploy via Portainer, re-pulling images |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
@@ -208,7 +208,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make dns-provision` | Create/update the DNS zones & records the `dns` service serves |
 | `make dns-check` | Query the `dns` service to confirm it's answering correctly |
 | `make migrate-volumes` / `make migrate-volumes DRY=1` | Copy the stack's volumes off the old Colima VM (`DRY=1` previews) |
-| `make clean CONFIRM=1` | Stop the stack and remove volumes (destructive; keeps `infra-net` and `certs/`) |
+| `make clean CONFIRM=1` | Delete the Portainer stack and its volumes (destructive; keeps Portainer, `infra-net` and `certs/`) |
 
 ## Monitoring
 
@@ -263,8 +263,11 @@ make portainer-logs
 make portainer-down      # stop + remove the container, keep portainer-data
 ```
 
-`make up` starts it along with everything else; the targets above exist for
-when you only want this one service.
+Portainer is not part of `docker-compose.yml`: it *deploys* that stack.
+Start it first, create the admin account, then create an access token
+(My account → Access tokens) and set `PORTAINER_API_KEY` in `.env` —
+`make up` needs it. See CLAUDE.md "Portainer-managed stack" for why bind
+mounts use `${INFRA_DIR}` and why `make up` insists on `origin/main`.
 
 It follows the single-ingress rule — no host `ports:`, reached through NGINX
 (`nginx/conf.d/portainer.conf`), which proxies to the container's own TLS
@@ -324,7 +327,8 @@ Two things worth knowing:
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, portainer, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, nginx, dns, LGTM + exporters
+docker-compose.portainer.yml  portainer (deploys the stack above)
 nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
 nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
@@ -332,6 +336,7 @@ postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
 scripts/                 check-docker.sh, migrate-volumes.sh, gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
+scripts/portainer-stack.sh    make up/down/pull/clean via Portainer's API
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the architecture notes and gotchas that
