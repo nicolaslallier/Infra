@@ -179,6 +179,10 @@ services:
       - "443:443"
       - "127.0.0.1:5432:5432"
       - "127.0.0.1:5672:5672"
+      # Portainer's native ports, LAN-only (nginx/stream.d/portainer.conf).
+      - "${LAN_IP:?Set LAN_IP in .env}:9443:9443"
+      - "${LAN_IP:?Set LAN_IP in .env}:9000:9000"
+      - "${LAN_IP:?Set LAN_IP in .env}:8000:8000"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
