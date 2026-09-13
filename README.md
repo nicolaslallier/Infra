@@ -78,7 +78,27 @@ Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
 
 ```bash
-make hosts     # prints /etc/hosts lines to add (not applied automatically)
+make hosts        # prints /etc/hosts lines to add (not applied automatically)
+make portainer-up # start Portainer itself (its own compose project)
+```
+
+`make up` deploys this stack through Portainer's API (see "Portainer" below
+and CLAUDE.md "Portainer-managed stack"), so before running it: create
+Portainer's admin account at `https://portainer.infra.famillelallier.net`
+within a few minutes of the container's first start (it locks the signup
+form after that window; `make portainer-restart` reopens it), then create
+an access token (My account → Access tokens) and set `PORTAINER_API_KEY`
+in `.env`. `make up` also refuses to run unless this checkout is on
+`main`, clean, and at `origin/main`, since Portainer deploys from GitHub
+rather than your working tree.
+
+Reaching that URL needs NGINX already listening, and NGINX is itself one
+of the services `make up` deploys — on a machine where this stack has
+never run before, nothing is serving that hostname yet. This repo doesn't
+currently document a way around that first-ever-boot gap; see "Portainer"
+below.
+
+```bash
 make up
 ```
 
@@ -95,8 +115,8 @@ MinIO console: `https://minio-console.famillelallier.net` (API at
 `http://minio:9000`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
-Portainer: `https://portainer.infra.famillelallier.net` (set its admin
-password on the first visit — see "Portainer" below)
+Portainer: `https://portainer.infra.famillelallier.net` (admin account and
+access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 
 ### Registering the Postgres server inside pgAdmin
