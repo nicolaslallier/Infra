@@ -1,6 +1,9 @@
-# Pinned so the CLI (from any checkout or worktree) and Portainer's stack
-# "infra" address the same project -- and the same infra_* volumes.
-name: infra
+# No top-level `name:` here on purpose: the CLI project name comes from the
+# checkout directory (the main checkout is `Infra`, so `infra` -- don't
+# rename it), while Portainer names its stack `infra` itself. A worktree
+# checkout therefore gets its own compose project instead of colliding with
+# the live one; scripts/portainer-stack.sh also refuses to run from a
+# worktree. See CLAUDE.md "Portainer-managed stack".
 
 # Repo bind mounts are ${INFRA_DIR:-.}/...: Portainer CE runs compose from
 # its own Git clone inside its container, where ./ is not on the host

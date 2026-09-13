@@ -20,8 +20,9 @@ CURL_IMAGE=curlimages/curl:8.5.0
 die() { printf 'portainer-stack.sh: %b\n' "$*" >&2; exit 1; }
 
 # .env -> Portainer's [{name,value}] stack env: KEY=VALUE lines only, minus
-# this script's own PORTAINER_* settings (never handed to containers) and
-# any stale INFRA_DIR, plus INFRA_DIR pointing at this checkout.
+# any PORTAINER_* settings (those belong in .portainer.env and are never
+# handed to containers -- filtered here too, as defence in depth) and any
+# stale INFRA_DIR, plus INFRA_DIR pointing at this checkout.
 env_json() { # <env-file> <infra-dir>
   jq -Rn --arg dir "$2" '
     [inputs
@@ -45,25 +46,40 @@ selftest() {
 
 # Runs curl in a throwaway container on infra-net, so deploying never
 # depends on nginx or dns -- both are part of the stack being deployed.
-# The key travels as an env var, not a command-line argument.
+# The key reaches curl via -K (a config file written from the env var
+# inside the container), never as a command-line argument, so it doesn't
+# show up in that container's process list.
 api() { # <method> <path> [json-body]
   printf '%s' "${3:-}" | docker run --rm -i --network infra-net \
     -e PORTAINER_API_KEY --entrypoint sh "$CURL_IMAGE" -c '
-      out="$(curl -sSk --fail-with-body -X "$1" \
-        -H "X-API-Key: $PORTAINER_API_KEY" -H "Content-Type: application/json" \
+      printf "header = \"X-API-Key: %s\"\n" "$PORTAINER_API_KEY" >/tmp/curl.cfg
+      out="$(curl -sSk -K /tmp/curl.cfg --fail-with-body -X "$1" \
+        -H "Content-Type: application/json" \
         --data-binary @- "https://portainer:9443/api$2" 2>&1)" \
         || { printf "%s\n" "$out" >&2; exit 1; }
       printf "%s" "$out"' sh "$1" "$2" \
     || die "$1 $2 failed (is Portainer up? 'make portainer-up')"
 }
 
+# Refuse to run from a linked worktree: Portainer mounts files from
+# INFRA_DIR (this directory) and this script addresses the live stack, but
+# a worktree can be deleted out from under a running deployment.
+check_main_checkout() {
+  local gitdir commondir
+  gitdir="$(git rev-parse --git-dir)" || die "not a git checkout"
+  commondir="$(git rev-parse --git-common-dir)" || die "not a git checkout"
+  [ "$gitdir" = "$commondir" ] \
+    || die "run this from the main checkout, not a linked worktree -- Portainer mounts files from this directory and this addresses the live stack"
+}
+
 # Portainer deploys GitHub main while the mounted configs come from this
 # checkout: refuse to deploy whenever the two could differ.
 check_synced() {
-  local branch head remote
+  local branch head remote status
   branch="$(git rev-parse --abbrev-ref HEAD)" || die "not a git checkout"
   [ "$branch" = main ] || die "this checkout is on '$branch'; Portainer deploys main"
-  git diff --quiet HEAD || die "uncommitted changes here would not match what Portainer deploys"
+  status="$(git status --porcelain)" || die "git status failed"
+  [ -z "$status" ] || die "uncommitted changes here would not match what Portainer deploys"
   git fetch -q origin main \
     || die "git fetch origin main failed -- cannot confirm this checkout matches what Portainer deploys"
   head="$(git rev-parse HEAD)" || die "git rev-parse HEAD failed"
@@ -79,10 +95,18 @@ case "$cmd" in
   *) die "usage: scripts/portainer-stack.sh up|pull|down|delete|selftest" ;;
 esac
 
+check_main_checkout
+
 [ -f .env ] || die ".env not found (run 'make init' first)"
 set -a; . ./.env; set +a
+
+# PORTAINER_API_KEY lives in its own gitignored file, not .env: .env is
+# handed to containers (postgres's env_file), and this key is a
+# Docker-daemon-root token that must never land in one.
+[ -f .portainer.env ] || die ".portainer.env not found -- create it with PORTAINER_API_KEY (Portainer -> My account -> Access tokens); see .env.example"
+set -a; . ./.portainer.env; set +a
 if [ -z "${PORTAINER_API_KEY:-}" ] || [ "$PORTAINER_API_KEY" = change-me ]; then
-  die "set PORTAINER_API_KEY in .env (Portainer -> My account -> Access tokens)"
+  die "set PORTAINER_API_KEY in .portainer.env (Portainer -> My account -> Access tokens)"
 fi
 
 eid="${PORTAINER_ENDPOINT_ID:-$(api GET /endpoints | jq -r '[.[] | select(.Type == 1)][0].Id // empty')}"
@@ -115,6 +139,10 @@ case "$cmd" in
     ;;
   down)
     [ -n "$sid" ] || die "stack '$STACK' does not exist in Portainer"
+    if [ "$(jq -r .Status <<<"$stack")" = 2 ]; then
+      echo "portainer-stack.sh: stack '$STACK' is already stopped"
+      exit 0
+    fi
     api POST "/stacks/$sid/stop?endpointId=$eid" >/dev/null
     echo "portainer-stack.sh: stopped stack '$STACK'"
     ;;
