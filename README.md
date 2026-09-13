@@ -96,12 +96,16 @@ make portainer-up      # start Portainer itself (its own compose project)
 Within a few minutes of that first start, create the admin account at
 `https://portainer.infra.famillelallier.net` (it locks the signup form
 after that window; `make portainer-restart` reopens it), then create an
-access token (My account → Access tokens) and set `PORTAINER_API_KEY` in
-`.env`.
+access token (My account → Access tokens) and put it in `.portainer.env`
+(gitignored, not `.env` — see "Portainer" below):
+
+```
+PORTAINER_API_KEY=<the token>
+```
 
 Now stop the bootstrap containers — Portainer won't create a stack whose
-name matches a running compose project — and let Portainer deploy for
-real:
+name matches a compose project it already knows about, even a stopped one
+— and let Portainer deploy for real:
 
 ```bash
 docker compose down   # no -v: keeps the volumes/data step 2 initialised
@@ -110,7 +114,9 @@ make up               # Portainer creates stack `infra` from GitHub main
 
 `make up` also refuses to run unless this checkout is on `main`, clean,
 and at `origin/main`, since Portainer deploys from GitHub rather than your
-working tree.
+working tree, and only from the main checkout (not a worktree). Every
+`make up` recreates every container, so expect a brief outage (including a
+momentary LAN DNS drop) on each redeploy, not just the first one.
 
 The cert script prints a `sudo security add-trusted-cert ...` command to
 trust the local CA in macOS's keychain — run that yourself if you want
@@ -222,7 +228,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | Command | What it does |
 |---|---|
 | `make docker-start` / `make docker-stop` | Launch / quit Docker Desktop (see "Runtime" above) |
-| `make up` / `make down` | Deploy-or-redeploy / stop the stack **via Portainer** (Git `main`; `up` checks `.env`, Docker Desktop and that this checkout is at `origin/main`) |
+| `make up` / `make down` | Deploy-or-redeploy / stop the stack **via Portainer** (Git `main`; `up` checks `.env`, Docker Desktop and that this checkout is at `origin/main`; every `up` recreates every container — brief outage expected) |
 | `make logs` / `make logs s=nginx` | Tail logs (all services, or one via `s=`) |
 | `make ps` / `make status` | Show service status |
 | `make restart` / `make restart s=keycloak` | Restart services (all, or one via `s=`) |
@@ -295,9 +301,11 @@ make portainer-down      # stop + remove the container, keep portainer-data
 
 Portainer is not part of `docker-compose.yml`: it *deploys* that stack.
 Start it first, create the admin account, then create an access token
-(My account → Access tokens) and set `PORTAINER_API_KEY` in `.env` —
+(My account → Access tokens) and put it in `.portainer.env` (gitignored,
+`PORTAINER_API_KEY=...`, next to `.env` but never sent to a container) —
 `make up` needs it. See CLAUDE.md "Portainer-managed stack" for why bind
-mounts use `${INFRA_DIR}` and why `make up` insists on `origin/main`.
+mounts use `${INFRA_DIR}`, why `make up` insists on `origin/main`, and why
+it also insists on the main checkout rather than a worktree.
 
 It follows the single-ingress rule — no host `ports:`, reached through NGINX
 (`nginx/conf.d/portainer.conf`), which proxies to the container's own TLS
