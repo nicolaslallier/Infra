@@ -288,6 +288,11 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 5672 → NGINX's `stream{}` block (`nginx/stream.d/rabbitmq.conf`),
   a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
   `127.0.0.1:5672` the same way.
+- Ports 9443/9000/8000 → NGINX's `stream{}` block
+  (`nginx/stream.d/portainer.conf`), raw TCP passthroughs to Portainer's
+  native UI (TLS), UI (plain HTTP) and Edge-agent tunnel ports, bound to
+  `${LAN_IP}` — LAN-reachable on purpose, unlike 5432/5672. Keep them off
+  `0.0.0.0`: that UI is root on the Docker daemon.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `minio`, `rabbitmq`, `portainer`, `grafana`, or other monitoring
