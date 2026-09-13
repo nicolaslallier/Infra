@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This repo is a Docker Compose infrastructure stack (NGINX, PostgreSQL 18
-with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Portainer, Technitium
+with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, Portainer, Technitium
 DNS, and the LGTM monitoring stack). There is no application code, build,
 lint, or unit-test step — the "test" is bringing the stack up and exercising
 it.
@@ -72,9 +72,9 @@ startup caveats that the update script deliberately does NOT handle.
 - **Postgres is only reachable through NGINX's TCP passthrough** at
   `127.0.0.1:5432` (bound to loopback), or in-cluster by service name
   `postgres:5432`. AMQP is the same pattern at `127.0.0.1:5672` →
-  `rabbitmq:5672`. `make psql` opens a superuser shell inside the container.
+  `rabbitmq:5672`, and Bolt at `127.0.0.1:7687` → `neo4j:7687`. `make psql` opens a superuser shell inside the container.
   Do not add a `ports:` entry to `postgres`/`pgadmin`/`keycloak`/`grafana`
-  /`minio`/`rabbitmq`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  /`minio`/`rabbitmq`/`neo4j`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
 
 - **DNS zones** are provisioned via the Technitium API, not env vars:
   `make dns-provision` (idempotent), then `make dns-check` to verify
