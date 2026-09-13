@@ -307,9 +307,12 @@ Start it first, create the admin account, then create an access token
 mounts use `${INFRA_DIR}`, why `make up` insists on `origin/main`, and why
 it also insists on the main checkout rather than a worktree.
 
-It follows the single-ingress rule — no host `ports:`, reached through NGINX
-(`nginx/conf.d/portainer.conf`), which proxies to the container's own TLS
-listener on `portainer:9443`. The hostname is covered by the existing
+It is the one exception to the single-ingress rule: it publishes 9443 (UI,
+TLS), 9000 (UI, HTTP) and 8000 (Edge agent) on `LAN_IP` itself, so
+`https://<LAN_IP>:9443` works even while the infra stack — nginx included —
+is down. It is also reachable through NGINX at
+`portainer.infra.famillelallier.net` (`nginx/conf.d/portainer.conf`). That
+hostname is covered by the existing
 `*.infra.famillelallier.net` cert and DNS wildcard, so no `gen-certs.sh` SAN
 or `dns-provision.sh` zone is needed.
 

@@ -76,8 +76,10 @@ never orphans another app that's still attached to it):
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
 - **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
-  UI, at `portainer.infra.famillelallier.net`. Publishes no host port;
-  NGINX proxies to `https://portainer:9443` rather than
+  UI, at `portainer.infra.famillelallier.net` and directly at
+  `https://${LAN_IP}:9443`. The one backend that **publishes its own
+  ports** (9443/9000/8000, bound to `${LAN_IP}`) — see "Single-ingress
+  rule" for why. The vhost's NGINX proxies to `https://portainer:9443` rather than
   `http://portainer:9000`, because Portainer's self-signed TLS listener is
   present on every release while the plain-HTTP one is version-dependent
   and can be off by default (`proxy_ssl_verify off` — that certificate is
@@ -349,7 +351,7 @@ This rule governs *backend application services* — anything NGINX fronts
 (`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`,
 `grafana`, monitoring backends, and future apps) — not top-level infra
 processes that own a protocol NGINX can't meaningfully front. `postgres`,
-`pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`, `grafana`, and the
+`pgadmin`, `keycloak`, `minio`, `rabbitmq`, `grafana`, and the
 rest of LGTM/exporters deliberately have no `ports:` key. All host access
 to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
@@ -363,15 +365,19 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 5672 → NGINX's `stream{}` block (`nginx/stream.d/rabbitmq.conf`),
   a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
   `127.0.0.1:5672` the same way.
-- Ports 9443/9000/8000 → NGINX's `stream{}` block
-  (`nginx/stream.d/portainer.conf`), raw TCP passthroughs to Portainer's
-  native UI (TLS), UI (plain HTTP) and Edge-agent tunnel ports, bound to
-  `${LAN_IP}` — LAN-reachable on purpose, unlike 5432/5672. Keep them off
-  `0.0.0.0`: that UI is root on the Docker daemon.
+**`portainer` is the one deliberate exception.** It publishes 9443 (UI,
+TLS), 9000 (UI, plain HTTP) and 8000 (Edge-agent tunnel) itself, from
+`docker-compose.portainer.yml`, bound to `${LAN_IP}` — never `0.0.0.0`,
+since that UI is root on the Docker daemon. Routing them through NGINX
+(as an earlier `nginx/stream.d/portainer.conf` did) made the tool you use
+to fix a broken stack depend on that stack: any `make up` recreates
+`nginx`, and a failed deploy leaves it down. Don't reintroduce that
+passthrough, and don't add the same ports back to `nginx` — the two would
+fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
+as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `portainer`, `grafana`, or other monitoring
-backends.** If a backend service needs to be reachable from the host, add
+`minio`, `rabbitmq`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
