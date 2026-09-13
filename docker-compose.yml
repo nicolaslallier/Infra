@@ -400,7 +400,9 @@ services:
   # --- Object storage (API + console via NGINX; no host ports) ---
 
   minio:
-    image: minio/minio:latest
+    # minio/minio was removed from Docker Hub; quay.io still hosts the release
+    # this volume was last run on. Pinned: MinIO no longer publishes new images.
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
     restart: unless-stopped
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
