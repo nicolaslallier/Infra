@@ -6,8 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-RabbitMQ, a Technitium DNS server, and an LGTM monitoring stack (Grafana,
-Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
+RabbitMQ, Portainer, a Technitium DNS server, and an LGTM monitoring stack
+(Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
 over a shared Docker network rather than being folded into this one.
 
@@ -16,6 +16,7 @@ over a shared Docker network rather than being folded into this one.
 ```bash
 make / make help                 # list targets (default goal)
 make init                        # create infra-net, generate dev certs, copy .env.example -> .env
+make docker-start / make docker-stop  # launch / quit Docker Desktop (and wait for its daemon)
 make up / make down / make restart
 make logs                        # tail logs (optional: s=<service>)
 make ps / make status            # service status
@@ -28,12 +29,15 @@ make certs                       # generate TLS certs (FORCE=1 to regenerate)
 make hosts                       # print the /etc/hosts lines this stack needs
 make dns-provision               # create/update the DNS zones & records the dns service serves
 make dns-check                   # query the dns service to confirm it's answering correctly
+make migrate-volumes             # copy the stack's volumes off the old Colima VM (DRY=1 previews)
 make clean CONFIRM=1             # docker compose down -v (keeps infra-net and certs/)
 ```
 
 `up`, `config`, `provision-app`, `dns-provision`, and `dns-check` run
 `check-env` first: `.env` must exist, and password-like values must not
-still be the `change-me` placeholders from `.env.example`.
+still be the `change-me` placeholders from `.env.example`. `up`, `config`,
+and `portainer-up` also run `check-docker` (see "Runtime: Docker Desktop"
+below).
 
 There is no build/lint/test step — this repo is Compose config, NGINX
 config, and shell scripts, not an application. Validate changes by actually
@@ -66,6 +70,21 @@ never orphans another app that's still attached to it):
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
+- **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
+  UI, at `portainer.infra.famillelallier.net`. Publishes no host port;
+  NGINX proxies to `https://portainer:9443` rather than
+  `http://portainer:9000`, because Portainer's self-signed TLS listener is
+  present on every release while the plain-HTTP one is version-dependent
+  and can be off by default (`proxy_ssl_verify off` — that certificate is
+  container-generated and the hop never leaves `infra-net`). It mounts
+  `/var/run/docker.sock` **read-write** on purpose: managing containers is
+  what it is for. That makes the UI equivalent to root on the daemon,
+  gated only by Portainer's own admin account — this vhost is not behind
+  oauth2-proxy. Its admin account must be created within a few minutes of
+  the container's first start or Portainer disables the form;
+  `make portainer-restart` reopens that window. `make portainer-up` /
+  `-down` / `-restart` / `-logs` drive it on its own without touching the
+  rest of the stack.
 - **`nginx`** — `nginx:alpine`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
@@ -97,163 +116,169 @@ inside pgAdmin's own UI, the host is the Compose service name `postgres`
 `postgresql.famillelallier.net` doesn't exist anywhere in this stack and
 produces connection-refused, not a DNS or reachability problem.
 
-### Runtime: Colima, not Docker Desktop
+### Runtime: Docker Desktop
 
-The stack runs on a **Colima** VM (`vm-type vz`, `mount-type virtiofs`),
-sized **6 CPU / 12 GB / 100 GB** — the 2 CPU / 2 GB default cannot hold
-Keycloak's JVM, Postgres, the whole LGTM stack, MinIO and RabbitMQ at once.
-Sibling app repos (Jarvis and others) share this same daemon and context
-automatically; there is no per-repo VM.
+The stack runs on **Docker Desktop for Mac**, sized **6 CPU / 12 GB / 100 GB**
+under Settings → Resources — the defaults cannot hold Keycloak's JVM,
+Postgres, the whole LGTM stack, MinIO and RabbitMQ at once. Sibling app repos
+(Jarvis and others) share this same daemon and context automatically; there is
+no per-repo VM.
 
-**The VM's disks live on the external volume `/Volumes/Docker`**, reached
-through a symlink:
+This replaced a **Colima** VM. Notes mentioning `colima start`,
+`~/.colima/_lima`, `socket_vmnet`, bridged networking or `make vm-start`
+describe that old runtime and no longer apply. Two things changed that are
+not cosmetic — what `LAN_IP` means, and what the `dns` container sees as a
+client address. Both are below.
 
-```
-~/.colima/_lima -> /Volumes/Docker/colima/_lima
-```
+**The one thing the migration can silently get wrong** is the daemon the
+`docker` CLI talks to. A leftover `docker context use colima`, `DOCKER_HOST`,
+or `DOCKER_CONTEXT` still resolves, so `make up` would bring the whole stack
+back up on the old VM, against the old volumes, and look entirely healthy.
+`scripts/check-docker.sh` asserts `docker info` reports Docker Desktop and
+fails the build otherwise; that check is the reason it exists.
 
-The Mac's internal SSD has under 90 GB free, and Colima's two sparse images
-(a 20 GB root disk plus the 100 GB `datadisk` backing `/var/lib/docker`)
-would eventually fill it. Docker Desktop used the same arrangement on this
-machine before the migration (`~/Library/Containers/com.docker.docker/Data`
-was itself a symlink to `/Volumes/Docker`). Colima still computes every path
-as `~/.colima/...` and resolves through the symlink, so the docker context
-endpoint, `brew services`, and every script stay unchanged — which is why
-this is a symlink rather than `COLIMA_HOME`.
+#### The disk image must live on the external volume
 
-**`colima delete` removes that symlink.** After any delete, recreate it
-before `colima start`, or the VM is silently rebuilt on the internal SSD:
+Point **Settings → Resources → Advanced → "Disk image location"** at
+`/Volumes/Docker`. The Mac's internal SSD has under 90 GB free, and Docker
+Desktop's sparse disk image grows toward the VM's full 100 GB. (Docker
+Desktop used a `~/Library/Containers/com.docker.docker/Data` symlink to
+`/Volumes/Docker` on this machine historically; the built-in setting is the
+supported way and `check-docker.sh` accepts either.)
 
-```bash
-mkdir -p /Volumes/Docker/colima/_lima
-ln -s /Volumes/Docker/colima/_lima ~/.colima/_lima
-```
+**Do not start Docker Desktop while that volume is unmounted.** Unlike
+Colima, which refused, Docker Desktop builds a *fresh empty VM* in the
+default location and comes up looking fine — a new Postgres cluster, no app
+databases, no Keycloak realms, an empty MinIO. `scripts/check-docker.sh`
+therefore checks the disk image location *first*, before it even asks
+whether a daemon is reachable, so `make docker-start` can refuse to launch
+the app rather than discovering the problem afterwards.
 
-`make check-vm` (a prerequisite of `up` and `config`) fails fast when the
-volume is unmounted — `~/.colima/_lima` then dangles — when the VM is not
-running, and when it is running but unusable, so an unplugged disk surfaces
-as a clear error instead of as mysterious LAN DNS outages. See "Autostart"
-below for what "running but unusable" means and how `scripts/check-vm.sh`
-detects it.
+#### `LAN_IP` is the Mac's address now, not a VM's
 
-#### Bridged networking is mandatory
+Colima ran bridged, with the VM holding its own DHCP lease, and `LAN_IP` was
+*the VM's* address. Docker Desktop has no bridged mode: it publishes
+container ports on the Mac itself. So `LAN_IP` is now **this Mac's** LAN IP
+(`ipconfig getifaddr en1`), and `ports: ["${LAN_IP}:53:53/udp", ...]` on the
+`dns` service binds the Mac's LAN interface directly. Move the router's
+static DHCP reservation from the VM's MAC to the Mac's.
 
-Colima is started with `--network-address --network-mode bridged
---network-interface en1`, giving the VM **its own DHCP lease on the LAN**.
-Containers then publish directly onto that address with no forwarding in the
-path. This is not a preference — it is the only arrangement that works here:
+What this buys and costs:
 
-- Colima's default `ssh` port-forwarder **does not forward UDP at all**, so
-  Technitium's `53/udp` would never reach LAN clients. Lima's newer `grpc`
-  forwarder nominally supports UDP but has a documented history of dropping
-  packets, so it is not relied on.
-- The default forwarder also binds host loopback only, so 80/443 would be
-  unreachable from phones and laptops.
-
-**`LAN_IP` in `.env` is therefore the VM's address, not the Mac's.** It is
-what the `dns` service binds its `ports:` on, and the answer
-`scripts/dns-provision.sh` writes into every zone. Give the VM's MAC a static
-DHCP reservation on the router; find the current address with `colima list`
-(ADDRESS column). Do not "simplify" this back to default networking — LAN DNS
-breaks silently, and the failure looks like a DNS problem rather than a
-port-forwarding one. The `--network-interface` is `en1` because that is this
-Mac's active LAN interface (Wi-Fi); Colima's own default is `en0`.
-
-`make vm-start` encodes all of these flags; use it rather than typing
-`colima start` by hand. Bridged mode needs `/opt/colima/bin/socket_vmnet` and
-`/etc/sudoers.d/colima`, which Colima installs itself on the first bridged
-start after prompting for a password. Homebrew's `socket_vmnet` formula is
-**not** used — Colima ships and manages its own copy.
-
-`vm-start` passes the host mount explicitly, as `--mount "$HOME:w"`.
-`--mount-type virtiofs` alone is not enough — it only selects the driver, and
-mounts *nothing*. Colima's documented default is "$HOME is mounted as
-writable", but that default applies only while `colima.yaml` has no opinion;
-once the file holds `mounts: null` (what `--mount none` and various resets
-leave behind) that null wins on every later start, and the generated
-`lima.yaml` comes back with an empty `mounts:` section. The VM then boots with
-the right CPU/memory *and the right LAN address* while `/proc/mounts` contains
-no virtiofs entry at all — so restarting with the network flags looks like it
-fixed things and changes nothing about the mount. Confirm with
-`colima ssh -- grep virtiofs /proc/mounts`, which must show
-`... /Users/<you> virtiofs rw`.
-
-**A start that does not prompt for a password did not go bridged.** Passing
-`--network-address` without `--network-mode bridged` silently yields *vzNAT*
-instead: the VM comes up on `192.168.64.x`, reachable from this Mac and from
-nothing else on the LAN, with no error anywhere. `colima list` is the check —
-the ADDRESS column must be on the Mac's own LAN subnet.
+- **UDP/53 works.** Bridged mode existed because Colima's default `ssh`
+  port-forwarder does not forward UDP at all. Docker Desktop's forwarder
+  does, so Technitium answers LAN clients through ordinary port publishing
+  and none of that machinery is needed.
+- **The `dns` container no longer sees real client addresses.** Docker
+  Desktop's forwarder rewrites the source IP to its internal gateway, so
+  every query arrives from one address. `DNS_SERVER_RECURSION` is still
+  satisfied (that gateway is a private address, and the policy is
+  `AllowOnlyForPrivateNetworks`), but Technitium's per-client ACLs,
+  stats and query logs now describe the forwarder, not the phone that
+  asked. Do not build anything on them.
+- macOS prompts once to allow incoming connections, and nothing else may
+  already hold `:53` on that address.
 
 `127.0.0.1:5432` and `127.0.0.1:5672` on the `nginx` service now bind the
-*VM's* loopback. Lima's port forwarder still surfaces them on the Mac's
-loopback; if that ever stops working, tunnel over Colima's generated SSH
-config rather than binding those ports to the VM's LAN address, which would
-expose Postgres and AMQP to the LAN and defeat the single-ingress rule.
+Mac's loopback directly, with no Lima forwarder in the path — simpler than
+before. Keep them on `127.0.0.1` rather than `${LAN_IP}`: binding them to the
+LAN address would expose Postgres and AMQP to every device on the network and
+defeat the single-ingress rule.
+
+#### Bind mounts and file sharing
+
+Docker Desktop shares `/Users`, `/Volumes`, `/private` and `/tmp` by default
+(Settings → Resources → File sharing). A repo outside those resolves to an
+empty auto-created directory *inside the VM*, and the stack then fails the
+same split way it did under a mountless Colima VM:
+
+- services mounting a single file (`loki`, `tempo`, `prometheus`, `alloy`,
+  `nginx`, `oauth2-proxy`, `rabbitmq`) die with
+  `error mounting ".../monitoring/loki/config.yml": ... not a directory`
+- services mounting a directory (`grafana` provisioning, `postgres` initdb,
+  `keycloak` realm-import) start **successfully against empty config**
+
+`scripts/check-docker.sh` checks the repo path against the shared roots so
+this surfaces as one clear error instead of half a stack behaving oddly.
+
+#### Preflight: `make check-docker` / `make docker-start`
+
+`scripts/check-docker.sh` reports state as an exit code, the same pattern the
+old `check-vm.sh` used:
+
+| code | meaning |
+|---|---|
+| 0 | running, Docker Desktop, repo bind-mountable, sized right |
+| 1 | the disk image location does not resolve (external volume unmounted) |
+| 2 | no docker CLI, or no reachable daemon (Docker Desktop is not running) |
+| 3 | a daemon answers, but it is not Docker Desktop |
+| 4 | the repo is outside Docker Desktop's shared directories |
+| 5 | usable, but under-sized or storing its disk image on the internal SSD |
+
+Setting `SKIP_DOCKER_CHECK=1` short-circuits the whole script to 0. Every
+check in it is macOS/Docker-Desktop specific, so that is the escape hatch for
+the non-Mac environments this stack is also brought up in (CI, a cloud dev
+VM, a plain Linux `dockerd` — see `AGENTS.md`); the compose stack itself is
+portable.
+
+`make check-docker` (a prerequisite of `up`, `config` and `portainer-up`)
+fails the build on 1–4 and only warns on 5, since a small VM or a misplaced
+disk image degrades the stack rather than breaking it. `make docker-start`
+reads the same code: it no-ops when the daemon is already correct, refuses on
+1 (mount the volume first), launches Docker.app and waits up to three minutes
+on 2, and re-checks afterwards.
 
 #### Autostart
 
-`brew services start colima` brings the VM up at login, and the containers'
-`restart: unless-stopped` follows. If `/Volumes/Docker` is not mounted yet,
-Colima fails to start rather than rebuilding on the internal disk — the stack
-stays down, which is the safe outcome. Turn off "put hard disks to sleep when
-possible" in Energy settings: a spin-down under a live `/var/lib/docker`
-stalls every container.
+Settings → General → **"Start Docker Desktop when you sign in"** brings the
+daemon up at login, and the containers' `restart: unless-stopped` follows.
+Turn off "put hard disks to sleep when possible" in Energy settings: a
+spin-down under a live disk image stalls every container.
 
-`brew services` runs a **bare `colima start`**, with none of `vm-start`'s
-flags. That is fine while `~/.colima/default/colima.yaml` still holds the
-values from the last flagged start, but after a `colima delete` (or anything
-else that resets that file back to `cpu: 0` / `disk: 0` / `mounts: null`) the
-flagless start silently rebuilds a **2 CPU / 2 GB VM with no host mount and no
-LAN address**, reattaching the existing 100 GB `datadisk`, so container data
-survives and nothing looks obviously wrong.
+The autostart caveat is the mirror of Colima's. Colima's flagless
+`brew services` start silently rebuilt a small, mountless VM; Docker Desktop
+keeps its Settings across restarts, so the sizing and file-sharing config
+persist — but it will happily start with `/Volumes/Docker` absent and build
+an empty VM there and then. That is why `check-docker.sh`'s disk-image check
+runs before anything else, and why `make up` runs it every time.
 
-That VM breaks the stack in two different ways at once, neither of which names
-the real cause:
+#### Migrating the volumes off the old Colima VM
 
-- Bind mounts are resolved *inside* the VM, and with no host mount none of the
-  repo's paths exist there. Docker auto-creates a **directory** for each
-  missing source, so the services mounting a single file (`loki`, `tempo`,
-  `prometheus`, `alloy`, `nginx`, `oauth2-proxy`, `rabbitmq`) die with
-  `error mounting ".../monitoring/loki/config.yml": ... not a directory`,
-  while the services mounting a directory (`grafana` provisioning,
-  `postgres` initdb, `keycloak` realm-import) start **successfully against
-  empty config**.
-- Without `--network-address --network-mode bridged`, the `dns` service stops
-  answering LAN clients, exactly as described above.
+Named volumes live inside the daemon's own VM: switching contexts does not
+bring them along. With both daemons installed and the stack stopped on both:
 
-`scripts/check-vm.sh` therefore asks more than whether the VM is running. It
-runs `colima ssh -- test -f <repo>/docker-compose.yml` to prove the repo is
-actually visible inside the VM, and checks `colima list` for a LAN address,
-reporting the state as an exit code (`0` ok, `1` no `_lima`, `2` not running,
-`3` no host mount, `4` no LAN address). `make check-vm` fails the build on
-1–3 and only warns on 4, since a missing address costs LAN clients but not
-the stack itself.
+```bash
+make migrate-volumes DRY=1   # list what would be copied
+make migrate-volumes         # colima -> desktop-linux, streamed through tar
+```
 
-`make vm-start` reads the same exit code, because **`colima start` applies
-none of its flags to an already-running VM** — it prints `already running,
-ignoring` and leaves the wrong config in place, so re-running `make vm-start`
-against a drifted VM used to be a silent no-op. It now no-ops only when the
-VM is already correct, and otherwise stops the VM first (saying so) before
-starting it with the flags. The VM keeps its `datadisk` across that restart,
-so no volume data is lost.
+`scripts/migrate-volumes.sh` enumerates the volumes by their
+`com.docker.compose.project` label (falling back to the `<project>_` name
+prefix), refuses to run while any of the project's containers are up on
+either daemon — copying a live Postgres data directory yields a corrupt
+cluster — and skips volumes that already hold data on the target unless
+`OVERWRITE=1`. It never modifies the source. Data that is *not* in a volume
+(`certs/`, `.env`, everything bind-mounted from the repo) needs nothing: it
+lives in the working tree.
 
-`/opt/colima/bin/socket_vmnet` and `/etc/sudoers.d/colima` missing is the tell
-that no bridged start has ever succeeded on this machine; the next
-`make vm-start` prompts for a password to install them.
+After migrating, re-run `make provision-app app=<name>` for each app — it is
+idempotent, and it is what re-asserts the `vector` extension and the
+`CONNECT` revocation if anything was missed.
 
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `grafana`,
-monitoring backends, and future apps) — not top-level infra processes that
-own a protocol NGINX can't meaningfully front. `postgres`, `pgadmin`,
-`keycloak`, `minio`, `rabbitmq`, `grafana`, and the rest of LGTM/exporters
-deliberately have no `ports:` key. All host access to them — HTTP(S),
-Postgres, and AMQP — goes through NGINX:
+(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`,
+`grafana`, monitoring backends, and future apps) — not top-level infra
+processes that own a protocol NGINX can't meaningfully front. `postgres`,
+`pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`, `grafana`, and the
+rest of LGTM/exporters deliberately have no `ports:` key. All host access
+to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
   proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `minio:9000`
-  / `minio:9001`, `rabbitmq:15672`, and, per-app, to whatever apps register.
+  / `minio:9001`, `rabbitmq:15672`, `portainer:9443` (https upstream), and,
+  per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
@@ -262,12 +287,12 @@ Postgres, and AMQP — goes through NGINX:
   `127.0.0.1:5672` the same way.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `grafana`, or other monitoring backends.** If a backend
-service needs to be reachable from the host, add an NGINX server block
-instead (`nginx/conf.d/app.conf.example` is the template for HTTP; extend
-`nginx/stream.d/` for raw TCP). This is a deliberate constraint, not an
-oversight — keeping every backend-app host-facing port behind one process
-is the point of this stack.
+`minio`, `rabbitmq`, `portainer`, `grafana`, or other monitoring
+backends.** If a backend service needs to be reachable from the host, add
+an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
+template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
+deliberate constraint, not an oversight — keeping every backend-app
+host-facing port behind one process is the point of this stack.
 
 `nginx` (HTTP/S + Postgres/AMQP TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own
@@ -438,6 +463,11 @@ environment variables (`DNS_SERVER_DOMAIN`, `DNS_SERVER_ADMIN_PASSWORD`,
 `DNS_SERVER_FORWARDERS`, `DNS_SERVER_RECURSION`, ...) are only read on
 first boot, when `/etc/dns` (the `dns-config` volume) is still empty — they
 bootstrap server-level settings, not zone data.
+
+Under Docker Desktop every query reaches the container from the port
+forwarder's gateway address rather than from the device that asked, so
+Technitium's per-client views (ACLs, stats, query logs) all collapse onto
+that one address — see "`LAN_IP` is the Mac's address now" above.
 
 `DNS_SERVER_RECURSION` is set explicitly to `AllowOnlyForPrivateNetworks`
 rather than left at its default. This is what makes "forward everything

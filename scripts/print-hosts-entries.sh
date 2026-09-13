@@ -7,6 +7,7 @@ set -euo pipefail
 DOMAIN="infra.famillelallier.net"
 GRAFANA_HOST="grafana.infra.famillelallier.net"
 RABBITMQ_HOST="rabbitmq.infra.famillelallier.net"
+PORTAINER_HOST="portainer.infra.famillelallier.net"
 MINIO_HOST="minio.famillelallier.net"
 MINIO_CONSOLE_HOST="minio-console.famillelallier.net"
 PGADMIN_HOST="pgadmin.famillelallier.net"
@@ -20,6 +21,7 @@ beacon.famillelallier.net / dev.famillelallier.net entries):
 127.0.0.1 $DOMAIN
 127.0.0.1 $GRAFANA_HOST
 127.0.0.1 $RABBITMQ_HOST
+127.0.0.1 $PORTAINER_HOST
 127.0.0.1 $MINIO_HOST
 127.0.0.1 $MINIO_CONSOLE_HOST
 127.0.0.1 $PGADMIN_HOST
@@ -32,6 +34,7 @@ One way to append them:
 127.0.0.1 $DOMAIN
 127.0.0.1 $GRAFANA_HOST
 127.0.0.1 $RABBITMQ_HOST
+127.0.0.1 $PORTAINER_HOST
 127.0.0.1 $MINIO_HOST
 127.0.0.1 $MINIO_CONSOLE_HOST
 127.0.0.1 $PGADMIN_HOST

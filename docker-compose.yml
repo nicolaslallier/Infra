@@ -314,16 +314,21 @@ services:
     # fix in google/cadvisor#3709 (merged into 0.5x+/0.60).
     image: ghcr.io/google/cadvisor:v0.60.5
     restart: unless-stopped
+    # The mounts below (/, /sys, /var/lib/docker, the containerd socket) are
+    # absolute paths Docker Desktop does not share from the Mac, so they
+    # resolve inside its Linux VM -- which is what cadvisor wants, and the
+    # same thing they did under Colima. This is nonetheless the service most
+    # likely to need attention after the runtime move: if container CPU/mem
+    # panels go blank in Grafana, check this container's logs first.
     privileged: true
     devices:
       - /dev/kmsg:/dev/kmsg
     volumes:
       - /:/rootfs:ro
       # Mount the socket alone, never /var/run:/var/run. Under Docker
-      # Desktop the latter brought in a host symlink to
-      # ~/.docker/run/docker.sock that dangled inside the Linux VM and hid
-      # the real engine socket. Under Colima /var/run is the VM's own and
-      # would not break that way, but the narrow mount is still correct:
+      # Desktop -- which this stack runs on again -- the latter brings in a
+      # host symlink to ~/.docker/run/docker.sock that dangles inside the
+      # Linux VM and hides the real engine socket. Load-bearing, not tidiness:
       # cadvisor needs this one socket, nothing else in /var/run.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
@@ -423,6 +428,25 @@ services:
       retries: 5
       start_period: 40s
 
+  # --- Docker management UI (via NGINX; no host ports) ---
+
+  portainer:
+    # 'lts' is Portainer's own long-term-support channel tag -- same
+    # moving-tag tradeoff as minio/dns above, and the tag Portainer
+    # documents for anything that isn't a throwaway test.
+    image: portainer/portainer-ce:lts
+    restart: unless-stopped
+    # Read-write on purpose: Portainer *is* a Docker control plane, so it
+    # needs to start/stop/exec containers, not just read their state. That
+    # makes the UI equivalent to root on this host's Docker daemon -- it is
+    # reachable only through NGINX (no 'ports:' here, per the single-ingress
+    # rule) and behind Portainer's own admin account.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    networks:
+      - infra-net
+
 networks:
   infra-net:
     external: true
@@ -438,3 +462,4 @@ volumes:
   alloy-data:
   minio-data:
   rabbitmq-data:
+  portainer-data:

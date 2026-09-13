@@ -5,11 +5,13 @@ SHELL := bash
 
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
-	dns-check clean check-env check-vm vm-start vm-stop keycloak-seed-users
+	dns-check clean check-env check-docker docker-start docker-stop \
+	migrate-volumes keycloak-seed-users \
+	portainer-up portainer-down portainer-restart portainer-logs
 
-# The Mac's LAN interface, bridged into the Colima VM by 'make vm-start'.
-# Colima's own default is en0; this Mac's active interface is Wi-Fi en1.
-COLIMA_LAN_IF ?= en1
+# Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
+# the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
+PORTAINER_HOST ?= portainer.infra.famillelallier.net
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -60,54 +62,55 @@ check-env:
 		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
 	fi
 
-# '--mount-type virtiofs' only picks the driver; it does not mount anything.
-# The list of mounts is '--mount', and once colima.yaml holds 'mounts: null'
-# -- which is what 'colima start --mount none' and some resets leave behind --
-# that null wins over Colima's "$HOME is mounted by default" behaviour on every
-# subsequent start, host mount silently gone. Passing $HOME explicitly here
-# rewrites that key instead of relying on the default.
-vm-start: ## Start the Colima VM, restarting it if its config drifted (prompts for sudo)
-	@./scripts/check-vm.sh "$(CURDIR)" && state=0 || state=$$?; \
+docker-start: ## Start Docker Desktop and wait for its daemon
+	@./scripts/check-docker.sh "$(CURDIR)" && state=0 || state=$$?; \
 	case $$state in \
-	  0) echo "make vm-start: the VM already has the host mount and a LAN address -- nothing to do."; \
+	  0) echo "make docker-start: Docker Desktop is already running and correctly configured."; \
 	     exit 0 ;; \
-	  1) echo "  Mount the volume holding the VM disks, or recreate the symlink," >&2; \
-	     echo "  then retry. See 'Runtime: Colima' in CLAUDE.md." >&2; \
+	  5) echo; \
+	     echo "make docker-start: Docker Desktop is running; the warnings above are not fatal."; \
+	     exit 0 ;; \
+	  1) echo "  Mount that volume BEFORE launching Docker Desktop, then retry." >&2; \
 	     exit 1 ;; \
-	  2) ;; \
-	  *) echo; \
-	     echo "make vm-start: the running VM does not match this stack's requirements."; \
-	     echo "  'colima start' prints 'already running, ignoring' and applies none of"; \
-	     echo "  its flags to a live VM, so the VM has to be stopped first. Doing that"; \
-	     echo "  now -- this takes the stack down with it, and keeps the datadisk."; \
-	     echo; \
-	     colima stop ;; \
+	  3|4) echo "  Docker Desktop is running but not usable for this stack; fix the above." >&2; \
+	     exit 1 ;; \
 	esac; \
-	set -x; \
-	colima start --cpu 6 --memory 12 --disk 100 --vm-type vz --mount-type virtiofs \
-		--mount "$$HOME:w" \
-		--network-address --network-mode bridged --network-interface $(COLIMA_LAN_IF)
-	@echo
-	@colima list
-	@echo
-	@echo "The ADDRESS column above must be a LAN address (same subnet as this Mac)."
-	@echo "If it is 192.168.64.x, bridged silently fell back to vzNAT and the stack"
-	@echo "will not be reachable from other LAN devices. Set LAN_IP in .env to that"
-	@echo "address, then re-run 'make dns-provision'."
-
-vm-stop: ## Stop the Colima VM (takes the whole stack down with it)
-	colima stop
-
-check-vm:
-	@./scripts/check-vm.sh "$(CURDIR)" && exit 0 || state=$$?; \
-	if [ $$state -eq 4 ]; then \
-		echo "make check-vm: warning: starting anyway; only LAN clients are affected." >&2; \
-		exit 0; \
-	fi; \
-	echo "make check-vm: rebuild the VM's runtime config with 'make vm-start'." >&2; \
+	open -a Docker || { \
+	  echo "make docker-start: could not launch Docker.app -- is Docker Desktop installed?" >&2; \
+	  exit 1; \
+	}; \
+	printf 'make docker-start: waiting for the daemon '; \
+	for _ in $$(seq 1 90); do \
+	  if docker info >/dev/null 2>&1; then break; fi; \
+	  printf '.'; sleep 2; \
+	done; \
+	echo; \
+	docker info >/dev/null 2>&1 || { \
+	  echo "make docker-start: the daemon did not come up within 3 minutes." >&2; \
+	  exit 1; \
+	}; \
+	./scripts/check-docker.sh "$(CURDIR)" && exit 0 || state=$$?; \
+	if [ $$state -eq 5 ]; then exit 0; fi; \
 	exit 1
 
-up: check-env check-vm net ## Start the stack
+docker-stop: ## Quit Docker Desktop (takes the whole stack down with it)
+	osascript -e 'quit app "Docker"'
+
+check-docker:
+	@./scripts/check-docker.sh "$(CURDIR)" && exit 0 || state=$$?; \
+	if [ $$state -eq 5 ]; then \
+		echo "make check-docker: warning: starting anyway; see above." >&2; \
+		exit 0; \
+	fi; \
+	if [ $$state -eq 2 ]; then \
+		echo "make check-docker: start it with 'make docker-start'." >&2; \
+	fi; \
+	exit 1
+
+migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
+	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
+
+up: check-env check-docker net ## Start the stack
 	docker compose up -d
 
 down: ## Stop the stack (keeps volumes)
@@ -127,7 +130,7 @@ status: ## Show service status (alias: ps)
 pull: ## Pull latest images
 	docker compose pull
 
-config: check-env check-vm ## Validate docker-compose.yml + .env
+config: check-env check-docker ## Validate docker-compose.yml + .env
 	docker compose config
 
 shell: ## Open a shell in a service (s=<service>)
@@ -136,6 +139,27 @@ shell: ## Open a shell in a service (s=<service>)
 
 psql: ## Open a psql shell as the superuser
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
+
+portainer-up: check-env check-docker net ## Start Portainer alone (Docker UI)
+	docker compose up -d portainer
+	@echo
+	@echo "Portainer -> https://$(PORTAINER_HOST)"
+	@echo
+	@echo "It publishes no host port (single-ingress rule), so nginx has to be"
+	@echo "running to reach it: 'make ps' to check, 'make up' to bring the stack up."
+	@echo "On a first start, create the admin account within a few minutes --"
+	@echo "Portainer locks itself out otherwise, and 'make portainer-restart'"
+	@echo "reopens that window."
+
+portainer-down: ## Stop Portainer alone (keeps its volume)
+	docker compose stop portainer
+	docker compose rm -f portainer
+
+portainer-restart: ## Restart Portainer alone
+	docker compose restart portainer
+
+portainer-logs: ## Tail Portainer's logs
+	docker compose logs -f portainer
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
