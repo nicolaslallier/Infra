@@ -1,0 +1,92 @@
+{
+  "realm": "ea",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "ea-editor", "description": "May change the EA catalogue. Reading needs no role." }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ea-spa",
+      "name": "EA — SPA",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://ea.infra.famillelallier.net##http://localhost:5173##http://127.0.0.1:5173"
+      },
+      "redirectUris": [
+        "https://ea.infra.famillelallier.net/auth/callback",
+        "http://localhost:5173/auth/callback",
+        "http://127.0.0.1:5173/auth/callback"
+      ],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "ea-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.custom.audience": "ea-api", "id.token.claim": "false", "access.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "ea-mcp",
+      "name": "EA — agents MCP",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "redirectUris": ["http://localhost:33418/callback"],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "ea-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.custom.audience": "ea-api", "id.token.claim": "false", "access.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "ea-pipelines",
+      "name": "EA — pipeline worker",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "ea-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.custom.audience": "ea-api", "id.token.claim": "false", "access.token.claim": "true" }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-ea-pipelines",
+      "enabled": true,
+      "serviceAccountClientId": "ea-pipelines",
+      "realmRoles": ["ea-editor"]
+    }
+  ]
+}

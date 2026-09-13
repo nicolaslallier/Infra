@@ -179,6 +179,35 @@ port, not through this vhost — see the "Jarvis: Keycloak login gate"
 section in [CLAUDE.md](CLAUDE.md) for the full explanation and what to
 verify manually.
 
+### EA login
+
+Unlike Jarvis, `https://ea.infra.famillelallier.net` has no oauth2-proxy
+gate: the EA API and its `/mcp` verify the token themselves, so
+`nginx/conf.d/ea.conf` is unchanged. After `make up` with
+`keycloak/realm-import/ea-realm.json` in place:
+
+1. In the `ea` realm, **Users** → **Add user** for each human, then give
+   editors the realm role `ea-editor` on that user's **Role mapping** tab
+   (reading the catalogue needs no role).
+2. **Clients** → `ea-pipelines` → **Credentials**, copy the client secret
+   into EA's `pipelines/.env` as `PIPELINES_EA_CLIENT_SECRET`.
+3. **Do not add LAN origins to `ea-spa`.** A plain-http LAN origin such as
+   `http://192.168.x.y:5173` cannot log in whatever its redirect URIs say:
+   the SPA builds PKCE with `crypto.subtle`, which browsers only expose in a
+   secure context. Open the Vite dev server as `http://localhost:5173` —
+   from another machine through
+   `ssh -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 <host>` — or use the
+   https vhost; both are already among `ea-spa`'s exact redirect URIs (EA
+   `docs/adr/0032`).
+
+`ea-mcp`'s one redirect URI (`http://localhost:33418/callback`) follows
+EA's `.mcp.json` `callbackPort` for the Claude Code MCP OAuth flow — change
+one and the other stops working.
+
+`--import-realm` only seeds a realm that doesn't exist yet (see "Keycloak
+admin bootstrap" below); changing `ea-realm.json` later means repeating the
+edit in the live realm through the console.
+
 ### Keycloak admin bootstrap
 
 `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` in `.env` only take effect on
