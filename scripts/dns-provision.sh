@@ -2,8 +2,8 @@
 # Creates/updates the DNS zones and records this stack owns inside the
 # running Technitium `dns` container: a wildcard zone for
 # *.infra.famillelallier.net (covers every app automatically) and leaf
-# zones for pgadmin.famillelallier.net, keycloak.famillelallier.net, and
-# jarvis.famillelallier.net.
+# zones for pgadmin.famillelallier.net, keycloak.famillelallier.net,
+# jarvis.famillelallier.net, and chat.famillelallier.net.
 # Safe to re-run — zone creation is ignored if the zone already exists,
 # and records are added with overwrite=true.
 #
@@ -81,5 +81,8 @@ add_a_record "minio.famillelallier.net" "minio.famillelallier.net"
 
 create_zone "minio-console.famillelallier.net"
 add_a_record "minio-console.famillelallier.net" "minio-console.famillelallier.net"
+
+create_zone "chat.famillelallier.net"
+add_a_record "chat.famillelallier.net" "chat.famillelallier.net"
 
 echo "Done. Run 'make dns-check' to verify."

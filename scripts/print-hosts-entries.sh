@@ -13,6 +13,7 @@ MINIO_CONSOLE_HOST="minio-console.famillelallier.net"
 PGADMIN_HOST="pgadmin.famillelallier.net"
 KEYCLOAK_HOST="keycloak.famillelallier.net"
 JARVIS_HOST="jarvis.famillelallier.net"
+CHAT_HOST="chat.famillelallier.net"
 
 cat <<EOF
 Add these lines to /etc/hosts (they don't conflict with your existing
@@ -27,6 +28,7 @@ beacon.famillelallier.net / dev.famillelallier.net entries):
 127.0.0.1 $PGADMIN_HOST
 127.0.0.1 $KEYCLOAK_HOST
 127.0.0.1 $JARVIS_HOST
+127.0.0.1 $CHAT_HOST
 
 One way to append them:
 
@@ -40,5 +42,6 @@ One way to append them:
 127.0.0.1 $PGADMIN_HOST
 127.0.0.1 $KEYCLOAK_HOST
 127.0.0.1 $JARVIS_HOST
+127.0.0.1 $CHAT_HOST
 HOSTS
 EOF
