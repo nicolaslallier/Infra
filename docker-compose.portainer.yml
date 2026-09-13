@@ -12,12 +12,22 @@ services:
     restart: unless-stopped
     # Read-write on purpose: Portainer *is* a Docker control plane, so it
     # needs to start/stop/exec containers, not just read their state. That
-    # makes the UI equivalent to root on this host's Docker daemon -- it is
-    # reachable only through NGINX (no 'ports:' here, per the single-ingress
-    # rule) and behind Portainer's own admin account.
+    # makes the UI equivalent to root on this host's Docker daemon, gated
+    # only by Portainer's own admin account.
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer-data:/data
+    # Published directly, not through nginx: Portainer must stay reachable
+    # while the infra stack (nginx included) is down or mid-redeploy, which
+    # is exactly when you need it. Bound to LAN_IP, never 0.0.0.0 -- see
+    # the root-on-the-daemon note above. LAN_IP comes from the repo's .env.
+    #   9443  UI/API over Portainer's own self-signed TLS
+    #   9000  UI/API over plain HTTP -- credentials in cleartext, prefer 9443
+    #   8000  Edge agent tunnel
+    ports:
+      - "${LAN_IP:?Set LAN_IP in .env}:9443:9443"
+      - "${LAN_IP:?Set LAN_IP in .env}:9000:9000"
+      - "${LAN_IP:?Set LAN_IP in .env}:8000:8000"
     networks:
       - infra-net
 

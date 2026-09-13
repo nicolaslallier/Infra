@@ -151,15 +151,13 @@ psql: ## Open a psql shell as the superuser
 
 PORTAINER_COMPOSE := docker compose -f docker-compose.portainer.yml
 
-portainer-up: check-docker net ## Start Portainer (its own compose project)
+portainer-up: check-env check-docker net ## Start Portainer (its own compose project)
 	@docker volume create infra_portainer-data >/dev/null
 	$(PORTAINER_COMPOSE) up -d
 	@echo
-	@echo "Portainer -> https://$(PORTAINER_HOST)"
+	@. ./.env; echo "Portainer -> https://$$LAN_IP:9443 (direct, no nginx)"
+	@echo "           https://$(PORTAINER_HOST) (via nginx)"
 	@echo
-	@echo "It publishes no host port (single-ingress rule), so nginx has to be"
-	@echo "running to reach it in a browser; 'make up' itself talks to it"
-	@echo "directly over infra-net and does not need nginx."
 	@echo "On a first start, create the admin account within a few minutes --"
 	@echo "Portainer locks itself out otherwise, and 'make portainer-restart'"
 	@echo "reopens that window."
