@@ -533,7 +533,7 @@ because PKCE needs `crypto.subtle` and browsers only expose it in a secure
 context — so reach Vite as `http://localhost:5173` (from another machine,
 `ssh -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 <host>`) or through the
 https vhost, never by adding the LAN origin in the console (EA
-`docs/adr/0031`). `ea-mcp` lists exactly one redirect URI,
+`docs/adr/0032`). `ea-mcp` lists exactly one redirect URI,
 `http://localhost:33418/callback` — Claude Code (2.1.270) opens a loopback
 callback on the port its own `.mcp.json` pins as `callbackPort` for
 `clientId: ea-mcp`; the two numbers must always agree, so changing EA's
@@ -542,7 +542,7 @@ never the other way only.
 
 Unlike Jarvis, there is **no oauth2-proxy and no `auth_request`** here:
 the EA API and its `/mcp` transport verify the JWT themselves (EA
-`docs/adr/0031`), so `nginx/conf.d/ea.conf` needs no change and this realm
+`docs/adr/0032`), so `nginx/conf.d/ea.conf` needs no change and this realm
 adds no NGINX location. Keycloak is still reached the normal way, at
 `https://keycloak.famillelallier.net`.
 

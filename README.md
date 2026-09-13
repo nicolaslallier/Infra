@@ -198,7 +198,7 @@ gate: the EA API and its `/mcp` verify the token themselves, so
    from another machine through
    `ssh -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 <host>` — or use the
    https vhost; both are already among `ea-spa`'s exact redirect URIs (EA
-   `docs/adr/0031`).
+   `docs/adr/0032`).
 
 `ea-mcp`'s one redirect URI (`http://localhost:33418/callback`) follows
 EA's `.mcp.json` `callbackPort` for the Claude Code MCP OAuth flow — change
