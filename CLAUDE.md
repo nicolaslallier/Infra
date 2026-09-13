@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-RabbitMQ, Portainer, a Technitium DNS server, and an LGTM monitoring stack
+RabbitMQ, Neo4j, Portainer, a Technitium DNS server, and an LGTM monitoring stack
 (Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
 over a shared Docker network rather than being folded into this one.
@@ -75,6 +75,13 @@ never orphans another app that's still attached to it):
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
+- **`neo4j`** — `neo4j:<version>-community`, pinned by tag *and* digest
+  because a store-format upgrade must not ride along with a redeploy. The
+  EA repo's architecture graph (its `docs/adr/0030`). Publishes no host
+  port: Bolt goes through NGINX's stream passthrough at `127.0.0.1:7687`;
+  apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
+  exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
+  `neo4j-data` volume — and `make clean` deletes that volume like the rest.
 - **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
   UI, at `portainer.infra.famillelallier.net` and directly at
   `https://${LAN_IP}:9443`. The one backend that **publishes its own
@@ -117,8 +124,13 @@ oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
 (`grafana.infra.famillelallier.net`), MinIO
 (`minio.famillelallier.net` / `minio-console.famillelallier.net`),
 RabbitMQ management (`rabbitmq.infra.famillelallier.net`),
-and the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
-`jarvis.infra.famillelallier.net`) do. When registering the Postgres server
+the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
+`jarvis.infra.famillelallier.net`), and LibreChat (`chat.famillelallier.net`,
+admin panel at `chat-admin.infra.famillelallier.net`) do. LibreChat is a
+Portainer stack of its own (compose in `~/OpenCode/LibreChat`), not a service
+of this repo: its `api` and `admin-panel` join `infra-net` under the aliases
+`librechat` / `librechat-admin` (`nginx/conf.d/librechat.conf`), and nothing
+else of it publishes a port. When registering the Postgres server
 inside pgAdmin's own UI, the host is the Compose service name `postgres`
 (pgAdmin and `postgres` share `infra-net` directly), port `5432` — never a
 `*.famillelallier.net` hostname. A hostname like
@@ -365,6 +377,9 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 5672 → NGINX's `stream{}` block (`nginx/stream.d/rabbitmq.conf`),
   a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
   `127.0.0.1:5672` the same way.
+- Port 7687 → NGINX's `stream{}` block (`nginx/stream.d/neo4j.conf`),
+  a raw TCP passthrough proxy to `neo4j:7687` (Bolt), bound to
+  `127.0.0.1:7687` the same way.
 **`portainer` is the one deliberate exception.** It publishes 9443 (UI,
 TLS), 9000 (UI, plain HTTP) and 8000 (Edge-agent tunnel) itself, from
 `docker-compose.portainer.yml`, bound to `${LAN_IP}` — never `0.0.0.0`,
@@ -377,7 +392,7 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`minio`, `rabbitmq`, `neo4j`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
@@ -533,17 +548,21 @@ regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
 
-pgAdmin, Keycloak, Jarvis, MinIO API, and MinIO console are all deliberate
-exceptions to the `.infra.` subdomain convention: they're served at
+pgAdmin, Keycloak, Jarvis, LibreChat, MinIO API, and MinIO console are all
+deliberate exceptions to the `.infra.` subdomain convention: they're served at
 `pgadmin.famillelallier.net`, `keycloak.famillelallier.net`,
-`jarvis.famillelallier.net`, `minio.famillelallier.net`, and
+`jarvis.famillelallier.net`, `chat.famillelallier.net`,
+`minio.famillelallier.net`, and
 `minio-console.famillelallier.net` (no `.infra.`), so those exact hostnames
 are added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
 `gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
-Regenerating certs (`./scripts/gen-certs.sh --force`) always mints a new
-local CA too, so re-run the `sudo security add-trusted-cert` step it
-prints for every browser/keychain that had the old one trusted — the
-old CA's trust doesn't carry over.
+Regenerating certs (`./scripts/gen-certs.sh --force`) re-issues the leaf
+and **keeps the local CA** when `certs/infra-ca.key` and `infra-ca.crt`
+exist, so adding a SAN needs no re-trust on any device. To mint a new CA,
+delete `certs/infra-ca.*` first — then re-run the `sudo security
+add-trusted-cert` step it prints for every browser/keychain that had the
+old one trusted, since the old CA's trust doesn't carry over. (The mkcert
+path always signs with mkcert's own CA.)
 
 ### DNS (LAN resolver)
 
@@ -594,6 +613,8 @@ zones, **never** a `Primary` zone for `famillelallier.net` itself:
   Jarvis is reachable at both.
 - `minio.famillelallier.net` / `minio-console.famillelallier.net` — apex
   A records → `LAN_IP`, same exception pattern (API + browser console).
+- `chat.famillelallier.net` — apex A record → `LAN_IP`, same exception
+  pattern (LibreChat; its admin panel rides the `.infra.` wildcard).
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every

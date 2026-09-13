@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generates a local CA + leaf cert covering *.infra.famillelallier.net,
 # plus pgadmin.famillelallier.net, keycloak.famillelallier.net,
-# jarvis.famillelallier.net, minio.famillelallier.net, and
+# jarvis.famillelallier.net, chat.famillelallier.net, minio.famillelallier.net, and
 # minio-console.famillelallier.net as standalone extra SANs (deliberately
 # served outside the .infra. subdomain convention).
 #
@@ -18,6 +18,7 @@ EXTRA_SANS=(
   "pgadmin.famillelallier.net"
   "keycloak.famillelallier.net"
   "jarvis.famillelallier.net"
+  "chat.famillelallier.net"
   "minio.famillelallier.net"
   "minio-console.famillelallier.net"
 )
@@ -65,13 +66,24 @@ gen_oauth2proxy_bundle() {
     echo "gen-certs.sh: docker create returned no container id; $bundle not built" >&2
     return 1
   fi
-  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle" || {
+  # docker cp keeps the image file's read-only mode, so appending to the copy
+  # fails ("Permission denied") and used to leave a bundle without our CA.
+  # Stage it, make it writable, append, then replace the old bundle (itself
+  # read-only). The replacement is a new inode: restart oauth2-proxy, whose
+  # single-file bind mount only picks it up when the container starts.
+  docker cp "$cid:/etc/ssl/certs/ca-certificates.crt" "$bundle.tmp" || {
     echo "gen-certs.sh: 'docker cp' of the image CA bundle failed" >&2
     return 1
   }
   docker rm "$cid" >/dev/null
   cid=""
-  cat "$ca_crt" >> "$bundle"
+  chmod u+w "$bundle.tmp"
+  cat "$ca_crt" >> "$bundle.tmp"
+  mv -f "$bundle.tmp" "$bundle"
+  grep -qF "$(sed -n 2p "$ca_crt")" "$bundle" || {
+    echo "gen-certs.sh: $bundle does not contain $ca_crt" >&2
+    return 1
+  }
 }
 
 if command -v mkcert >/dev/null 2>&1; then
@@ -94,10 +106,16 @@ LEAF_CRT="$CERT_DIR/infra.crt"
 LEAF_CSR="$CERT_DIR/infra.csr"
 SAN_CONF="$CERT_DIR/.san.cnf"
 
-# 1. Local CA (10 year validity — this is dev-only tooling).
-openssl req -x509 -new -nodes -newkey rsa:4096 -sha256 -days 3650 \
-  -subj "/CN=Infra Local Dev CA" \
-  -keyout "$CA_KEY" -out "$CA_CRT"
+# 1. Local CA (10 year validity — this is dev-only tooling). Kept when it
+#    already exists: a new CA has to be trusted again on every device, while
+#    adding a SAN only needs a new leaf. Delete infra-ca.* to mint a new one.
+if [ -f "$CA_KEY" ] && [ -f "$CA_CRT" ]; then
+  echo "gen-certs.sh: reusing the existing CA $CA_CRT"
+else
+  openssl req -x509 -new -nodes -newkey rsa:4096 -sha256 -days 3650 \
+    -subj "/CN=Infra Local Dev CA" \
+    -keyout "$CA_KEY" -out "$CA_CRT"
+fi
 
 # 2. Leaf key + CSR with SANs for the wildcard domain, localhost, and
 #    each extra exception hostname.
