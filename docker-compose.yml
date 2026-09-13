@@ -432,25 +432,6 @@ services:
       retries: 5
       start_period: 40s
 
-  # --- Docker management UI (via NGINX; no host ports) ---
-
-  portainer:
-    # 'lts' is Portainer's own long-term-support channel tag -- same
-    # moving-tag tradeoff as minio/dns above, and the tag Portainer
-    # documents for anything that isn't a throwaway test.
-    image: portainer/portainer-ce:lts
-    restart: unless-stopped
-    # Read-write on purpose: Portainer *is* a Docker control plane, so it
-    # needs to start/stop/exec containers, not just read their state. That
-    # makes the UI equivalent to root on this host's Docker daemon -- it is
-    # reachable only through NGINX (no 'ports:' here, per the single-ingress
-    # rule) and behind Portainer's own admin account.
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer-data:/data
-    networks:
-      - infra-net
-
 networks:
   infra-net:
     external: true
@@ -466,4 +447,3 @@ volumes:
   alloy-data:
   minio-data:
   rabbitmq-data:
-  portainer-data:

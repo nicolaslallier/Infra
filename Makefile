@@ -149,26 +149,29 @@ shell: ## Open a shell in a service (s=<service>)
 psql: ## Open a psql shell as the superuser
 	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
 
-portainer-up: check-env check-docker net ## Start Portainer alone (Docker UI)
-	docker compose up -d portainer
+PORTAINER_COMPOSE := docker compose -f docker-compose.portainer.yml
+
+portainer-up: check-docker net ## Start Portainer (its own compose project)
+	@docker volume create infra_portainer-data >/dev/null
+	$(PORTAINER_COMPOSE) up -d
 	@echo
 	@echo "Portainer -> https://$(PORTAINER_HOST)"
 	@echo
 	@echo "It publishes no host port (single-ingress rule), so nginx has to be"
-	@echo "running to reach it: 'make ps' to check, 'make up' to bring the stack up."
+	@echo "running to reach it in a browser; 'make up' itself talks to it"
+	@echo "directly over infra-net and does not need nginx."
 	@echo "On a first start, create the admin account within a few minutes --"
 	@echo "Portainer locks itself out otherwise, and 'make portainer-restart'"
 	@echo "reopens that window."
 
-portainer-down: ## Stop Portainer alone (keeps its volume)
-	docker compose stop portainer
-	docker compose rm -f portainer
+portainer-down: ## Stop Portainer (keeps its volume)
+	$(PORTAINER_COMPOSE) down
 
-portainer-restart: ## Restart Portainer alone
-	docker compose restart portainer
+portainer-restart: ## Restart Portainer
+	$(PORTAINER_COMPOSE) restart
 
 portainer-logs: ## Tail Portainer's logs
-	docker compose logs -f portainer
+	$(PORTAINER_COMPOSE) logs -f
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
