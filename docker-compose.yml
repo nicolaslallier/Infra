@@ -451,7 +451,7 @@ services:
 
   neo4j:
     # The EA repo's architecture graph (github.com/nicolaslallier/EA,
-    # docs/adr/0027 there). Tag *and* digest: Neo4j's store format moves
+    # docs/adr/0030 there). Tag *and* digest: Neo4j's store format moves
     # between releases, so a redeploy must not upgrade it without a commit.
     # Same version as the instance the data was migrated from.
     image: neo4j:2026.07.1-community@sha256:956faa5d14b6beaa629b80c718bfd389ec12064f97e276ed9a58b0c53b25a323
