@@ -79,28 +79,38 @@ Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 
 ```bash
 make hosts        # prints /etc/hosts lines to add (not applied automatically)
-make portainer-up # start Portainer itself (its own compose project)
 ```
 
 `make up` deploys this stack through Portainer's API (see "Portainer" below
-and CLAUDE.md "Portainer-managed stack"), so before running it: create
-Portainer's admin account at `https://portainer.infra.famillelallier.net`
-within a few minutes of the container's first start (it locks the signup
-form after that window; `make portainer-restart` reopens it), then create
-an access token (My account → Access tokens) and set `PORTAINER_API_KEY`
-in `.env`. `make up` also refuses to run unless this checkout is on
-`main`, clean, and at `origin/main`, since Portainer deploys from GitHub
-rather than your working tree.
-
-Reaching that URL needs NGINX already listening, and NGINX is itself one
-of the services `make up` deploys — on a machine where this stack has
-never run before, nothing is serving that hostname yet. This repo doesn't
-currently document a way around that first-ever-boot gap; see "Portainer"
-below.
+and CLAUDE.md "Portainer-managed stack"), so Portainer needs to exist and
+hold an API key before `make up` can run. On a machine where this stack has
+never run before, bootstrap that with a one-time plain-compose bring-up —
+it's what gets NGINX (and so the Portainer UI) reachable in the first
+place:
 
 ```bash
-make up
+docker compose up -d   # one-time bootstrap only, so nginx/dns exist
+make portainer-up      # start Portainer itself (its own compose project)
 ```
+
+Within a few minutes of that first start, create the admin account at
+`https://portainer.infra.famillelallier.net` (it locks the signup form
+after that window; `make portainer-restart` reopens it), then create an
+access token (My account → Access tokens) and set `PORTAINER_API_KEY` in
+`.env`.
+
+Now stop the bootstrap containers — Portainer won't create a stack whose
+name matches a running compose project — and let Portainer deploy for
+real:
+
+```bash
+docker compose down   # no -v: keeps the volumes/data step 2 initialised
+make up               # Portainer creates stack `infra` from GitHub main
+```
+
+`make up` also refuses to run unless this checkout is on `main`, clean,
+and at `origin/main`, since Portainer deploys from GitHub rather than your
+working tree.
 
 The cert script prints a `sudo security add-trusted-cert ...` command to
 trust the local CA in macOS's keychain — run that yourself if you want
