@@ -197,6 +197,7 @@ services:
       - "443:443"
       - "127.0.0.1:5432:5432"
       - "127.0.0.1:5672:5672"
+      - "127.0.0.1:7687:7687"
     volumes:
       - ${INFRA_DIR:-.}/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ${INFRA_DIR:-.}/nginx/conf.d:/etc/nginx/conf.d:ro
@@ -448,6 +449,41 @@ services:
       retries: 5
       start_period: 40s
 
+  neo4j:
+    # The EA repo's architecture graph (github.com/nicolaslallier/EA,
+    # docs/adr/0027 there). Tag *and* digest: Neo4j's store format moves
+    # between releases, so a redeploy must not upgrade it without a commit.
+    # Same version as the instance the data was migrated from.
+    image: neo4j:2026.07.1-community@sha256:956faa5d14b6beaa629b80c718bfd389ec12064f97e276ed9a58b0c53b25a323
+    restart: unless-stopped
+    environment:
+      # Read once, on first boot against an empty volume -- changing it
+      # afterwards does not change the password (same caveat as pgAdmin).
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
+      # For the healthcheck only. Not NEO4J_-prefixed: the image turns every
+      # NEO4J_* variable into a neo4j.conf setting and refuses unknown ones.
+      HEALTHCHECK_PASSWORD: ${NEO4J_PASSWORD}
+      # Drivers re-use the advertised address; the only host path to Bolt is
+      # nginx's 127.0.0.1:7687 passthrough.
+      NEO4J_server_bolt_advertised__address: localhost:7687
+      # The image sizes itself on the whole VM otherwise, and this VM also
+      # holds Keycloak's JVM and the LGTM stack.
+      NEO4J_server_memory_pagecache_size: 256M
+      NEO4J_server_memory_heap_initial__size: 512M
+      NEO4J_server_memory_heap_max__size: 512M
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+    networks:
+      - infra-net
+    healthcheck:
+      # Password in the environment of this one command, not in its argv (ps).
+      test: ["CMD-SHELL", "NEO4J_USERNAME=neo4j NEO4J_PASSWORD=\"$${HEALTHCHECK_PASSWORD}\" cypher-shell 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
 networks:
   infra-net:
     external: true
@@ -463,3 +499,5 @@ volumes:
   alloy-data:
   minio-data:
   rabbitmq-data:
+  neo4j-data:
+  neo4j-logs:

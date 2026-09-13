@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-RabbitMQ, Portainer, a Technitium DNS server, and an LGTM monitoring stack
+RabbitMQ, Neo4j, Portainer, a Technitium DNS server, and an LGTM monitoring stack
 (Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
 over a shared Docker network rather than being folded into this one.
@@ -75,6 +75,13 @@ never orphans another app that's still attached to it):
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
+- **`neo4j`** — `neo4j:<version>-community`, pinned by tag *and* digest
+  because a store-format upgrade must not ride along with a redeploy. The
+  EA repo's architecture graph (its `docs/adr/0027`). Publishes no host
+  port: Bolt goes through NGINX's stream passthrough at `127.0.0.1:7687`;
+  apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
+  exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
+  `neo4j-data` volume — and `make clean` deletes that volume like the rest.
 - **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
   UI, at `portainer.infra.famillelallier.net` and directly at
   `https://${LAN_IP}:9443`. The one backend that **publishes its own
@@ -365,6 +372,9 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 5672 → NGINX's `stream{}` block (`nginx/stream.d/rabbitmq.conf`),
   a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
   `127.0.0.1:5672` the same way.
+- Port 7687 → NGINX's `stream{}` block (`nginx/stream.d/neo4j.conf`),
+  a raw TCP passthrough proxy to `neo4j:7687` (Bolt), bound to
+  `127.0.0.1:7687` the same way.
 **`portainer` is the one deliberate exception.** It publishes 9443 (UI,
 TLS), 9000 (UI, plain HTTP) and 8000 (Edge-agent tunnel) itself, from
 `docker-compose.portainer.yml`, bound to `${LAN_IP}` — never `0.0.0.0`,
@@ -377,7 +387,7 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`minio`, `rabbitmq`, `neo4j`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app

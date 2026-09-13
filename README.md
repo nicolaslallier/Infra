@@ -2,7 +2,7 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Portainer,
+PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, Portainer,
 Technitium DNS, and an LGTM monitoring stack (Grafana, Prometheus, Loki,
 Tempo, Alloy).
 Application repos stay independent: they don't run their own database or
@@ -10,8 +10,9 @@ proxy, they just join this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), 5432 (TCP
-passthrough) for Postgres, and 5672 (TCP passthrough) for RabbitMQ AMQP.
-Postgres, pgAdmin, Keycloak, MinIO, RabbitMQ, Portainer, Grafana, and
+passthrough) for Postgres, 5672 (TCP passthrough) for RabbitMQ AMQP, and
+7687 (TCP passthrough) for Neo4j Bolt.
+Postgres, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, Grafana, and
 the rest of the monitoring backends publish nothing themselves; they're
 reachable only on the shared `infra-net` Docker network or through NGINX.
 A separate `dns` container publishes its own ports too — it's a top-level
@@ -134,6 +135,8 @@ RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 Portainer: `https://portainer.infra.famillelallier.net` (admin account and
 access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
+Neo4j (the EA graph): Bolt at `bolt://127.0.0.1:7687` from the host, or
+`neo4j:7687` on `infra-net`; no browser is exposed
 
 ### Registering the Postgres server inside pgAdmin
 
@@ -368,11 +371,11 @@ Two things worth knowing:
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, neo4j, nginx, dns, LGTM + exporters
 docker-compose.portainer.yml  portainer (deploys the stack above)
-nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP TCP passthrough)
+nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP + Bolt TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
-nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
+nginx/stream.d/          Postgres + RabbitMQ + Neo4j TCP proxy blocks
 postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
