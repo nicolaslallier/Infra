@@ -60,12 +60,15 @@ api() { # <method> <path> [json-body]
 # Portainer deploys GitHub main while the mounted configs come from this
 # checkout: refuse to deploy whenever the two could differ.
 check_synced() {
-  local branch
-  branch="$(git rev-parse --abbrev-ref HEAD)"
+  local branch head remote
+  branch="$(git rev-parse --abbrev-ref HEAD)" || die "not a git checkout"
   [ "$branch" = main ] || die "this checkout is on '$branch'; Portainer deploys main"
   git diff --quiet HEAD || die "uncommitted changes here would not match what Portainer deploys"
-  git fetch -q origin main
-  [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] \
+  git fetch -q origin main \
+    || die "git fetch origin main failed -- cannot confirm this checkout matches what Portainer deploys"
+  head="$(git rev-parse HEAD)" || die "git rev-parse HEAD failed"
+  remote="$(git rev-parse origin/main)" || die "origin/main unknown -- git fetch origin main first"
+  [ "$head" = "$remote" ] \
     || die "this checkout is not at origin/main -- 'git pull --ff-only' (or push) first"
 }
 
