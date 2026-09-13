@@ -179,6 +179,26 @@ port, not through this vhost — see the "Jarvis: Keycloak login gate"
 section in [CLAUDE.md](CLAUDE.md) for the full explanation and what to
 verify manually.
 
+### EA login
+
+Unlike Jarvis, `https://ea.infra.famillelallier.net` has no oauth2-proxy
+gate: the EA API and its `/mcp` verify the token themselves, so
+`nginx/conf.d/ea.conf` is unchanged. After `make up` with
+`keycloak/realm-import/ea-realm.json` in place:
+
+1. In the `ea` realm, **Users** → **Add user** for each human, then give
+   editors the realm role `ea-editor` on that user's **Role mapping** tab
+   (reading the catalogue needs no role).
+2. **Clients** → `ea-pipelines` → **Credentials**, copy the client secret
+   into EA's `pipelines/.env` as `PIPELINES_EA_CLIENT_SECRET`.
+3. **Clients** → `ea-spa` → add each LAN origin that serves the Vite dev
+   server (`http://192.168.x.y:5173/*`) to **Valid redirect URIs** — the
+   same exact list EA's `EA_CORS_ORIGINS` needs.
+
+`--import-realm` only seeds a realm that doesn't exist yet (see "Keycloak
+admin bootstrap" below); changing `ea-realm.json` later means repeating the
+edit in the live realm through the console.
+
 ### Keycloak admin bootstrap
 
 `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` in `.env` only take effect on

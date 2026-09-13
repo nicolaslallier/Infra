@@ -502,6 +502,43 @@ anyone who can resolve its hostname. The gate is the standard
   deployed frontend was actually built with, and whether that backend
   port is reachable unauthenticated from outside the LAN.
 
+### EA: token verification, no gateway
+
+`keycloak/realm-import/ea-realm.json` seeds a dedicated realm (`ea`),
+separate from `jarvis`/`nurse`, for the EA application in the `EA` repo.
+It holds three clients — `ea-spa` (public, PKCE, the SPA's browser
+sessions), `ea-mcp` (public, PKCE, an agent talking to `/mcp` via the same
+authorization-code flow but with a loopback redirect — `http://localhost:*`
+— since there is no browser origin to restrict it to) and `ea-pipelines`
+(confidential, service account only — no human ever logs in as it) — plus
+one realm role, `ea-editor`, that gates writes
+(reading the catalogue needs no role). All three clients carry an
+`oidc-audience-mapper` stamping `ea-api` into the access token, because the
+EA API validates that audience rather than trusting whichever client
+requested the token.
+
+Unlike Jarvis, there is **no oauth2-proxy and no `auth_request`** here:
+the EA API and its `/mcp` transport verify the JWT themselves (EA
+`docs/adr/0031`), so `nginx/conf.d/ea.conf` needs no change and this realm
+adds no NGINX location. Keycloak is still reached the normal way, at
+`https://keycloak.famillelallier.net`.
+
+`ea-realm.json` carries a **`users` array**, deliberately, where
+`jarvis-realm.json` deliberately has none: `ea-pipelines`'s service
+account is not a human who logs in with a password, it is how the worker
+itself authenticates, so the only way to hand it the `ea-editor` role at
+import time is a `users` entry named `service-account-<clientId>` with
+`serviceAccountClientId` set and no `credentials` — Keycloak creates that
+user automatically for any client with `serviceAccountsEnabled: true`, and
+the import is just attaching a role to the user it will create anyway.
+Nothing sensitive lands in the file: no password, and the confidential
+client's secret is still Keycloak-generated on import, copied out of the
+console afterwards exactly like `jarvis`'s.
+
+`--import-realm` only seeds a realm that does not exist yet — editing this
+file after the first `make up` does not touch the live `ea` realm; repeat
+the change in the admin console too.
+
 ### PostgreSQL 18's data directory moved
 
 The official image (and `pgvector/pgvector:pg18`, which is based on it)
