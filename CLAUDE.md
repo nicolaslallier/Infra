@@ -35,7 +35,10 @@ make clean CONFIRM=1             # docker compose down -v (keeps infra-net and c
 
 `up`, `config`, `provision-app`, `dns-provision`, and `dns-check` run
 `check-env` first: `.env` must exist, and password-like values must not
-still be the `change-me` placeholders from `.env.example`. `up`, `config`,
+still be the `change-me` placeholders from `.env.example`, and `LAN_IP`
+must be an address this host actually owns (a stale one — e.g. the old
+Colima VM's — fails `dns`'s port bind and leaves every later service stuck
+in `Created`). `up`, `config`,
 and `portainer-up` also run `check-docker` (see "Runtime: Docker Desktop"
 below).
 

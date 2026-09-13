@@ -31,6 +31,9 @@ certs: ## Generate TLS certs (FORCE=1 to regenerate)
 hosts: ## Print /etc/hosts lines for this stack
 	@./scripts/print-hosts-entries.sh
 
+# LAN_IP must be an address this host owns: dns publishes its ports on it, and
+# a stale one (an old VM's, a changed DHCP lease) fails that bind and leaves
+# every later service stuck in "Created".
 check-env:
 	@if [ ! -f .env ]; then \
 		echo "make check-env: .env not found (run 'make init' first)" >&2; \
@@ -58,8 +61,14 @@ check-env:
 		echo "make check-env: replace placeholder values in .env for: $$bad" >&2; \
 		exit 1; \
 	fi; \
-	if [ "$${LAN_IP:-}" = "192.168.1.50" ]; then \
-		echo "make check-env: warning: LAN_IP is still the example value 192.168.1.50" >&2; \
+	addrs="$$( { ifconfig 2>/dev/null || ip -4 -o addr show 2>/dev/null; } \
+		| grep -oE 'inet (addr:)?[0-9.]+' | grep -oE '[0-9.]+$$')"; \
+	if [ -z "$${LAN_IP:-}" ]; then \
+		echo "make check-env: LAN_IP is not set in .env" >&2; \
+		exit 1; \
+	elif [ -n "$$addrs" ] && ! printf '%s\n' "$$addrs" | grep -qxF "$$LAN_IP"; then \
+		echo "make check-env: LAN_IP=$$LAN_IP is not an address on this host (have: $$(echo $$addrs))" >&2; \
+		exit 1; \
 	fi
 
 docker-start: ## Start Docker Desktop and wait for its daemon
