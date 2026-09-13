@@ -77,7 +77,7 @@ never orphans another app that's still attached to it):
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
 - **`neo4j`** — `neo4j:<version>-community`, pinned by tag *and* digest
   because a store-format upgrade must not ride along with a redeploy. The
-  EA repo's architecture graph (its `docs/adr/0027`). Publishes no host
+  EA repo's architecture graph (its `docs/adr/0030`). Publishes no host
   port: Bolt goes through NGINX's stream passthrough at `127.0.0.1:7687`;
   apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
   exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
