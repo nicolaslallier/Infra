@@ -94,6 +94,10 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
+      # Continues nginx's traceparent, so a login shows up as nginx ->
+      # keycloak spans in one trace; also prints traceId=... in its logs.
+      KC_TRACING_ENABLED: "true"
+      KC_TRACING_ENDPOINT: http://alloy:4317
     volumes:
       - ${INFRA_DIR:-.}/keycloak/realm-import:/opt/keycloak/data/import:ro
     networks:
@@ -190,7 +194,8 @@ services:
         condition: service_healthy
 
   nginx:
-    image: nginx:alpine
+    # -otel variant: same image plus ngx_otel_module (see nginx/nginx.conf).
+    image: nginx:alpine-otel
     restart: unless-stopped
     ports:
       - "80:80"

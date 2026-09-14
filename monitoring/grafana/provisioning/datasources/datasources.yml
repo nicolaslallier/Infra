@@ -24,7 +24,9 @@ datasources:
       derivedFields:
         - name: TraceID
           datasourceUid: tempo
-          matcherRegex: '"trace_id":"(\\w+)"'
+          # JSON app logs ("trace_id":"..."), nginx access log (trace_id=...),
+          # Keycloak console log (traceId=...).
+          matcherRegex: '(?:trace_id|traceId)"?[:=]"?(\w+)'
           url: "$${__value.raw}"
           urlDisplayLabel: View Trace
 
@@ -39,8 +41,10 @@ datasources:
         datasourceUid: loki
         spanStartTimeShift: "-1h"
         spanEndTimeShift: "1h"
-        filterByTraceID: true
-        filterBySpanID: false
+        # Every container's log lines mentioning this trace — nginx, Keycloak
+        # and any app — not just the span's own service.
+        customQuery: true
+        query: '{container=~".+"} |= "$${__trace.traceId}"'
       tracesToMetrics:
         datasourceUid: prometheus
       serviceMap:

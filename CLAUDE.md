@@ -101,10 +101,17 @@ never orphans another app that's still attached to it):
   `portainer`, volume `infra_portainer-data`) because it deploys the
   `infra` stack and a redeploy must never stop it. `make portainer-up` /
   `-down` / `-restart` / `-logs` drive it.
-- **`nginx`** — `nginx:alpine`. Fronts every backend application service —
+- **`nginx`** — `nginx:alpine-otel`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
-  host).
+  host). The `-otel` variant is load-bearing: `nginx.conf` loads
+  `ngx_otel_module` and starts a trace for every request (span exported to
+  `alloy:4317`, W3C `traceparent` forwarded upstream, id returned as the
+  `X-Trace-Id` response header and logged as `trace_id=`). Plain
+  `nginx:alpine` fails on `load_module`. Keycloak continues that trace
+  (`KC_TRACING_ENABLED`), so one id shows nginx → keycloak → its SQL
+  queries in Tempo. A vhost that sets its own `add_header` loses the
+  inherited `X-Trace-Id` and must repeat it.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of

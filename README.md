@@ -296,8 +296,14 @@ What you get:
 - **Logs** — Alloy reads every container's stdout/stderr via the Docker
   socket (this stack and sibling Compose projects on the same host) and
   ships them to Loki
-- **Traces** — Alloy accepts OTLP on `alloy:4317` (gRPC) / `alloy:4318`
-  (HTTP); sibling apps on `infra-net` should export there
+- **Traces** — NGINX starts a trace for every request and returns its id
+  in the `X-Trace-Id` response header; Keycloak continues it. To follow one
+  request: `curl -skI https://<host>/... | grep -i x-trace-id`, then
+  Grafana → Explore → Tempo → paste the id (the span's "Logs for this
+  span" shows every container's log lines carrying it). Alloy accepts OTLP
+  on `alloy:4317` (gRPC) / `alloy:4318` (HTTP); sibling apps on `infra-net`
+  should export there and honour the incoming `traceparent` header to join
+  the same trace
 
 Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
 **Application logs**, and **Jarvis** (`uid: jarvis-overview`) covering
