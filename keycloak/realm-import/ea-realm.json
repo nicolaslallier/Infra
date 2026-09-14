@@ -62,6 +62,29 @@
       ]
     },
     {
+      "clientId": "ea-librechat",
+      "name": "EA — LibreChat (MCP)",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": { "pkce.code.challenge.method": "S256" },
+      "redirectUris": ["https://chat.famillelallier.net/api/mcp/ea/oauth/callback"],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "ea-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.custom.audience": "ea-api", "id.token.claim": "false", "access.token.claim": "true" }
+        }
+      ]
+    },
+    {
       "clientId": "ea-pipelines",
       "name": "EA — pipeline worker",
       "protocol": "openid-connect",
