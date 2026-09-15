@@ -136,6 +136,8 @@ Grafana: `https://grafana.infra.famillelallier.net`
 MinIO console: `https://minio-console.famillelallier.net` (API at
 `https://minio.famillelallier.net`; apps on `infra-net` can also use
 `http://minio:9000`)
+Airflow: `https://airflow.infra.famillelallier.net` (admin / `AIRFLOW_ADMIN_PASSWORD`;
+DAGs go in `airflow/dags/`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
 Portainer: `https://portainer.infra.famillelallier.net` (admin account and

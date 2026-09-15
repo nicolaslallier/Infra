@@ -10,6 +10,37 @@
 # (relative-path volumes are Business Edition only). make up passes
 # INFRA_DIR=<this checkout>; plain CLI use falls back to ./.
 
+# Shared by every airflow-* service. LocalExecutor: tasks run as
+# subprocesses of airflow-scheduler, so there is no Celery broker or worker.
+x-airflow-common: &airflow-common
+  image: apache/airflow:3.3.1
+  restart: unless-stopped
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
+    # Database/role `airflow`, provisioned like any other app (APP_DATABASES).
+    # The password sits inside a URL, so keep AIRFLOW_DB_PASSWORD URL-safe.
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@postgres:5432/airflow
+    # Encrypts stored connections/variables: empty stores them in plaintext,
+    # a changed key makes them unreadable -- hence the guard.
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env (openssl rand -base64 32 | tr -- '+/' '-_')}
+    # Signs the tokens tasks use against the execution API. Every component
+    # must share it; unset, each generates its own and every task fails auth.
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET:?Set AIRFLOW_JWT_SECRET in .env (openssl rand -hex 32)}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__API__BASE_URL: https://airflow.infra.famillelallier.net
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+  volumes:
+    - ${INFRA_DIR:-.}/airflow/dags:/opt/airflow/dags:ro
+    # Shared so the api-server reads the logs the scheduler's tasks write.
+    - airflow-logs:/opt/airflow/logs
+  networks:
+    - infra-net
+  depends_on:
+    postgres:
+      condition: service_healthy
+
 services:
   postgres:
     # pgvector/pgvector:pg18 is the official Postgres 18 image plus the
@@ -577,6 +608,47 @@ services:
     networks:
       - infra-net
 
+  # --- Airflow (UI + REST API via NGINX; no host ports) ---
+
+  airflow-init:
+    <<: *airflow-common
+    # One-shot on every deploy: the image entrypoint migrates the schema and
+    # creates the admin user (both no-ops when already done), then exits.
+    command: version
+    restart: "no"
+    environment:
+      <<: *airflow-env
+      _AIRFLOW_DB_MIGRATE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_ADMIN_USER:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+
+  airflow-apiserver:
+    <<: *airflow-common
+    # Trust nginx's X-Forwarded-Proto/For. "*" is safe only because nothing
+    # but infra-net can reach this container (no ports:).
+    command: ["api-server", "--proxy-headers"]
+    environment:
+      <<: *airflow-env
+      FORWARDED_ALLOW_IPS: "*"
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+
 networks:
   infra-net:
     external: true
@@ -595,3 +667,4 @@ volumes:
   neo4j-data:
   neo4j-logs:
   obsidian-config:
+  airflow-logs:

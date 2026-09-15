@@ -79,7 +79,7 @@ startup caveats that the update script deliberately does NOT handle.
   `postgres:5432`. AMQP is the same pattern at `127.0.0.1:5672` →
   `rabbitmq:5672`, and Bolt at `127.0.0.1:7687` → `neo4j:7687`. `make psql` opens a superuser shell inside the container.
   Do not add a `ports:` entry to `postgres`/`pgadmin`/`keycloak`/`grafana`
-  /`minio`/`rabbitmq`/`neo4j`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  /`minio`/`rabbitmq`/`neo4j`/`airflow-*`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
 
 - **DNS zones** are provisioned via the Technitium API, not env vars:
   `make dns-provision` (idempotent), then `make dns-check` to verify

@@ -6,7 +6,7 @@ SHELL := bash
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
-	migrate-volumes keycloak-seed-users obsidian-minio \
+	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
 	portainer-up portainer-down portainer-restart portainer-logs
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
@@ -181,6 +181,9 @@ keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 
 obsidian-minio: check-env ## Create/update the MinIO bucket + user Obsidian syncs into
 	@./scripts/provision-obsidian-minio.sh
+
+ea-minio: check-env ## Create/update the MinIO bucket + user the EA API stores files in
+	@./scripts/provision-ea-minio.sh
 
 # Deleting the Portainer stack only removes its containers; 'down -v' then
 # drops the volumes docker-compose.yml declares -- infra_portainer-data is
