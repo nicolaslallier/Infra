@@ -32,7 +32,23 @@ env_json() { # <env-file> <infra-dir>
     + [{name: "INFRA_DIR", value: $dir}]' <"$1"
 }
 
+# A checkout path as Docker Desktop's daemon sees it. WSL's /mnt/c exists
+# only inside the distro; the daemon (and so Portainer's compose) sees that
+# drive at /run/desktop/mnt/host/c. Handed /mnt/c/..., it auto-creates an
+# empty directory there: file mounts fail with "not a directory" and
+# directory mounts start silently empty.
+daemon_dir() { # <path>
+  case "$1" in
+    /mnt/[a-z]/*) printf '/run/desktop/mnt/host/%s' "${1#/mnt/}" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 selftest() {
+  [ "$(daemon_dir /mnt/c/Users/nicol/OpenCode/Infra)" = /run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra ] \
+    || die "selftest: daemon_dir did not translate a WSL path"
+  [ "$(daemon_dir /Users/me/Infra)" = /Users/me/Infra ] \
+    || die "selftest: daemon_dir changed a non-WSL path"
   local tmp got want
   tmp="$(mktemp -d)"
   printf '%s\n' '# comment' '' 'A=1' 'URL=postgres://u:p@h/db?x=y' 'EMPTY=' \
@@ -130,7 +146,7 @@ case "$cmd" in
     check_synced
     # PORTAINER_INFRA_DIR: this checkout's path as the daemon sees it, when
     # that daemon is remote (set by the Makefile); $PWD otherwise.
-    env="$(env_json .env "${PORTAINER_INFRA_DIR:-$PWD}")"
+    env="$(env_json .env "$(daemon_dir "${PORTAINER_INFRA_DIR:-$PWD}")")"
     if [ -z "$sid" ]; then
       [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make up' first"
       body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --argjson env "$env" \

@@ -310,7 +310,12 @@ Things that look odd and are load-bearing:
   arrive empty. Relative-path volumes are Business Edition only. The script
   passes `INFRA_DIR=<the checkout make ran from>`, so **the compose comes
   from GitHub and the mounted files from that checkout**. `certs/` and
-  `.env` are gitignored and could not come from Git anyway.
+  `.env` are gitignored and could not come from Git anyway. That path must
+  be the one the *daemon* sees: from the Mac the Makefile sets
+  `PORTAINER_INFRA_DIR`, and from WSL `daemon_dir` rewrites `/mnt/c/...` to
+  `/run/desktop/mnt/host/c/...`. A raw `/mnt/c` path gets auto-created empty
+  in Docker Desktop's VM and `nginx` dies with `mounting ".../nginx.conf"
+  ... not a directory`.
 - **The drift guard.** Because of that split, `make up` / `pull` refuse
   unless the checkout is on `main`, clean, and at `origin/main`. Merge,
   `git pull --ff-only`, then `make up`. It is also why polling stays off:
