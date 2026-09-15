@@ -16,35 +16,40 @@ JARVIS_HOST="jarvis.famillelallier.net"
 CHAT_HOST="chat.famillelallier.net"
 EA_HOST="ea.infra.famillelallier.net"
 
+# The stack's host (LAN_IP from .env), not this machine: the stack runs on
+# the Windows laptop, and loopback only reaches it when run from there.
+IP="$(sed -n 's/^LAN_IP=//p' "$(dirname "$0")/../.env" 2>/dev/null | tail -1)"
+IP="${IP:-127.0.0.1}"
+
 cat <<EOF
 Add these lines to /etc/hosts (they don't conflict with your existing
 beacon.famillelallier.net / dev.famillelallier.net entries):
 
-127.0.0.1 $DOMAIN
-127.0.0.1 $GRAFANA_HOST
-127.0.0.1 $RABBITMQ_HOST
-127.0.0.1 $PORTAINER_HOST
-127.0.0.1 $MINIO_HOST
-127.0.0.1 $MINIO_CONSOLE_HOST
-127.0.0.1 $PGADMIN_HOST
-127.0.0.1 $KEYCLOAK_HOST
-127.0.0.1 $JARVIS_HOST
-127.0.0.1 $CHAT_HOST
-127.0.0.1 $EA_HOST
+$IP $DOMAIN
+$IP $GRAFANA_HOST
+$IP $RABBITMQ_HOST
+$IP $PORTAINER_HOST
+$IP $MINIO_HOST
+$IP $MINIO_CONSOLE_HOST
+$IP $PGADMIN_HOST
+$IP $KEYCLOAK_HOST
+$IP $JARVIS_HOST
+$IP $CHAT_HOST
+$IP $EA_HOST
 
 One way to append them:
 
   sudo tee -a /etc/hosts <<'HOSTS'
-127.0.0.1 $DOMAIN
-127.0.0.1 $GRAFANA_HOST
-127.0.0.1 $RABBITMQ_HOST
-127.0.0.1 $PORTAINER_HOST
-127.0.0.1 $MINIO_HOST
-127.0.0.1 $MINIO_CONSOLE_HOST
-127.0.0.1 $PGADMIN_HOST
-127.0.0.1 $KEYCLOAK_HOST
-127.0.0.1 $JARVIS_HOST
-127.0.0.1 $CHAT_HOST
-127.0.0.1 $EA_HOST
+$IP $DOMAIN
+$IP $GRAFANA_HOST
+$IP $RABBITMQ_HOST
+$IP $PORTAINER_HOST
+$IP $MINIO_HOST
+$IP $MINIO_CONSOLE_HOST
+$IP $PGADMIN_HOST
+$IP $KEYCLOAK_HOST
+$IP $JARVIS_HOST
+$IP $CHAT_HOST
+$IP $EA_HOST
 HOSTS
 EOF

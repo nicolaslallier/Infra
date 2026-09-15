@@ -13,6 +13,19 @@ SHELL := bash
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
 PORTAINER_HOST ?= portainer.infra.famillelallier.net
 
+# The stack runs on Docker Desktop on the Windows laptop (laptop-dopbpc0j).
+# From the Mac, every docker/compose call -- and so the Portainer API calls,
+# which run in a curl container -- goes there over SSH (key auth required).
+# 'make DOCKER_HOST=' targets the local daemon instead.
+INFRA_HOST ?= 192.168.2.10
+INFRA_SSH_USER ?= nicol
+ifeq ($(shell uname -s),Darwin)
+export DOCKER_HOST ?= ssh://$(INFRA_SSH_USER)@$(INFRA_HOST)
+# This checkout (C:\Users\nicol\OpenCode\Infra, SMB-mounted on the Mac) as
+# the laptop's Docker Desktop VM sees it: Portainer bind-mounts from here.
+export PORTAINER_INFRA_DIR ?= /run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra
+endif
+
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -62,16 +75,27 @@ check-env:
 		exit 1; \
 	fi; \
 	addrs="$$( { ifconfig 2>/dev/null || ip -4 -o addr show 2>/dev/null; } \
-		| grep -oE 'inet (addr:)?[0-9.]+' | grep -oE '[0-9.]+$$')"; \
+		| grep -oE 'inet (addr:)?[0-9.]+' | grep -oE '[0-9.]+$$' \
+		|| ipconfig 2>/dev/null | grep -i 'IPv4' | grep -oE '([0-9]+\.){3}[0-9]+' \
+		|| true)"; \
 	if [ -z "$${LAN_IP:-}" ]; then \
 		echo "make check-env: LAN_IP is not set in .env" >&2; \
 		exit 1; \
+	elif [ -n "$${DOCKER_HOST:-}" ]; then \
+		if [ "$$LAN_IP" != "$(INFRA_HOST)" ]; then \
+			echo "make check-env: LAN_IP=$$LAN_IP but DOCKER_HOST targets $(INFRA_HOST)" >&2; \
+			exit 1; \
+		fi; \
 	elif [ -n "$$addrs" ] && ! printf '%s\n' "$$addrs" | grep -qxF "$$LAN_IP"; then \
 		echo "make check-env: LAN_IP=$$LAN_IP is not an address on this host (have: $$(echo $$addrs))" >&2; \
 		exit 1; \
 	fi
 
 docker-start: ## Start Docker Desktop and wait for its daemon
+	@if [ -n "$${DOCKER_HOST:-}" ]; then \
+		echo "make docker-start: the daemon is remote ($$DOCKER_HOST); start Docker Desktop on that host." >&2; \
+		exit 1; \
+	fi
 	@./scripts/check-docker.sh "$(CURDIR)" && state=0 || state=$$?; \
 	case $$state in \
 	  0) echo "make docker-start: Docker Desktop is already running and correctly configured."; \
@@ -103,6 +127,10 @@ docker-start: ## Start Docker Desktop and wait for its daemon
 	exit 1
 
 docker-stop: ## Quit Docker Desktop (takes the whole stack down with it)
+	@if [ -n "$${DOCKER_HOST:-}" ]; then \
+		echo "make docker-stop: the daemon is remote ($$DOCKER_HOST); quit Docker Desktop on that host." >&2; \
+		exit 1; \
+	fi
 	osascript -e 'quit app "Docker"'
 
 check-docker:
@@ -111,7 +139,7 @@ check-docker:
 		echo "make check-docker: warning: starting anyway; see above." >&2; \
 		exit 0; \
 	fi; \
-	if [ $$state -eq 2 ]; then \
+	if [ $$state -eq 2 ] && [ -z "$${DOCKER_HOST:-}" ]; then \
 		echo "make check-docker: start it with 'make docker-start'." >&2; \
 	fi; \
 	exit 1

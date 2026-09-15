@@ -3,3 +3,6 @@
 certs/*
 !certs/.gitkeep
 .DS_Store
+# Scratch d'agents : contient des copies completes de .env (mots de passe).
+Claude outputs/
+*.env

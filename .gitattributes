@@ -1,0 +1,21 @@
+# Force LF in the working tree, on every platform.
+#
+# postgres/initdb/*.sh, scripts/*.sh and the nginx configs are bind-mounted
+# straight into Linux containers. Checked out with CRLF (Git for Windows'
+# core.autocrlf=true default), /bin/sh dies on the shebang and the initdb
+# scripts never run -- which shows up much later as "password authentication
+# failed" for every per-app role, because none of them were ever created.
+* text=auto eol=lf
+
+# Certificates and keys: byte-exact, never normalized.
+*.crt -text
+*.key -text
+*.pem -text
+
+# Binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary

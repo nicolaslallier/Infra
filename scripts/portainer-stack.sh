@@ -50,7 +50,13 @@ selftest() {
 # inside the container), never as a command-line argument, so it doesn't
 # show up in that container's process list.
 api() { # <method> <path> [json-body]
-  printf '%s' "${3:-}" | docker run --rm -i --network infra-net \
+  # MSYS_NO_PATHCONV/MSYS2_ARG_CONV_EXCL: under Git for Windows, the MSYS
+  # runtime rewrites arguments that look like POSIX paths before handing
+  # them to the native docker.exe, so "/endpoints" arrives as
+  # "C:/Program Files/Git/endpoints" and curl rejects the URL. No-ops on
+  # macOS and Linux.
+  printf '%s' "${3:-}" | MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+    docker run --rm -i --network infra-net \
     -e PORTAINER_API_KEY --entrypoint sh "$CURL_IMAGE" -c '
       printf "header = \"X-API-Key: %s\"\n" "$PORTAINER_API_KEY" >/tmp/curl.cfg
       out="$(curl -sSk -K /tmp/curl.cfg --fail-with-body -X "$1" \
@@ -118,7 +124,9 @@ sid=""
 case "$cmd" in
   up|pull)
     check_synced
-    env="$(env_json .env "$PWD")"
+    # PORTAINER_INFRA_DIR: this checkout's path as the daemon sees it, when
+    # that daemon is remote (set by the Makefile); $PWD otherwise.
+    env="$(env_json .env "${PORTAINER_INFRA_DIR:-$PWD}")"
     if [ -z "$sid" ]; then
       [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make up' first"
       body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --argjson env "$env" \
