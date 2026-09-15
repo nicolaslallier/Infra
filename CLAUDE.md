@@ -132,7 +132,9 @@ never orphans another app that's still attached to it):
   session is not a Jarvis session (different realm, different cookie, no
   SSO). `ea-obsidian` enforces PKCE like every other client in that realm,
   hence `OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256`. oauth2-proxy reads the
-  `email` claim, so an `ea` user without an email address cannot log in.
+  `email` claim, so an `ea` user without an email address cannot log in,
+  and one whose **Email verified** is off gets a bare 500 on
+  `/oauth2/callback` (logged as `email in id_token (...) isn't verified`).
   Vault data is synced into MinIO (bucket `obsidian`, versioned) by the
   in-app **Remotely Save** plugin against `http://minio:9000`, using a
   MinIO user `obsidian` scoped to that bucket
@@ -663,7 +665,11 @@ The realm does have a fourth client that *is* an oauth2-proxy gate,
 `ea-obsidian` — but it fronts Obsidian, not EA (see the `obsidian` service
 above). It is the one client here with no `ea-api` audience mapper, because
 nothing behind that gate calls the EA API; the token is only ever proof
-that the person is an `ea` realm user. Its single redirect URI is
+that the person is an `ea` realm user. It carries its own
+`ea-obsidian-audience` mapper instead, as `jarvis` does: oauth2-proxy's
+keycloak-oidc provider rejects a token whose `aud` lacks its client id,
+and without the mapper Keycloak stamps only `account` there (a bare 500
+on `/oauth2/callback`, logged as `audience ... [account] does not match`). Its single redirect URI is
 `https://obsidian.infra.famillelallier.net/oauth2/callback` — the same
 exact-callback rule as every other client in this file, no trailing `*`.
 

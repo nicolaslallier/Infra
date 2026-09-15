@@ -99,7 +99,16 @@
         "post.logout.redirect.uris": "https://obsidian.infra.famillelallier.net"
       },
       "redirectUris": ["https://obsidian.infra.famillelallier.net/oauth2/callback"],
-      "webOrigins": []
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "ea-obsidian-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.client.audience": "ea-obsidian", "id.token.claim": "true", "access.token.claim": "true" }
+        }
+      ]
     },
     {
       "clientId": "ea-pipelines",
