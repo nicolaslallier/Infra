@@ -138,7 +138,8 @@ Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 Neo4j (the EA graph): Bolt at `bolt://127.0.0.1:7687` from the host, or
 `neo4j:7687` on `infra-net`; no browser is exposed
 Obsidian (desktop app in the browser): `https://obsidian.infra.famillelallier.net`
-(same Keycloak login as Jarvis; vaults live in the `obsidian-config` volume)
+(Keycloak login against the `ea` realm; vaults live in the `obsidian-config`
+volume)
 
 ### Registering the Postgres server inside pgAdmin
 
@@ -158,10 +159,9 @@ machine via `psql` — it's a different path than pgAdmin uses.)
 
 ### Jarvis login (Keycloak + oauth2-proxy)
 
-`https://jarvis.famillelallier.net` requires a Keycloak login, and so does
-`https://obsidian.infra.famillelallier.net`, which reuses the same
-oauth2-proxy and account (every other app listed above is unauthenticated
-at the NGINX layer). After `make up`:
+`https://jarvis.famillelallier.net` requires a Keycloak login (see
+"Obsidian login" below for the other gated vhost; every other app listed
+above is unauthenticated at the NGINX layer). After `make up`:
 
 1. In the Keycloak admin console, open the `jarvis` realm → **Clients** →
    `jarvis` → **Credentials** tab, copy the client secret into
@@ -181,6 +181,38 @@ API/WebSocket are reached by the browser directly at their own published
 port, not through this vhost — see the "Jarvis: Keycloak login gate"
 section in [CLAUDE.md](CLAUDE.md) for the full explanation and what to
 verify manually.
+
+### Obsidian login (Keycloak + oauth2-proxy, realm `ea`)
+
+`https://obsidian.infra.famillelallier.net` is gated too, but by the **`ea`
+realm**, not `jarvis`: anyone who can log in to EA can open Obsidian. An
+oauth2-proxy process talks to exactly one issuer, so this is a second
+container — `oauth2-proxy-ea` — with its own client, `ea-obsidian`, seeded
+by `keycloak/realm-import/ea-realm.json`. It is a separate session from a
+Jarvis login: different realm, different cookie, no SSO between the two.
+
+After `make up`:
+
+1. Set `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` in `.env` **before first boot**
+   (`openssl rand -base64 32`) — oauth2-proxy needs it at startup.
+2. In the Keycloak admin console, `ea` realm → **Clients** → `ea-obsidian`
+   → **Credentials**, copy the client secret into
+   `EA_OBSIDIAN_OAUTH_CLIENT_SECRET` in `.env`, then
+   `docker compose up -d oauth2-proxy-ea`.
+3. Give each `ea` realm user who should reach Obsidian an **email address**
+   — oauth2-proxy reads the `email` claim and rejects a login without one.
+   No realm role is required; to narrow access to EA editors, add
+   `OAUTH2_PROXY_ALLOWED_ROLES: ea-editor` to the service.
+
+`--import-realm` only seeds a realm that does not exist yet, so on an
+already-running Keycloak the `ea-obsidian` client has to be created by hand
+in the console: confidential client, standard flow only, PKCE method `S256`,
+one exact redirect URI
+`https://obsidian.infra.famillelallier.net/oauth2/callback`.
+
+The desktop inside that container has no login of its own, which is the
+whole reason for the gate — never give the `obsidian` service a `ports:`
+entry.
 
 ### Obsidian vaults in MinIO
 

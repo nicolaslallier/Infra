@@ -116,11 +116,25 @@ never orphans another app that's still attached to it):
   app streamed to a browser at `obsidian.infra.famillelallier.net`
   (port `3000`, one long-lived WebSocket; vaults in the `obsidian-config`
   volume). Publishes no host port. It has no auth of its own and is a whole
-  desktop session, so `nginx/conf.d/obsidian.conf` gates it with the
-  **existing** Jarvis `oauth2-proxy` — no second proxy, no Keycloak change:
-  the fixed `REDIRECT_URL` completes login on the Jarvis host, the cookie is
-  scoped to `.famillelallier.net`, and `rd` (whitelisted) returns the
-  browser to Obsidian. Consequence: any `jarvis` realm user gets Obsidian.
+  desktop session, so `nginx/conf.d/obsidian.conf` gates it with an
+  `oauth2-proxy`/`auth_request` recipe — but against the **`ea`** realm,
+  via a **second** proxy container, `oauth2-proxy-ea`, and its own
+  confidential client `ea-obsidian`. The second container is not
+  duplication to be tidied away: an oauth2-proxy process is bound to one
+  issuer, so "who may open Obsidian" (the `ea` realm) and "who may open
+  Jarvis" (the `jarvis` realm) cannot share one. Everything happens on the
+  Obsidian hostname — `REDIRECT_URL` is
+  `https://obsidian.infra.famillelallier.net/oauth2/callback` — so unlike
+  the Jarvis gate it needs no `COOKIE_DOMAINS` and no
+  `WHITELIST_DOMAINS`, and its cookie is host-scoped. It still carries a
+  distinct `OAUTH2_PROXY_COOKIE_NAME` (`_oauth2_proxy_ea`), because the
+  Jarvis proxy's `_oauth2_proxy` cookie *is* scoped to
+  `.famillelallier.net` and would otherwise be clobbered on every Obsidian
+  login. Consequence: any `ea` realm user gets Obsidian, and an Obsidian
+  session is not a Jarvis session (different realm, different cookie, no
+  SSO). `ea-obsidian` enforces PKCE like every other client in that realm,
+  hence `OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256`. oauth2-proxy reads the
+  `email` claim, so an `ea` user without an email address cannot log in.
   Vault data is synced into MinIO (bucket `obsidian`, versioned) by the
   in-app **Remotely Save** plugin against `http://minio:9000`, using a
   MinIO user `obsidian` scoped to that bucket
@@ -456,8 +470,10 @@ default is 10 minutes, which silently drops idle Postgres connections
 
 ### Jarvis: Keycloak login gate (oauth2-proxy)
 
-`jarvis.famillelallier.net` (and its `.infra.` alias) is the only
-application vhost in this repo that currently requires a login — every
+`jarvis.famillelallier.net` (and its `.infra.` alias) is one of the two
+application vhosts in this repo that require a login — the other is
+Obsidian, which runs the same recipe against a different realm through its
+own `oauth2-proxy-ea` container (see the `obsidian` service above). Every
 other backend app listed in "Single-ingress rule" above is reachable by
 anyone who can resolve its hostname. The gate is the standard
 `oauth2-proxy` + NGINX `auth_request` recipe:
@@ -572,11 +588,19 @@ callback on the port its own `.mcp.json` pins as `callbackPort` for
 `.mcp.json` means changing this realm file (and the live realm) to match,
 never the other way only.
 
-Unlike Jarvis, there is **no oauth2-proxy and no `auth_request`** here:
-the EA API and its `/mcp` transport verify the JWT themselves (EA
-`docs/adr/0032`), so `nginx/conf.d/ea.conf` needs no change and this realm
-adds no NGINX location. Keycloak is still reached the normal way, at
-`https://keycloak.famillelallier.net`.
+Unlike Jarvis, there is **no oauth2-proxy and no `auth_request`** on the
+EA vhost itself: the EA API and its `/mcp` transport verify the JWT
+themselves (EA `docs/adr/0032`), so `nginx/conf.d/ea.conf` needs no change
+and this realm adds no NGINX location *there*. Keycloak is still reached
+the normal way, at `https://keycloak.famillelallier.net`.
+
+The realm does have a fourth client that *is* an oauth2-proxy gate,
+`ea-obsidian` — but it fronts Obsidian, not EA (see the `obsidian` service
+above). It is the one client here with no `ea-api` audience mapper, because
+nothing behind that gate calls the EA API; the token is only ever proof
+that the person is an `ea` realm user. Its single redirect URI is
+`https://obsidian.infra.famillelallier.net/oauth2/callback` — the same
+exact-callback rule as every other client in this file, no trailing `*`.
 
 `ea-realm.json` carries a **`users` array**, deliberately, where
 `jarvis-realm.json` deliberately has none: `ea-pipelines`'s service

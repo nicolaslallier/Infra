@@ -85,6 +85,23 @@
       ]
     },
     {
+      "clientId": "ea-obsidian",
+      "name": "EA — Obsidian (oauth2-proxy gate)",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://obsidian.infra.famillelallier.net"
+      },
+      "redirectUris": ["https://obsidian.infra.famillelallier.net/oauth2/callback"],
+      "webOrigins": []
+    },
+    {
       "clientId": "ea-pipelines",
       "name": "EA — pipeline worker",
       "protocol": "openid-connect",
