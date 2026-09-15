@@ -201,11 +201,21 @@ because the failure it prevents surfaces somewhere other than `.env`:
   that list by hand has no `.env.example` line to diff against, hence the
   separate loop). The three states are reported separately because they are
   three different mistakes.
-- **oauth2-proxy cookie keys of the wrong length.** oauth2-proxy accepts
-  only a 16, 24 or 32 byte `cookie-secret` (raw, or base64/base64url of
-  that many bytes) and dies at startup otherwise, so
-  `JARVIS_OAUTH_COOKIE_SECRET` / `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` are
-  length-checked rather than just checked for being filled in.
+- **oauth2-proxy cookie keys of the wrong length *or alphabet*.**
+  oauth2-proxy accepts only a 16, 24 or 32 byte `cookie-secret` and dies at
+  startup otherwise, so `JARVIS_OAUTH_COOKIE_SECRET` /
+  `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` are checked rather than just checked
+  for being filled in. The check mirrors `pkg/encryption.SecretBytes`
+  rather than asking "is this base64 of 32 bytes", because the container
+  does not: it decodes with Go's `base64.RawURLEncoding` — the **URL-safe**
+  alphabet — and falls back to the *raw string* when that fails. So a
+  standard-base64 key is a 44-byte key to it
+  (`cookie_secret must be 16, 24, or 32 bytes ... but is 44 bytes`), and
+  `openssl rand -base64 32` alone produces one about three times in four.
+  Hence the `| tr -- '+/' '-_'` on every generation recipe in `.env.example`,
+  the README and the `:?` guards, and hence check-env naming that case
+  specially: the fix is to re-spell the existing key, not to mint a new one
+  (which invalidates every live session).
 - **`LAN_IP` the host does not own.** `dns` publishes its ports on that
   address; a stale one (an old VM's, a changed DHCP lease) fails the bind
   and leaves every later service stuck in `Created`. Against a remote daemon

@@ -78,7 +78,8 @@ Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the two
 oauth2-proxy cookie keys (`JARVIS_OAUTH_COOKIE_SECRET`,
-`EA_OBSIDIAN_OAUTH_COOKIE_SECRET` — `openssl rand -base64 32` each).
+`EA_OBSIDIAN_OAUTH_COOKIE_SECRET` — `openssl rand -base64 32 | tr -- '+/'
+'-_'` each; the `tr` matters, see below).
 `make check-env` lists whatever is still missing, so you don't have to work
 that list out by hand:
 
@@ -207,11 +208,25 @@ above is unauthenticated at the NGINX layer). After `make up`:
    `keycloak/realm-import/jarvis-realm.json` / CLAUDE.md for why).
 
 Set `JARVIS_OAUTH_COOKIE_SECRET` in `.env` before first boot (`openssl
-rand -base64 32`) — unlike the client secret, oauth2-proxy needs this at
-startup, not after, and `docker-compose.yml` fails the compose parse
-outright if it is unset. It must be 16, 24 or 32 bytes (raw or base64);
-anything else and oauth2-proxy exits on `invalid configuration`, which is
-why `make check-env` length-checks it. Until step 1 is done,
+rand -base64 32 | tr -- '+/' '-_'`) — unlike the client secret,
+oauth2-proxy needs this at startup, not after, and `docker-compose.yml`
+fails the compose parse outright if it is unset. It must be 16, 24 or 32
+bytes, raw or **base64url**; anything else and oauth2-proxy exits on
+`invalid configuration`, which is why `make check-env` checks it.
+
+That `tr` is the whole reason the recipe is not just `openssl rand -base64
+32`. oauth2-proxy decodes the key with the URL-safe base64 alphabet only
+and quietly keeps the raw string when the decode fails, so a standard-base64
+key — one containing a `+` or a `/`, which is roughly three out of four —
+is read as a 44-byte key and the container dies on:
+
+```
+cookie_secret must be 16, 24, or 32 bytes to create an AES cipher, but is 44 bytes
+```
+
+An existing key hit by this keeps its entropy; only its spelling is wrong.
+Convert it in place rather than generating a new one (which would log
+everyone out): `printf '%s\n' "$JARVIS_OAUTH_COOKIE_SECRET" | tr -- '+/' '-_'`. Until step 1 is done,
 `oauth2-proxy` crash-loops on `missing setting: client-secret` — expected
 on a first deploy, and `make check-env` warns about it rather than
 blocking.
@@ -234,7 +249,9 @@ Jarvis login: different realm, different cookie, no SSO between the two.
 After `make up`:
 
 1. Set `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` in `.env` **before first boot**
-   (`openssl rand -base64 32`) — oauth2-proxy needs it at startup.
+   (`openssl rand -base64 32 | tr -- '+/' '-_'` — base64url, same as the
+   Jarvis key above and for the same reason) — oauth2-proxy needs it at
+   startup.
 2. In the Keycloak admin console, `ea` realm → **Clients** → `ea-obsidian`
    → **Credentials**, copy the client secret into
    `EA_OBSIDIAN_OAUTH_CLIENT_SECRET` in `.env`, then
