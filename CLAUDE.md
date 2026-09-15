@@ -143,6 +143,21 @@ never orphans another app that's still attached to it):
   filesystem, so a FUSE/s3fs mount of the bucket as `/config` is not an
   option (it also needs `SYS_ADMIN`). MinIO is the durable copy and the one
   other devices sync from.
+- **`airflow-*`** — `apache/airflow:3.3.1`, at
+  `airflow.infra.famillelallier.net` (NGINX → `airflow-apiserver:8080`).
+  Publishes no host port. `LocalExecutor`, so tasks run inside
+  `airflow-scheduler` and there is no Celery/Redis; `airflow-dag-processor`
+  is a required component in Airflow 3, not optional. Its metadata DB is the
+  provisioned Postgres database/role `airflow` — on an existing cluster run
+  `make provision-app app=airflow` before the first deploy, or `airflow-init`
+  fails and the rest never start. `airflow-init` is a one-shot (migrate +
+  create admin) that re-runs harmlessly on every `make up`. All components
+  must share `AIRFLOW_JWT_SECRET` (execution-API tokens) and
+  `AIRFLOW_FERNET_KEY` (connection encryption; changing it orphans stored
+  secrets), hence their `:?` guards. DAGs are bind-mounted read-only from
+  `airflow/dags/` — they must be committed, since the drift guard refuses
+  untracked files. No triggerer: add an `airflow-triggerer` service
+  (`command: triggerer`) the day a DAG uses deferrable operators.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
@@ -505,7 +520,7 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `neo4j`, `obsidian`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`minio`, `rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
