@@ -15,10 +15,11 @@
 #      crash-loops.
 #   2. A value still at the `change-me` placeholder, or empty.
 #   3. A value that is present and wrong in a way only the container finds
-#      out: an oauth2-proxy cookie key that is not 16/24/32 bytes, or a
-#      LAN_IP this host does not own (the `dns` service publishes its ports
-#      on that address, and a stale one fails the bind and leaves every
-#      later service stuck in "Created").
+#      out: an oauth2-proxy cookie key that is not 16/24/32 bytes as *that
+#      container* counts them (standard base64 is the usual near-miss -- see
+#      section 3 below), or a LAN_IP this host does not own (the `dns`
+#      service publishes its ports on that address, and a stale one fails
+#      the bind and leaves every later service stuck in "Created").
 #
 # The two oauth2-proxy *client* secrets are deliberately not errors: Keycloak
 # generates them when it imports the realm, so they cannot exist before the
@@ -60,8 +61,9 @@ REQUIRED=(
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start
-# unless the key is 16, 24 or 32 bytes (raw, or base64/base64url of that many
-# bytes) -- so they are checked for length, not just for being filled in.
+# unless the key is 16, 24 or 32 bytes -- raw, or base64url (not standard
+# base64) of that many bytes -- so they are checked for length and alphabet,
+# not just for being filled in.
 COOKIE_SECRETS=(
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
@@ -175,15 +177,28 @@ if [ "${#empty[@]}" -gt 0 ]; then
 fi
 
 # --- 3. present but unusable ------------------------------------------------
-# Byte length of a base64 (or base64url, padded or not) value, or "" if it is
-# not base64 at all. oauth2-proxy accepts all four encodings.
-decoded_len() {
-	local value=$1 padded out
-	padded=$(printf '%s' "$value" | tr -- '-_' '+/')
-	while [ $(( ${#padded} % 4 )) -ne 0 ]; do
-		padded="${padded}="
+# Byte length of a value read the way oauth2-proxy reads it, or "" if it does
+# not read as base64 at all. This mirrors pkg/encryption.SecretBytes exactly,
+# and the "exactly" is the whole point: oauth2-proxy decodes with Go's
+# base64.RawURLEncoding -- the *URL-safe* alphabet, padding stripped -- and
+# silently falls back to the raw string when that fails. So a standard-base64
+# key is not "base64 of 32 bytes" to it. `openssl rand -base64 32` emits a
+# '+' or a '/' about three times in four, and each of those becomes a 44-byte
+# raw key:
+#   [main.go:52] invalid configuration:
+#     cookie_secret must be 16, 24, or 32 bytes to create an AES cipher,
+#     but is 44 bytes
+# A check that accepted any base64 would wave that value straight through to
+# the crash-loop it is here to prevent.
+b64url_len() {
+	local value=$1 out
+	while [ "${value%=}" != "$value" ]; do value="${value%=}"; done
+	case "$value" in *[!A-Za-z0-9_-]*) return 0 ;; esac
+	value=$(printf '%s' "$value" | tr -- '-_' '+/')
+	while [ $(( ${#value} % 4 )) -ne 0 ]; do
+		value="${value}="
 	done
-	out=$(printf '%s' "$padded" | { base64 --decode 2>/dev/null || base64 -D 2>/dev/null; } | wc -c) || return 0
+	out=$(printf '%s' "$value" | { base64 --decode 2>/dev/null || base64 -D 2>/dev/null; } | wc -c) || return 0
 	printf '%s' "${out//[[:space:]]/}"
 }
 
@@ -192,10 +207,21 @@ for var in "${COOKIE_SECRETS[@]}"; do
 	[ -n "$value" ] && [ "$value" != "$PLACEHOLDER" ] || continue
 	raw=$(printf '%s' "$value" | wc -c)
 	raw=${raw//[[:space:]]/}
-	dec=$(decoded_len "$value")
+	dec=$(b64url_len "$value")
+	# Either branch is accepted: oauth2-proxy tries the decode first and
+	# keeps the raw bytes when it fails or yields an unusable length.
 	case "$raw" in 16 | 24 | 32) continue ;; esac
 	case "$dec" in 16 | 24 | 32) continue ;; esac
-	errors+=("$var is $raw bytes ${dec:+(decoding to $dec) }-- oauth2-proxy only accepts a 16, 24 or 32 byte cookie key; generate one with 'openssl rand -base64 32'")
+	case "$(b64url_len "$(printf '%s' "$value" | tr -- '+/' '-_')")" in
+	16 | 24 | 32)
+		# The common near-miss, and unguessable from the container's error
+		# message: the value *is* 32 bytes of base64, just the wrong alphabet.
+		errors+=("$var is standard base64, not base64url -- oauth2-proxy only decodes the URL-safe alphabet, so it takes this as a raw $raw byte key and dies with \"cookie_secret must be 16, 24, or 32 bytes to create an AES cipher, but is $raw bytes\". Keep the same key, change the alphabet: printf '%s\\n' \"\$$var\" | tr -- '+/' '-_'")
+		;;
+	*)
+		errors+=("$var is $raw bytes ${dec:+(decoding to $dec) }-- oauth2-proxy only accepts a 16, 24 or 32 byte cookie key, raw or base64url; generate one with \"openssl rand -base64 32 | tr -- '+/' '-_'\"")
+		;;
+	esac
 done
 
 if [ -z "${LAN_IP:-}" ]; then
