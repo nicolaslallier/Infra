@@ -35,12 +35,10 @@ make migrate-volumes             # copy the stack's volumes off the old Colima V
 make clean CONFIRM=1             # delete the Portainer stack + its volumes (keeps Portainer, infra-net, certs/)
 ```
 
-`up`, `config`, `provision-app`, `dns-provision`, and `dns-check` run
-`check-env` first: `.env` must exist, and password-like values must not
-still be the `change-me` placeholders from `.env.example`, and `LAN_IP`
-must be an address this host actually owns (a stale one — e.g. the old
-Colima VM's — fails `dns`'s port bind and leaves every later service stuck
-in `Created`). `up`, `config`,
+`up`, `config`, `provision-app`, `dns-provision`, `dns-check`,
+`keycloak-seed-users` and `obsidian-minio` run `check-env`
+(`scripts/check-env.sh`) first — see "Preflight: `make check-env`" below for
+what it asserts and why each check exists. `up`, `config`,
 and `portainer-up` also run `check-docker` (see "Runtime: Docker Desktop"
 below).
 
@@ -174,6 +172,63 @@ inside pgAdmin's own UI, the host is the Compose service name `postgres`
 `*.famillelallier.net` hostname. A hostname like
 `postgresql.famillelallier.net` doesn't exist anywhere in this stack and
 produces connection-refused, not a DNS or reachability problem.
+
+### Preflight: `make check-env`
+
+`scripts/check-env.sh` refuses to let anything deploy or provision against
+a `.env` that cannot bring the stack up. Everything it finds goes to stderr
+— warnings first, then the blockers — and it exits 1 if there was a blocker,
+having reported all of them rather than the first. Every check is there
+because the failure it prevents surfaces somewhere other than `.env`:
+
+- **Settings `.env.example` defines that this `.env` never got.** `.env` is
+  copied once, by `make init`, and then lives on (gitignored) while
+  `.env.example` keeps growing — so a variable introduced with a new service
+  is simply absent from a long-lived `.env`. Compose interpolates an absent
+  variable as an **empty string and deploys anyway**, so the symptom is a
+  container dying on its own config with nothing naming `.env`:
+  `oauth2-proxy-ea`, handed an empty `EA_OBSIDIAN_OAUTH_COOKIE_SECRET`,
+  logs `invalid configuration: missing setting: cookie-secret` and
+  crash-loops. The check diffs the assigned keys of the two files and prints
+  the missing lines ready to append. Keys assigned only inside a comment in
+  `.env.example` (`PORTAINER_API_KEY`, which belongs in `.portainer.env`)
+  are not keys and never trip it. To decline a setting that has a Compose
+  `:-` default (`UPSTREAM_DNS`, `GRAFANA_ADMIN_USER`), keep its line and
+  leave the value empty rather than deleting it.
+- **Placeholders, empties, and absences** in the password-like values with
+  no source other than `.env` — the `change-me` check — plus a
+  `<APP>_DB_PASSWORD` for every entry in `APP_DATABASES` (an app added to
+  that list by hand has no `.env.example` line to diff against, hence the
+  separate loop). The three states are reported separately because they are
+  three different mistakes.
+- **oauth2-proxy cookie keys of the wrong length.** oauth2-proxy accepts
+  only a 16, 24 or 32 byte `cookie-secret` (raw, or base64/base64url of
+  that many bytes) and dies at startup otherwise, so
+  `JARVIS_OAUTH_COOKIE_SECRET` / `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` are
+  length-checked rather than just checked for being filled in.
+- **`LAN_IP` the host does not own.** `dns` publishes its ports on that
+  address; a stale one (an old VM's, a changed DHCP lease) fails the bind
+  and leaves every later service stuck in `Created`. Against a remote daemon
+  (`DOCKER_HOST=ssh://…`, the normal Mac → Windows-laptop case) the
+  addresses of *this* machine say nothing, so `LAN_IP` is compared to the
+  Makefile's `INFRA_HOST` instead; standalone, that host is derived from
+  `DOCKER_HOST`. Where neither `ifconfig` nor `ip` exists to enumerate
+  addresses, the check passes rather than guessing.
+
+The **two oauth2-proxy client secrets are warnings, never errors**:
+Keycloak generates them when it imports a realm, so they cannot exist
+before the first deploy — erroring on them would make the documented
+bootstrap order (deploy, then copy the secret out of the admin console)
+impossible. The warning names the realm and client to copy it from, and
+which container crash-loops until then. For the same reason
+`docker-compose.yml` guards the *cookie* secrets with
+`${...:?Set ... in .env}` (like `LAN_IP` and `DNS_ADMIN_PASSWORD`) but
+leaves the *client* secrets unguarded: the cookie key is required before
+first boot and choosable offline, so failing the compose parse is right,
+while a `:?` on the client secret would block the very deploy that creates
+it. Non-Mac environments that run `docker compose up -d` directly
+(CI, the cloud VM in `AGENTS.md`) never call `check-env`, so those `:?`
+guards are the only thing standing between them and a silently empty value.
 
 ### Runtime: Docker Desktop
 
