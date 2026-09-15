@@ -112,6 +112,23 @@ never orphans another app that's still attached to it):
   (`KC_TRACING_ENABLED`), so one id shows nginx → keycloak → its SQL
   queries in Tempo. A vhost that sets its own `add_header` loses the
   inherited `X-Trace-Id` and must repeat it.
+- **`obsidian`** — `lscr.io/linuxserver/obsidian`, the Obsidian desktop
+  app streamed to a browser at `obsidian.infra.famillelallier.net`
+  (port `3000`, one long-lived WebSocket; vaults in the `obsidian-config`
+  volume). Publishes no host port. It has no auth of its own and is a whole
+  desktop session, so `nginx/conf.d/obsidian.conf` gates it with the
+  **existing** Jarvis `oauth2-proxy` — no second proxy, no Keycloak change:
+  the fixed `REDIRECT_URL` completes login on the Jarvis host, the cookie is
+  scoped to `.famillelallier.net`, and `rd` (whitelisted) returns the
+  browser to Obsidian. Consequence: any `jarvis` realm user gets Obsidian.
+  Vault data is synced into MinIO (bucket `obsidian`, versioned) by the
+  in-app **Remotely Save** plugin against `http://minio:9000`, using a
+  MinIO user `obsidian` scoped to that bucket
+  (`make obsidian-minio` / `scripts/provision-obsidian-minio.sh`). The
+  working copy stays on the `obsidian-config` volume: Obsidian watches the
+  filesystem, so a FUSE/s3fs mount of the bucket as `/config` is not an
+  option (it also needs `SYS_ADMIN`). MinIO is the durable copy and the one
+  other devices sync from.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
@@ -407,7 +424,7 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `neo4j`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`minio`, `rabbitmq`, `neo4j`, `obsidian`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app

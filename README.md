@@ -137,6 +137,8 @@ access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
 Neo4j (the EA graph): Bolt at `bolt://127.0.0.1:7687` from the host, or
 `neo4j:7687` on `infra-net`; no browser is exposed
+Obsidian (desktop app in the browser): `https://obsidian.infra.famillelallier.net`
+(same Keycloak login as Jarvis; vaults live in the `obsidian-config` volume)
 
 ### Registering the Postgres server inside pgAdmin
 
@@ -156,9 +158,10 @@ machine via `psql` — it's a different path than pgAdmin uses.)
 
 ### Jarvis login (Keycloak + oauth2-proxy)
 
-`https://jarvis.famillelallier.net` requires a Keycloak login — it's the
-one application vhost in this repo currently gated this way (every other
-app listed above is unauthenticated at the NGINX layer). After `make up`:
+`https://jarvis.famillelallier.net` requires a Keycloak login, and so does
+`https://obsidian.infra.famillelallier.net`, which reuses the same
+oauth2-proxy and account (every other app listed above is unauthenticated
+at the NGINX layer). After `make up`:
 
 1. In the Keycloak admin console, open the `jarvis` realm → **Clients** →
    `jarvis` → **Credentials** tab, copy the client secret into
@@ -178,6 +181,31 @@ API/WebSocket are reached by the browser directly at their own published
 port, not through this vhost — see the "Jarvis: Keycloak login gate"
 section in [CLAUDE.md](CLAUDE.md) for the full explanation and what to
 verify manually.
+
+### Obsidian vaults in MinIO
+
+The browser Obsidian keeps its working copy on the `obsidian-config`
+volume and syncs it into the MinIO bucket `obsidian` with the Remotely Save
+plugin. One-time setup, after `make up`:
+
+1. Set `OBSIDIAN_MINIO_SECRET_KEY` in `.env`, then `make obsidian-minio`
+   (creates the versioned bucket, a policy limited to it, and the MinIO
+   user `obsidian`; safe to re-run).
+2. In `https://obsidian.infra.famillelallier.net`, create or open a vault,
+   then **Settings → Community plugins → Browse → Remotely Save → Install →
+   Enable**.
+3. Remotely Save settings → **S3 or compatible**:
+   - Endpoint: `http://minio:9000`
+   - Region: `us-east-1`
+   - Access Key ID: `obsidian`
+   - Secret Access Key: your `OBSIDIAN_MINIO_SECRET_KEY`
+   - Bucket: `obsidian`
+   - S3 URL style: **Path Style**
+   - Bypass CORS: on
+   - Then **Check** the connection, and set a schedule (e.g. every 5 min).
+
+Other devices (phone, laptop) can sync the same vault with the same
+settings, using `https://minio.famillelallier.net` as the endpoint.
 
 ### EA login
 

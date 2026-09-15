@@ -489,6 +489,27 @@ services:
       retries: 10
       start_period: 60s
 
+  obsidian:
+    # The Obsidian desktop app streamed to a browser tab, at
+    # obsidian.infra.famillelallier.net behind the Keycloak gate
+    # (nginx/conf.d/obsidian.conf). No auth of its own and a full desktop
+    # session inside, so it must never get a `ports:` entry.
+    image: lscr.io/linuxserver/obsidian:latest
+    restart: unless-stopped
+    environment:
+      PUID: 1000
+      PGID: 1000
+      # Daily-note dates come from this clock; UTC would roll them over at
+      # 20:00 local.
+      TZ: America/Toronto
+    volumes:
+      # Home directory: vaults, Obsidian settings, plugins.
+      - obsidian-config:/config
+    # Electron crashes on Docker's 64m default.
+    shm_size: "1gb"
+    networks:
+      - infra-net
+
 networks:
   infra-net:
     external: true
@@ -506,3 +527,4 @@ volumes:
   rabbitmq-data:
   neo4j-data:
   neo4j-logs:
+  obsidian-config:
