@@ -37,7 +37,12 @@ startup caveats that the update script deliberately does NOT handle.
   placeholder `192.168.1.50` — the container would fail to publish its ports.
   `.env` is gitignored and persists in the snapshot with real dev passwords
   already filled in (no `change-me` values), so `make check-env` / `make up`
-  pass out of the box.
+  pass out of the box. If `check-env` reports settings that `.env.example`
+  defines and `.env` does not, that snapshot predates a service added since:
+  append those lines from `.env.example` and fill them in (see "Preflight:
+  `make check-env`" in CLAUDE.md) — an absent variable is interpolated into
+  the stack as an empty string, which is how a container ends up dying on
+  its own config instead of anything naming `.env`.
 
 - **`make config` needs `SKIP_DOCKER_CHECK=1` here.** The stack's normal
   runtime is Docker Desktop on a Mac, and `make config` / `make

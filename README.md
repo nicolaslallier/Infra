@@ -76,9 +76,14 @@ Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `MINIO_ROOT_PASSWORD`,
 `RABBITMQ_DEFAULT_PASS`, `MONITORING_DB_PASSWORD`, and one
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
-`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`).
+`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the two
+oauth2-proxy cookie keys (`JARVIS_OAUTH_COOKIE_SECRET`,
+`EA_OBSIDIAN_OAUTH_COOKIE_SECRET` — `openssl rand -base64 32` each).
+`make check-env` lists whatever is still missing, so you don't have to work
+that list out by hand:
 
 ```bash
+make check-env    # run by up / config / provision-* / dns-* anyway
 make hosts        # prints /etc/hosts lines to add (not applied automatically)
 ```
 
@@ -141,6 +146,35 @@ Obsidian (desktop app in the browser): `https://obsidian.infra.famillelallier.ne
 (Keycloak login against the `ea` realm; vaults live in the `obsidian-config`
 volume)
 
+### Keeping an existing `.env` in step with `.env.example`
+
+`.env` is copied from `.env.example` once and is gitignored, so a `.env`
+created months ago is missing every setting added since — a new service's
+variables are simply absent from it. Compose interpolates an absent
+variable as an **empty string and deploys anyway**, so the symptom is a
+container dying on its own config with nothing pointing back at `.env`:
+
+```
+[main.go:52] invalid configuration:
+  missing setting: cookie-secret
+  missing setting: client-secret or client-secret-file
+```
+
+That is `oauth2-proxy` (or `oauth2-proxy-ea`) handed empty secrets.
+`make check-env` diffs the two files and prints the lines to append:
+
+```
+check-env: .env is missing settings that .env.example defines: EA_OBSIDIAN_OAUTH_COOKIE_SECRET
+...
+    EA_OBSIDIAN_OAUTH_COOKIE_SECRET=change-me
+```
+
+Append them, fill each in (`grep -B4 -n <VAR> .env.example` says what it is
+for), and re-run. Do this after every `git pull` that adds a service. The
+one value `check-env` only warns about is an oauth2-proxy **client** secret:
+Keycloak generates it during realm import, so it cannot exist until after
+the first deploy — see the Jarvis and Obsidian login sections below.
+
 ### Registering the Postgres server inside pgAdmin
 
 `postgres` has no LAN hostname of its own — only pgAdmin does
@@ -174,7 +208,13 @@ above is unauthenticated at the NGINX layer). After `make up`:
 
 Set `JARVIS_OAUTH_COOKIE_SECRET` in `.env` before first boot (`openssl
 rand -base64 32`) — unlike the client secret, oauth2-proxy needs this at
-startup, not after.
+startup, not after, and `docker-compose.yml` fails the compose parse
+outright if it is unset. It must be 16, 24 or 32 bytes (raw or base64);
+anything else and oauth2-proxy exits on `invalid configuration`, which is
+why `make check-env` length-checks it. Until step 1 is done,
+`oauth2-proxy` crash-loops on `missing setting: client-secret` — expected
+on a first deploy, and `make check-env` warns about it rather than
+blocking.
 
 Note this only gates the frontend page itself; the Jarvis backend
 API/WebSocket are reached by the browser directly at their own published
@@ -199,6 +239,8 @@ After `make up`:
    → **Credentials**, copy the client secret into
    `EA_OBSIDIAN_OAUTH_CLIENT_SECRET` in `.env`, then
    `docker compose up -d oauth2-proxy-ea`.
+   Until then `oauth2-proxy-ea` crash-loops on `missing setting:
+   client-secret`, exactly as the Jarvis proxy does before its own step 1.
 3. Give each `ea` realm user who should reach Obsidian an **email address**
    — oauth2-proxy reads the `email` claim and rejects a login without one.
    No realm role is required; to narrow access to EA editors, add
@@ -330,6 +372,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
 | `make pull` | Redeploy via Portainer, re-pulling images |
 | `make config` | Validate `docker-compose.yml` + `.env` |
+| `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |

@@ -154,8 +154,18 @@ services:
       # OIDC_ISSUER_URL used to fetch it, so strict verification always fails.
       OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
       OAUTH2_PROXY_CLIENT_ID: jarvis
+      # No :? guard on the client secret, unlike the cookie key below:
+      # Keycloak generates it when it imports the realm, so the first deploy
+      # is what brings it into existence (README's Jarvis login steps). It
+      # does mean an unset value reaches oauth2-proxy as an empty string and
+      # this container crash-loops on "missing setting: client-secret" until
+      # it is filled in -- `make check-env` warns about that before deploying.
       OAUTH2_PROXY_CLIENT_SECRET: ${JARVIS_OAUTH_CLIENT_SECRET}
-      OAUTH2_PROXY_COOKIE_SECRET: ${JARVIS_OAUTH_COOKIE_SECRET}
+      # Required before the first boot and choosable offline, so fail the
+      # whole compose parse rather than deploy a proxy that will die on
+      # "missing setting: cookie-secret" -- an absent variable interpolates
+      # as an empty string, and Compose deploys it without comment.
+      OAUTH2_PROXY_COOKIE_SECRET: ${JARVIS_OAUTH_COOKIE_SECRET:?Set JARVIS_OAUTH_COOKIE_SECRET in .env (openssl rand -base64 32)}
       OAUTH2_PROXY_COOKIE_DOMAINS: .famillelallier.net
       OAUTH2_PROXY_WHITELIST_DOMAINS: .famillelallier.net
       OAUTH2_PROXY_COOKIE_SECURE: "true"
@@ -209,8 +219,11 @@ services:
       OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/ea
       OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
       OAUTH2_PROXY_CLIENT_ID: ea-obsidian
+      # Same split as the jarvis instance above: the client secret cannot
+      # exist before the realm import, the cookie key must exist before the
+      # first boot and so carries a :? guard.
       OAUTH2_PROXY_CLIENT_SECRET: ${EA_OBSIDIAN_OAUTH_CLIENT_SECRET}
-      OAUTH2_PROXY_COOKIE_SECRET: ${EA_OBSIDIAN_OAUTH_COOKIE_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${EA_OBSIDIAN_OAUTH_COOKIE_SECRET:?Set EA_OBSIDIAN_OAUTH_COOKIE_SECRET in .env (openssl rand -base64 32)}
       # ea-obsidian enforces PKCE (pkce.code.challenge.method in
       # ea-realm.json, as every other client in that realm does), so the
       # proxy has to send a challenge or Keycloak rejects the code exchange.

@@ -33,6 +33,8 @@ init: net certs ## Create network, certs, and .env from .env.example
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "Created .env — edit passwords, LAN_IP, and DNS_ADMIN_PASSWORD before 'make up'."; \
+	else \
+		echo ".env already exists, left untouched — 'make check-env' lists the settings .env.example has gained since."; \
 	fi
 
 net: ## Ensure the external infra-net Docker network exists
@@ -44,52 +46,14 @@ certs: ## Generate TLS certs (FORCE=1 to regenerate)
 hosts: ## Print /etc/hosts lines for this stack
 	@./scripts/print-hosts-entries.sh
 
-# LAN_IP must be an address this host owns: dns publishes its ports on it, and
-# a stale one (an old VM's, a changed DHCP lease) fails that bind and leaves
-# every later service stuck in "Created".
+# Asserts .env is complete and usable before anything deploys against it:
+# every setting .env.example defines is present (a variable added with a new
+# service and never copied over interpolates as an empty string and takes a
+# container down on its own config), no placeholders are left, the
+# oauth2-proxy cookie keys are a length oauth2-proxy accepts, and LAN_IP is
+# an address the Docker host owns.
 check-env:
-	@if [ ! -f .env ]; then \
-		echo "make check-env: .env not found (run 'make init' first)" >&2; \
-		exit 1; \
-	fi
-	@set -a; . ./.env; set +a; \
-	bad=""; \
-	for var in POSTGRES_PASSWORD PGADMIN_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD DNS_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD MONITORING_DB_PASSWORD MINIO_ROOT_PASSWORD OBSIDIAN_MINIO_SECRET_KEY RABBITMQ_DEFAULT_PASS NEO4J_PASSWORD; do \
-		if [ -z "$${!var:-}" ] || [ "$${!var}" = "change-me" ]; then \
-			bad="$$bad $$var"; \
-		fi; \
-	done; \
-	old_ifs="$$IFS"; \
-	IFS=','; for app in $${APP_DATABASES:-}; do \
-		app="$${app//[[:space:]]/}"; \
-		[ -z "$$app" ] && continue; \
-		var="$$(printf '%s' "$$app" | tr '[:lower:]' '[:upper:]')_DB_PASSWORD"; \
-		if [ -z "$${!var:-}" ] || [ "$${!var}" = "change-me" ]; then \
-			bad="$$bad $$var"; \
-		fi; \
-	done; \
-	IFS="$$old_ifs"; \
-	if [ -n "$$bad" ]; then \
-		bad="$$(printf '%s\n' $$bad | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$$//')"; \
-		echo "make check-env: replace placeholder values in .env for: $$bad" >&2; \
-		exit 1; \
-	fi; \
-	addrs="$$( { { ifconfig 2>/dev/null || ip -4 -o addr show 2>/dev/null; } \
-		| grep -oE 'inet (addr:)?[0-9.]+' | grep -oE '[0-9.]+$$'; \
-		ipconfig.exe 2>/dev/null | grep -i 'IPv4' | grep -oE '([0-9]+\.){3}[0-9]+'; } \
-		|| true)"; \
-	if [ -z "$${LAN_IP:-}" ]; then \
-		echo "make check-env: LAN_IP is not set in .env" >&2; \
-		exit 1; \
-	elif [ -n "$${DOCKER_HOST:-}" ]; then \
-		if [ "$$LAN_IP" != "$(INFRA_HOST)" ]; then \
-			echo "make check-env: LAN_IP=$$LAN_IP but DOCKER_HOST targets $(INFRA_HOST)" >&2; \
-			exit 1; \
-		fi; \
-	elif [ -n "$$addrs" ] && ! printf '%s\n' "$$addrs" | grep -qxF "$$LAN_IP"; then \
-		echo "make check-env: LAN_IP=$$LAN_IP is not an address on this host (have: $$(echo $$addrs))" >&2; \
-		exit 1; \
-	fi
+	@INFRA_HOST="$(INFRA_HOST)" ./scripts/check-env.sh
 
 docker-start: ## Start Docker Desktop and wait for its daemon
 	@if [ -n "$${DOCKER_HOST:-}" ]; then \
