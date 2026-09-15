@@ -6,7 +6,7 @@ SHELL := bash
 .PHONY: help init net certs up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
-	migrate-volumes keycloak-seed-users \
+	migrate-volumes keycloak-seed-users obsidian-minio \
 	portainer-up portainer-down portainer-restart portainer-logs
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
@@ -54,7 +54,7 @@ check-env:
 	fi
 	@set -a; . ./.env; set +a; \
 	bad=""; \
-	for var in POSTGRES_PASSWORD PGADMIN_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD DNS_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD MONITORING_DB_PASSWORD MINIO_ROOT_PASSWORD RABBITMQ_DEFAULT_PASS NEO4J_PASSWORD; do \
+	for var in POSTGRES_PASSWORD PGADMIN_PASSWORD KEYCLOAK_ADMIN_PASSWORD KEYCLOAK_DB_PASSWORD DNS_ADMIN_PASSWORD GRAFANA_ADMIN_PASSWORD MONITORING_DB_PASSWORD MINIO_ROOT_PASSWORD OBSIDIAN_MINIO_SECRET_KEY RABBITMQ_DEFAULT_PASS NEO4J_PASSWORD; do \
 		if [ -z "$${!var:-}" ] || [ "$${!var}" = "change-me" ]; then \
 			bad="$$bad $$var"; \
 		fi; \
@@ -214,6 +214,9 @@ dns-check: check-env ## Query the dns service to verify answers
 
 keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
+
+obsidian-minio: check-env ## Create/update the MinIO bucket + user Obsidian syncs into
+	@./scripts/provision-obsidian-minio.sh
 
 # Deleting the Portainer stack only removes its containers; 'down -v' then
 # drops the volumes docker-compose.yml declares -- infra_portainer-data is

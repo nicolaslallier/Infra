@@ -15,6 +15,7 @@ KEYCLOAK_HOST="keycloak.famillelallier.net"
 JARVIS_HOST="jarvis.famillelallier.net"
 CHAT_HOST="chat.famillelallier.net"
 EA_HOST="ea.infra.famillelallier.net"
+OBSIDIAN_HOST="obsidian.infra.famillelallier.net"
 
 # The stack's host (LAN_IP from .env), not this machine: the stack runs on
 # the Windows laptop, and loopback only reaches it when run from there.
@@ -36,6 +37,7 @@ $IP $KEYCLOAK_HOST
 $IP $JARVIS_HOST
 $IP $CHAT_HOST
 $IP $EA_HOST
+$IP $OBSIDIAN_HOST
 
 One way to append them:
 
@@ -51,5 +53,6 @@ $IP $KEYCLOAK_HOST
 $IP $JARVIS_HOST
 $IP $CHAT_HOST
 $IP $EA_HOST
+$IP $OBSIDIAN_HOST
 HOSTS
 EOF
