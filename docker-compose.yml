@@ -193,6 +193,56 @@ services:
       keycloak:
         condition: service_healthy
 
+  # Second oauth2-proxy, for Obsidian, against the `ea` realm instead of
+  # `jarvis` (nginx/conf.d/obsidian.conf). A separate container rather than
+  # a second realm on the one above: an oauth2-proxy process speaks to
+  # exactly one issuer, so "who may open Obsidian" and "who may open Jarvis"
+  # are different realms and therefore different processes. Same dummy
+  # upstream, same auth_request role as the jarvis instance.
+  oauth2-proxy-ea:
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    restart: unless-stopped
+    environment:
+      OAUTH2_PROXY_PROVIDER: keycloak-oidc
+      # Internal infra-net URL + the issuer-verification escape hatch, for
+      # the same Keycloak hostname-v2 reason documented on oauth2-proxy above.
+      OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/ea
+      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
+      OAUTH2_PROXY_CLIENT_ID: ea-obsidian
+      OAUTH2_PROXY_CLIENT_SECRET: ${EA_OBSIDIAN_OAUTH_CLIENT_SECRET}
+      OAUTH2_PROXY_COOKIE_SECRET: ${EA_OBSIDIAN_OAUTH_COOKIE_SECRET}
+      # ea-obsidian enforces PKCE (pkce.code.challenge.method in
+      # ea-realm.json, as every other client in that realm does), so the
+      # proxy has to send a challenge or Keycloak rejects the code exchange.
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      # No COOKIE_DOMAINS/WHITELIST_DOMAINS, unlike the jarvis instance:
+      # sign-in, callback and the app are all on this one hostname, so the
+      # cookie stays host-scoped and `rd` never leaves the host either.
+      # The distinct name keeps it from colliding with the jarvis proxy's
+      # own `_oauth2_proxy` cookie, which is scoped to .famillelallier.net
+      # and would otherwise be overwritten on every Obsidian login.
+      OAUTH2_PROXY_COOKIE_NAME: _oauth2_proxy_ea
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_REDIRECT_URL: https://obsidian.infra.famillelallier.net/oauth2/callback
+      # Any human in the `ea` realm; the realm itself is the gate. To narrow
+      # it to EA editors, add OAUTH2_PROXY_ALLOWED_ROLES: ea-editor.
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_UPSTREAMS: static://202
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+    volumes:
+      # Same local-CA bundle swap as the jarvis instance -- its token and
+      # jwks calls go to the external keycloak.famillelallier.net hostname
+      # named in the discovery document, i.e. back through nginx's TLS.
+      - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+    networks:
+      - infra-net
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
   nginx:
     # -otel variant: same image plus ngx_otel_module (see nginx/nginx.conf).
     image: nginx:alpine-otel
@@ -228,6 +278,8 @@ services:
       keycloak:
         condition: service_started
       oauth2-proxy:
+        condition: service_started
+      oauth2-proxy-ea:
         condition: service_started
 
   dns:
