@@ -74,9 +74,9 @@ check-env:
 		echo "make check-env: replace placeholder values in .env for: $$bad" >&2; \
 		exit 1; \
 	fi; \
-	addrs="$$( { ifconfig 2>/dev/null || ip -4 -o addr show 2>/dev/null; } \
-		| grep -oE 'inet (addr:)?[0-9.]+' | grep -oE '[0-9.]+$$' \
-		|| ipconfig 2>/dev/null | grep -i 'IPv4' | grep -oE '([0-9]+\.){3}[0-9]+' \
+	addrs="$$( { { ifconfig 2>/dev/null || ip -4 -o addr show 2>/dev/null; } \
+		| grep -oE 'inet (addr:)?[0-9.]+' | grep -oE '[0-9.]+$$'; \
+		ipconfig.exe 2>/dev/null | grep -i 'IPv4' | grep -oE '([0-9]+\.){3}[0-9]+'; } \
 		|| true)"; \
 	if [ -z "$${LAN_IP:-}" ]; then \
 		echo "make check-env: LAN_IP is not set in .env" >&2; \

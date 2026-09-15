@@ -46,19 +46,23 @@ selftest() {
 
 # Runs curl in a throwaway container on infra-net, so deploying never
 # depends on nginx or dns -- both are part of the stack being deployed.
-# The key reaches curl via -K (a config file written from the env var
-# inside the container), never as a command-line argument, so it doesn't
-# show up in that container's process list.
+# The key reaches curl via -K (a config file written inside the container
+# from stdin's first line, the body following it), never as a command-line
+# argument, so it doesn't show up in any process list. Not `-e
+# PORTAINER_API_KEY`: whether the docker CLI forwards its env depends on
+# the shell (from WSL, a Windows docker.exe doesn't see it), and a missing
+# key only surfaces as Portainer's "A valid authorization token is missing".
 api() { # <method> <path> [json-body]
   # MSYS_NO_PATHCONV/MSYS2_ARG_CONV_EXCL: under Git for Windows, the MSYS
   # runtime rewrites arguments that look like POSIX paths before handing
   # them to the native docker.exe, so "/endpoints" arrives as
   # "C:/Program Files/Git/endpoints" and curl rejects the URL. No-ops on
   # macOS and Linux.
-  printf '%s' "${3:-}" | MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
+  printf '%s\n%s' "$PORTAINER_API_KEY" "${3:-}" | MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' \
     docker run --rm -i --network infra-net \
-    -e PORTAINER_API_KEY --entrypoint sh "$CURL_IMAGE" -c '
-      printf "header = \"X-API-Key: %s\"\n" "$PORTAINER_API_KEY" >/tmp/curl.cfg
+    --entrypoint sh "$CURL_IMAGE" -c '
+      IFS= read -r key
+      printf "header = \"X-API-Key: %s\"\n" "$key" >/tmp/curl.cfg
       out="$(curl -sSk -K /tmp/curl.cfg --fail-with-body -X "$1" \
         -H "Content-Type: application/json" \
         --data-binary @- "https://portainer:9443/api$2" 2>&1)" \

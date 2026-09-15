@@ -349,9 +349,12 @@ Things that look odd and are load-bearing:
 - **API calls go through a throwaway `curlimages/curl` container on
   `infra-net`** to `https://portainer:9443`, not through NGINX or a hostname:
   both nginx and dns are *in* the stack being deployed. The API key
-  reaches curl via a `-K` config file written inside that container, never
-  on curl's command line, so it doesn't show up in that container's
-  process list.
+  reaches curl via a `-K` config file written inside that container from
+  the first line of stdin (the JSON body follows), never on a command
+  line, so it doesn't show up in any process list. Not `-e
+  PORTAINER_API_KEY`: from WSL a Windows `docker.exe` doesn't inherit the
+  shell's env, the key arrives empty, and Portainer only says "A valid
+  authorization token is missing".
 - **Portainer refuses to create a stack whose name matches a compose
   project it already knows about, stopped or not** — it lists containers
   regardless of state, so `docker compose stop` isn't enough; containers
