@@ -230,7 +230,9 @@ services:
       OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
       # No COOKIE_DOMAINS/WHITELIST_DOMAINS, unlike the jarvis instance:
       # sign-in, callback and the app are all on this one hostname, so the
-      # cookie stays host-scoped and `rd` never leaves the host either.
+      # cookie stays host-scoped. obsidian.conf keeps `rd` a relative path:
+      # without a whitelist, oauth2-proxy rejects an absolute one, even for
+      # this same host.
       # The distinct name keeps it from colliding with the jarvis proxy's
       # own `_oauth2_proxy` cookie, which is scoped to .famillelallier.net
       # and would otherwise be overwritten on every Obsidian login.
