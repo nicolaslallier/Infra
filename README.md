@@ -486,8 +486,51 @@ Two things worth knowing:
   `/var/run/docker.sock` read-write because managing containers is the whole
   point of it, so anyone who reaches the page and gets past its login can
   start a privileged container. Its own admin account is the only gate —
-  unlike `jarvis.famillelallier.net`, this vhost is not behind
-  oauth2-proxy/Keycloak.
+   unlike `jarvis.famillelallier.net`, this vhost is not behind
+   oauth2-proxy/Keycloak.
+
+### Watching Portainer itself
+
+Portainer CE exposes no `/metrics` endpoint, so to scrape Portainer from the
+LGTM stack you run `scripts/portainer-metrics.py` — a host-side exporter that
+polls the Portainer REST API and re-exports it in Prometheus text format. It
+lives on the **host, not in a container**: its only credential is a
+full-admin `PORTAINER_API_KEY`, which is a Docker-daemon-root secret that
+CLAUDE.md "Portainer-managed stack" forbids reaching any container (`.env` is
+handed to containers via postgres's `env_file`). It reads that same token out
+of `.portainer.env` (the file `scripts/portainer-stack.sh` already uses), so
+the token never lands in a container's filesystem, env, or process list.
+
+```bash
+python3 scripts/portainer-metrics.py --config .portainer.env   # serve on :9999
+python3 scripts/portainer-metrics.py --once --selftest         # parse/render checks, no network
+```
+
+It is stdlib-only, so it runs under the Mac's system `python3` with no install
+step. Defaults: bind `0.0.0.0:9999`, poll the API every 30s. The base URL falls
+back through `--base-url` → `PORTAINER_BASE_URL` (in `.portainer.env`) →
+`https://127.0.0.1:9443`; TLS verification is off, exactly like the `-k`
+`api()` helper in `portainer-stack.sh` (the API sits behind Portainer's 9443
+self-signed cert). A failed poll keeps the last good reading and bumps
+`portainer_exporter_scrape_errors_total` instead of dropping the target.
+
+To feed it to Prometheus, Prometheus (in the stack) reaches the host over
+`host.docker.internal`. Add a job to `monitoring/prometheus/prometheus.yml`:
+
+```yaml
+   - job_name: portainer
+     static_configs:
+       - targets: ["host.docker.internal:9999"]
+```
+
+What it exports: `portainer_controlplane_up` (1 when the API answered the last
+poll), `portainer_exporter_scrape_total` / `_scrape_errors_total`,
+`portainer_api_last_success_timestamp_seconds`, `portainer_version`,
+`portainer_ram_total_bytes`, `portainer_endpoint_count{type=}`,
+`portainer_stack_count{status=}` (1=stopped 2=running), and per-stack
+`portainer_stack_running` / `portainer_stack_status` / `portainer_stack_repository`
+/ `portainer_stack_last_deploy_timestamp_seconds` (a git stack's last
+successful snapshot update).
 
 ## Connecting an application repo
 
@@ -538,6 +581,7 @@ rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
 scripts/                 check-docker.sh, migrate-volumes.sh, gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
 scripts/portainer-stack.sh    make up/down/pull/clean via Portainer's API
+scripts/portainer-metrics.py  host-side exporter: Portainer API -> Prometheus (:9999)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for the architecture notes and gotchas that
