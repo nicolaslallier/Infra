@@ -38,7 +38,9 @@ init: net certs ## Create network, certs, and .env from .env.example
 	fi
 
 net: ## Ensure the external infra-net Docker network exists
-	@docker network create infra-net >/dev/null 2>&1 || true
+	@docker network create infra-net >/dev/null 2>&1 \
+		&& echo "created network infra-net" \
+		|| echo "network infra-net already exists"
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
