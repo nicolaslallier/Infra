@@ -1,0 +1,1216 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Overview",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1
+    },
+    {
+      "type": "stat",
+      "title": "Requests (range)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" [$__range]))",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 2
+    },
+    {
+      "type": "stat",
+      "title": "5xx (range)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" | status >= 500 [$__range])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 1
+      },
+      "id": 3
+    },
+    {
+      "type": "stat",
+      "title": "Latency p95",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.95, {compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" | unwrap duration_ms [$__range]) by ()",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 1
+      },
+      "id": 4
+    },
+    {
+      "type": "stat",
+      "title": "MCP tool calls (range)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.mcp.tools\" [$__range])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 5
+    },
+    {
+      "type": "stat",
+      "title": "Errors logged (range)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | level=~\"ERROR|CRITICAL\" [$__range])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 6
+    },
+    {
+      "type": "stat",
+      "title": "Warnings logged (range)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum(count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | level=\"WARNING\" [$__range])) or vector(0)",
+          "legendFormat": "",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "auto"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
+      "id": 7
+    },
+    {
+      "type": "row",
+      "title": "HTTP (API, health checks excluded)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 8
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by status",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (status) (count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" [$__interval]))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
+      "id": 9
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.50, {compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" | unwrap duration_ms [$__interval]) by ()",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.95, {compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" | unwrap duration_ms [$__interval]) by ()",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.99, {compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" | unwrap duration_ms [$__interval]) by ()",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
+      "id": 10
+    },
+    {
+      "type": "timeseries",
+      "title": "Slowest paths (p95)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "topk(10, quantile_over_time(0.95, {compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.requests\" | path!~\".*/health\" | unwrap duration_ms [$__interval]) by (method, path))",
+          "legendFormat": "{{method}} {{path}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      },
+      "id": 11
+    },
+    {
+      "type": "timeseries",
+      "title": "Log lines by level",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (level) (count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" [$__interval]))",
+          "legendFormat": "{{level}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      },
+      "id": 12
+    },
+    {
+      "type": "row",
+      "title": "MCP tools",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
+      "id": 13
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool calls by tool and outcome",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "sum by (tool, outcome) (count_over_time({compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.mcp.tools\" [$__interval]))",
+          "legendFormat": "{{tool}} ({{outcome}})",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
+      "id": 14
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool duration p95",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "quantile_over_time(0.95, {compose_project=\"ea\", compose_service=\"api\"} | json | __error__=\"\" | logger=\"ea.mcp.tools\" | unwrap duration_ms [$__interval]) by (tool)",
+          "legendFormat": "{{tool}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
+      "id": 15
+    },
+    {
+      "type": "row",
+      "title": "PostgreSQL (database ea)",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "id": 16
+    },
+    {
+      "type": "timeseries",
+      "title": "Active connections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_stat_database_numbackends{datname=\"ea\"}",
+          "legendFormat": "connections",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "id": 17
+    },
+    {
+      "type": "timeseries",
+      "title": "Transactions / s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(pg_stat_database_xact_commit{datname=\"ea\"}[5m])",
+          "legendFormat": "commit",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(pg_stat_database_xact_rollback{datname=\"ea\"}[5m])",
+          "legendFormat": "rollback",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "id": 18
+    },
+    {
+      "type": "timeseries",
+      "title": "Database size",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "pg_database_size_bytes{datname=\"ea\"}",
+          "legendFormat": "size",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "id": 19
+    },
+    {
+      "type": "row",
+      "title": "Containers",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      },
+      "id": 20
+    },
+    {
+      "type": "timeseries",
+      "title": "Container CPU",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\"ea-(api|web)-1\"}[5m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 41
+      },
+      "id": 21
+    },
+    {
+      "type": "timeseries",
+      "title": "Container memory",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\"ea-(api|web)-1\", image!=\"\"})",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 41
+      },
+      "id": 22
+    },
+    {
+      "type": "timeseries",
+      "title": "Network receive",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (name) (rate(container_network_receive_bytes_total{name=~\"ea-(api|web)-1\"}[5m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "id": 23
+    },
+    {
+      "type": "timeseries",
+      "title": "Network transmit",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (name) (rate(container_network_transmit_bytes_total{name=~\"ea-(api|web)-1\"}[5m]))",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "id": 24
+    },
+    {
+      "type": "row",
+      "title": "Logs",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "id": 25
+    },
+    {
+      "type": "logs",
+      "title": "Errors and warnings",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{compose_project=\"ea\", compose_service=\"api\"} | json | level=~\"ERROR|CRITICAL|WARNING\"",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 58
+      },
+      "id": 26
+    },
+    {
+      "type": "logs",
+      "title": "All logs ($service)",
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "expr": "{compose_project=\"ea\", compose_service=~\"$service\"} != \"/health\" |~ `$search`",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 68
+      },
+      "id": 27
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "ea",
+    "app"
+  ],
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "service",
+        "label": "Service",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": "label_values({compose_project=\"ea\"}, compose_service)",
+        "definition": "label_values({compose_project=\"ea\"}, compose_service)",
+        "refresh": 2,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "type": "textbox",
+        "name": "search",
+        "label": "Search (regex)",
+        "query": "",
+        "current": {
+          "text": "",
+          "value": ""
+        }
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "EA",
+  "uid": "ea-overview",
+  "version": 1
+}
