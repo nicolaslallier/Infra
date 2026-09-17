@@ -1,0 +1,27 @@
+# Macs scraped by the `macos` job in ../prometheus.yml. One entry per machine
+# running node_exporter (the darwin build) on :9100 -- see "macOS machines" in
+# README.md for the brew install and the firewall note.
+#
+# `hostname` is optional and cosmetic: when set it replaces IP:port as the
+# `instance` label, so dashboards, alerts and up{} name the machine.
+#
+# Prometheus re-reads this file every 30s, so adding a machine needs no
+# redeploy -- but it is bind-mounted from this checkout, so commit and push
+# the change before the next `make up` (the drift guard refuses untracked
+# files anyway).
+
+# The Mac this stack itself runs on. host.docker.internal is Docker Desktop's
+# route from a container back to its own host: from inside infra-net the Mac
+# is not a container and has no service name. This is the machine the `node`
+# job cannot describe -- node-exporter in the stack sees Docker Desktop's
+# Linux VM, this one sees the Mac.
+- targets: ["host.docker.internal:9100"]
+  labels:
+    hostname: mac-infra
+
+# Any other Mac on the LAN: reach it by address (this is exactly the case the
+# single-ingress rule does not cover -- the exporter runs on a host we don't
+# deploy to, not behind nginx).
+# - targets: ["192.168.2.30:9100"]
+#   labels:
+#     hostname: macbook-nicolas

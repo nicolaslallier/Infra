@@ -69,3 +69,19 @@ scrape_configs:
         target_label: instance
       - regex: hostname
         action: labeldrop
+
+  # Macs, each running node_exporter (darwin build) on :9100. Same shape as
+  # the `windows` job above, and separate from the `node` job on purpose:
+  # `node` is the node-exporter container, which describes Docker Desktop's
+  # Linux VM, not the Mac around it -- both emit node_* metrics, so a query
+  # that forgets job="macos" mixes the two.
+  - job_name: macos
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/macos.yml"]
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [hostname]
+        regex: (.+)
+        target_label: instance
+      - regex: hostname
+        action: labeldrop

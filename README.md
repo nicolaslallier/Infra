@@ -414,8 +414,9 @@ What you get:
 - **Metrics** — host (node-exporter), containers (cAdvisor), Postgres,
   NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
   MinIO, RabbitMQ (`:15692/metrics`), Alloy, Windows machines
-  (windows_exporter, job `windows` — see below), and sibling apps that expose
-  `/metrics` (Jarvis API at `jarvis-api:8000`, scraped as job `jarvis`)
+  (windows_exporter, job `windows` — see below), Macs (node_exporter's darwin
+  build, job `macos` — see below), and sibling apps that expose `/metrics`
+  (Jarvis API at `jarvis-api:8000`, scraped as job `jarvis`)
 - **Logs** — Alloy reads every container's stdout/stderr via the Docker
   socket (this stack and sibling Compose projects on the same host) and
   ships them to Loki
@@ -431,7 +432,8 @@ What you get:
 Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
 **Application logs**, **Jarvis** (`uid: jarvis-overview`) covering
 API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs and
-Tempo traces, and **Windows machines** (`uid: windows-hosts`).
+Tempo traces, **Windows machines** (`uid: windows-hosts`), and **macOS
+machines** (`uid: macos-hosts`).
 
 ### Windows machines
 
@@ -499,6 +501,81 @@ hundred series per machine. If that is more than you want to store, narrow it
 with `EXTRA_FLAGS="--collector.service.include=..."`; the *Auto-start services
 that are not running* panel then only covers the services you named.
 
+### macOS machines
+
+**macOS machines** (`uid: macos-hosts`) charts the LAN's Macs — CPU and load,
+memory the way Activity Monitor counts it, swap and paging, volumes, disk and
+network I/O, uptime, and battery. The **Mac** picker at the top filters every
+panel; leave it on *All* for the fleet.
+
+It is fed by [node_exporter][ne]'s **darwin build, running on each Mac** — not
+by the `node-exporter` container in this stack, which sees Docker Desktop's
+Linux VM. Same exception to the single-ingress rule as the Windows job: the
+exporter lives on a host we don't deploy to, so it is scraped over the LAN
+rather than fronted by NGINX.
+
+[ne]: https://github.com/prometheus/node_exporter
+
+Per Mac:
+
+```bash
+brew install node_exporter
+brew services start node_exporter     # listens on :9100, comes back at login
+
+curl -s localhost:9100/metrics | head -5
+```
+
+macOS prompts once to allow incoming connections the first time a LAN machine
+scrapes it; accept, or the target flaps between `up` and `down`. The default
+collector set on darwin already covers everything this dashboard reads —
+`cpu`, `meminfo`, `filesystem`, `diskstats`, `netdev`, `loadavg`, `boottime`,
+`uname` and `powersupplyclass` — so there is nothing to enable.
+
+Then list the Mac in
+[`monitoring/prometheus/targets/macos.yml`](monitoring/prometheus/targets/macos.yml),
+same shape as the Windows list (`hostname` optional, cosmetic, becomes the
+`instance` label):
+
+```yaml
+- targets: ["192.168.2.30:9100"]
+  labels:
+    hostname: macbook-nicolas
+```
+
+The Mac **this stack runs on** is scraped at `host.docker.internal:9100`, the
+same route the Windows job uses for its own host. It is the one machine the
+`node` job also reports on — but that job is the container, describing the
+Linux VM, so this is the dashboard that describes the actual hardware.
+
+Three things about the queries, all of which bite anyone adapting a
+Linux-shaped dashboard:
+
+- **The `node` and `macos` jobs share the `node_*` metric namespace.** Every
+  panel here pins `job="macos"`; drop that and the Docker Desktop VM is
+  averaged into the Mac's numbers.
+- **darwin spells the network counters differently.** It exports
+  `node_network_receive_errors_total` and `node_network_receive_dropped_total`
+  where Linux says `_errs_` and `_drop_`, and has no transmit-dropped counter
+  at all. The *Errors and drops / s* panel matches both spellings by
+  `__name__` regex so it charts on either.
+- **Memory used is wired + app + compressed**, over `hw.memsize` —
+  `node_memory_inactive_bytes` and `node_memory_purgeable_bytes` are
+  reclaimable, and counting them as used makes every Mac look permanently
+  full. Likewise on disk: `node_filesystem_purgeable_bytes` is space Finder
+  already counts as free, which is why a volume can read 95% used and not
+  actually be out of room.
+
+On an APFS Mac, `/` and `/System/Volumes/Data` share one container and report
+identical numbers (`/` being the read-only system snapshot), so both appear in
+*Volume used %*. The helper volumes (`Preboot`, `VM`, `Update`, `xarts`,
+`iSCPreboot`, `Hardware`) are filtered out. `/Volumes/Docker` — the external
+disk Docker Desktop's disk image lives on, per *The disk image must live on
+the external volume* in CLAUDE.md — does show up, which makes this dashboard
+the place that notices it filling before the daemon does.
+
+Battery panels are empty on a desktop Mac: IOKit has no power source to
+report. That is the expected reading, not a broken scrape.
+
 On an **already-running** Postgres volume (init scripts won't re-run):
 
 ```bash
@@ -508,11 +585,12 @@ make provision-monitoring-role   # postgres-exporter role (idempotent)
 ```
 
 **macOS / Docker Desktop:** node-exporter and cAdvisor see Docker Desktop's
-Linux VM, not the Mac host hardware — CPU/RAM/disk panels are best-effort and
-describe the VM's 6 vCPU / 12 GB / 100 GB, not the Mac's. Container metrics
-and logs still work. cAdvisor is the service most likely to need attention
-after the move off Colima; see the note on its mounts in
-`docker-compose.yml`.
+Linux VM, not the Mac host hardware — CPU/RAM/disk panels on **Infra
+overview** are best-effort and describe the VM's 6 vCPU / 12 GB / 100 GB, not
+the Mac's. That is what the **macOS machines** dashboard above is for: it
+reads a node_exporter running on the Mac itself. Container metrics and logs
+still work. cAdvisor is the service most likely to need attention after the
+move off Colima; see the note on its mounts in `docker-compose.yml`.
 
 ## Portainer
 
@@ -646,7 +724,7 @@ nginx/stream.d/          Postgres + RabbitMQ + Neo4j TCP proxy blocks
 postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
-monitoring/prometheus/targets/  file_sd target lists (Windows machines)
+monitoring/prometheus/targets/  file_sd target lists (Windows machines, Macs)
 scripts/                 check-docker.sh, migrate-volumes.sh, gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
 scripts/portainer-stack.sh    make up/down/pull/clean via Portainer's API
 scripts/portainer-metrics.py  host-side exporter: Portainer API -> Prometheus (:9999)
