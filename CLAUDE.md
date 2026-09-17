@@ -765,7 +765,15 @@ same reasons. What is specific to darwin:
   running on the Mac itself. Every panel in the dashboard pins
   `job="macos"`; a query that forgets it averages the VM into the hardware.
   The two never collide on the wire — the container is `node-exporter:9100`
-  on `infra-net`, the Mac is `host.docker.internal:9100`.
+  on `infra-net`, a Mac is `<its LAN address>:9100`.
+- **Never target a Mac as `host.docker.internal:9100`.** That name means
+  *the Docker host*, and the daemon this stack runs on is not necessarily a
+  Mac — it has been the Windows laptop, in which case the job quietly scrapes
+  whatever holds `:9100` over there (`426 Upgrade Required`) and
+  `up{job="macos"}` reads 0 forever while every panel says "No data". Macs
+  are LAN machines like the Windows ones: address them by IP, with a DHCP
+  reservation, and not by a `.local` name (mDNS does not resolve from inside
+  a Linux container).
 - **darwin's network counters are not Linux's.** The netdev collector on
   darwin keys them `receive_errors` / `receive_dropped`, so the metrics are
   `node_network_receive_errors_total` and

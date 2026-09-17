@@ -10,18 +10,18 @@
 # the change before the next `make up` (the drift guard refuses untracked
 # files anyway).
 
-# The Mac this stack itself runs on. host.docker.internal is Docker Desktop's
-# route from a container back to its own host: from inside infra-net the Mac
-# is not a container and has no service name. This is the machine the `node`
-# job cannot describe -- node-exporter in the stack sees Docker Desktop's
-# Linux VM, this one sees the Mac.
-- targets: ["host.docker.internal:9100"]
+# Macs are reached by LAN address, never by host.docker.internal. That name
+# resolves to *the Docker host* -- which is the Windows laptop, not a Mac --
+# so a target using it scrapes the wrong machine entirely (it answered
+# `426 Upgrade Required` from whatever holds :9100 on Windows, and
+# up{job="macos"} was 0 for as long as the job existed).
+#
+# Use a DHCP reservation rather than a .local name: mDNS does not resolve
+# from inside a Linux container.
+- targets: ["192.168.2.35:9100"]
   labels:
     hostname: mac-infra
 
-# Any other Mac on the LAN: reach it by address (this is exactly the case the
-# single-ingress rule does not cover -- the exporter runs on a host we don't
-# deploy to, not behind nginx).
-# - targets: ["192.168.2.30:9100"]
-#   labels:
-#     hostname: macbook-nicolas
+- targets: ["192.168.2.41:9100"]
+  labels:
+    hostname: mac-02
