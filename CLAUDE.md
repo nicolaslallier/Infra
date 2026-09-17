@@ -173,6 +173,11 @@ never orphans another app that's still attached to it):
 - **Windows machines** — no service of this stack at all: `windows_exporter`
   runs *on* each Windows host and Prometheus scrapes it over the LAN as job
   `windows`. See "Windows machines (`windows_exporter`)" below.
+- **Macs** — likewise no service of this stack: node_exporter's *darwin*
+  build runs on each Mac and Prometheus scrapes it over the LAN as job
+  `macos`, distinct from the `node` job (the node-exporter container, which
+  describes Docker Desktop's Linux VM). See "macOS machines
+  (`node_exporter` on darwin)" below.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
@@ -529,10 +534,11 @@ template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
 host-facing port behind one process is the point of this stack.
 
-The `windows` scrape job is outside this rule rather than an exception to
-it: `windows_exporter` is not a container and not a service this repo
-deploys, it runs on a LAN machine. There is nothing to put behind NGINX and
-nothing to publish — Prometheus reaches out to `<host>:9182`.
+The `windows` and `macos` scrape jobs are outside this rule rather than an
+exception to it: `windows_exporter` and node_exporter's darwin build are not
+containers and not services this repo deploys, they run on LAN machines.
+There is nothing to put behind NGINX and nothing to publish — Prometheus
+reaches out to `<host>:9182` / `<host>:9100`.
 
 `nginx` (HTTP/S + Postgres/AMQP TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own
@@ -743,6 +749,58 @@ Job `windows` in `monitoring/prometheus/prometheus.yml`, dashboard
   nothing and the tunnel adapters show up in every network panel. Likewise
   `windows_logical_disk_*{volume="_Total"}` is the exporter's own rollup and
   would double-count in any fleet-wide `max()`.
+
+### macOS machines (`node_exporter` on darwin)
+
+Job `macos` in `monitoring/prometheus/prometheus.yml`, targets in
+`monitoring/prometheus/targets/macos.yml`, dashboard
+`monitoring/grafana/provisioning/dashboards/json/macos.json`
+(`uid: macos-hosts`). The `file_sd` + `hostname` → `instance` relabel is
+the same machinery as the `windows` job above and is load-bearing for the
+same reasons. What is specific to darwin:
+
+- **`macos` and `node` are two jobs over one metric namespace.** Both emit
+  `node_*`: `node` is the node-exporter *container*, which sees Docker
+  Desktop's Linux VM (6 vCPU / 12 GB / 100 GB), `macos` is a node_exporter
+  running on the Mac itself. Every panel in the dashboard pins
+  `job="macos"`; a query that forgets it averages the VM into the hardware.
+  The two never collide on the wire — the container is `node-exporter:9100`
+  on `infra-net`, the Mac is `host.docker.internal:9100`.
+- **darwin's network counters are not Linux's.** The netdev collector on
+  darwin keys them `receive_errors` / `receive_dropped`, so the metrics are
+  `node_network_receive_errors_total` and
+  `node_network_receive_dropped_total` — Linux's `_errs_` and `_drop_` names
+  do not exist here, and there is no transmit-dropped counter at all. The
+  *Errors and drops / s* panel selects by `__name__` regex over both
+  spellings, the same "chart on whichever exists" idiom the Windows
+  dashboard uses for its `or`-ed expressions.
+- **Memory used is `wired + active + compressed`,** over
+  `node_memory_total_bytes` (darwin's meminfo collector exposes
+  `hw.memsize` directly; there is no `node_memory_MemTotal_bytes` here).
+  `inactive` and `purgeable` are reclaimable — counting them as used makes
+  every Mac read ~95% full, which is exactly why Activity Monitor doesn't.
+  The same holds on disk: `node_filesystem_purgeable_bytes` is APFS space
+  Finder already reports as free but `avail_bytes` does not.
+- **NIC and disk filters are include-lists, not exclude-lists.** macOS
+  invents a lot of virtual interfaces (`utun*` for VPNs, `awdl0`/`llw0` for
+  AirDrop, `anpi*`/`ap1` on Apple Silicon, `gif0`, `stf0`), and the set
+  grows with each release, so the panels match `en[0-9]+|bridge[0-9]+` and
+  `disk[0-9]+` rather than trying to enumerate the noise. PromQL regexes
+  are fully anchored, so those match exactly `en0`, `bridge0`, `disk0` —
+  slices like `disk0s1` are excluded on purpose, IOKit's stats are
+  whole-disk.
+- **`/` and `/System/Volumes/Data` are one APFS container** and report
+  identical numbers; `/` is the read-only system snapshot. Both are charted
+  — dropping one would be wrong on a non-APFS or pre-Catalina volume. The
+  helper volumes (`Preboot`, `VM`, `Update`, `xarts`, `iSCPreboot`,
+  `Hardware`) are filtered out; `/Volumes/Docker` is not, since that is the
+  external disk the Docker Desktop disk image lives on (see "The disk image
+  must live on the external volume" above) and its free space is worth
+  watching.
+- **Battery panels are empty on a desktop Mac.** `powersupplyclass` has no
+  power source to enumerate there. Don't "fix" it. On a laptop,
+  `node_power_supply_time_to_empty_seconds` is `-1` while charging or still
+  estimating, hence the `> 0` filter on that panel.
 
 ### PostgreSQL 18's data directory moved
 

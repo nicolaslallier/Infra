@@ -359,8 +359,8 @@ services:
       - --web.enable-lifecycle
     volumes:
       - ${INFRA_DIR:-.}/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # file_sd for the `windows` job: targets that are LAN hosts, not
-      # containers, so they can't be named inline as service names.
+      # file_sd for the `windows` and `macos` jobs: targets that are LAN
+      # hosts, not containers, so they can't be named inline as service names.
       - ${INFRA_DIR:-.}/monitoring/prometheus/targets:/etc/prometheus/targets:ro
       - prometheus-data:/prometheus
     networks:
