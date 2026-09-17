@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-RabbitMQ, Neo4j, Portainer, a Technitium DNS server, and an LGTM monitoring stack
-(Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via Docker Compose.
+RabbitMQ, Neo4j, OpenBao, Portainer, a Technitium DNS server, and an LGTM
+monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via
+Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
 over a shared Docker network rather than being folded into this one.
 
@@ -15,7 +16,7 @@ over a shared Docker network rather than being folded into this one.
 
 ```bash
 make / make help                 # list targets (default goal)
-make init                        # create infra-net, generate dev certs, copy .env.example -> .env
+make init                        # create infra-net, dev certs, OpenBao's seal key, copy .env.example -> .env
 make docker-start / make docker-stop  # launch / quit Docker Desktop (and wait for its daemon)
 make up / make down              # deploy-or-redeploy / stop the stack via Portainer (Git main)
 make restart                     # docker compose restart (optional: s=<service>)
@@ -28,12 +29,22 @@ make psql                        # psql shell as the superuser (via docker compo
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
 make provision-monitoring-role   # create/update postgres-exporter monitoring role
 make certs                       # generate TLS certs (FORCE=1 to regenerate)
+make seal-key                    # generate OpenBao's auto-unseal key (FORCE=1 replaces it)
+make vault-init                  # initialise the vault; root token -> .openbao.env
+make vault-seed                  # copy .env into the vault (infra/env)
+make vault-env                   # regenerate .env from the vault (old one -> .env.bak)
+make vault-status                # the vault's seal/init state
+make vault-cli args="kv list infra/"  # run any bao command against it
 make hosts                       # print the /etc/hosts lines this stack needs
 make dns-provision               # create/update the DNS zones & records the dns service serves
 make dns-check                   # query the dns service to confirm it's answering correctly
 make migrate-volumes             # copy the stack's volumes off the old Colima VM (DRY=1 previews)
 make clean CONFIRM=1             # delete the Portainer stack + its volumes (keeps Portainer, infra-net, certs/)
 ```
+
+The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
+is how a `.env` that `check-env` rejects gets repaired, so requiring it first
+would deadlock.
 
 `up`, `config`, `provision-app`, `dns-provision`, `dns-check`,
 `keycloak-seed-users` and `obsidian-minio` run `check-env`
@@ -80,6 +91,21 @@ never orphans another app that's still attached to it):
   apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
   exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
   `neo4j-data` volume — and `make clean` deletes that volume like the rest.
+- **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
+  `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
+  MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2
+  API and the same `bao`/`vault` CLI, so Vault's docs and client libraries
+  apply. Publishes no host port; apps on `infra-net` use
+  `http://openbao:8200`. Raft (integrated) storage on the `openbao-data`
+  volume, KV v2 mounted at `infra/`. **Auto-unseals** from
+  `openbao/seal.key` — a gitignored 32-byte file, not a `.env` value — which
+  is the only reason it survives `make up` at all (every deploy
+  force-recreates every container, and a Shamir-sealed vault would come back
+  sealed each time). `make vault-init` initialises it and writes the root
+  token to `.openbao.env`; `make vault-seed` / `make vault-env` are the two
+  directions of the `.env` round trip. See "Secrets (OpenBao)" below — the
+  seal key and the trade it makes are the part worth reading before touching
+  anything here.
 - **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
   UI, at `portainer.infra.famillelallier.net` and directly at
   `https://${LAN_IP}:9443`. The one backend that **publishes its own
@@ -241,6 +267,16 @@ because the failure it prevents surfaces somewhere other than `.env`:
   the README and the `:?` guards, and hence check-env naming that case
   specially: the fix is to re-spell the existing key, not to mint a new one
   (which invalidates every live session).
+- **A missing or wrong-sized `openbao/seal.key`.** The only check here that
+  is not about a value in `.env`, and it is here for exactly the reason the
+  rest are: it fails somewhere that never names the file. The key is
+  bind-mounted into `openbao` as a *file*, and Docker silently auto-creates a
+  **directory** for a bind mount whose source does not exist — so a checkout
+  that ran `make init` before OpenBao existed deploys a vault that dies on
+  "is a directory", with the whole secret store down. A key of the wrong
+  length fails later and more obscurely still: the static seal is AES-256 and
+  takes 32 bytes, nothing else. `make seal-key` generates it; it is
+  gitignored, so it can never arrive with a `git pull`.
 - **`LAN_IP` the host does not own.** `dns` publishes its ports on that
   address; a stale one (an old VM's, a changed DHCP lease) fails the bind
   and leaves every later service stuck in `Created`. Against a remote daemon
@@ -496,8 +532,8 @@ Things that look odd and are load-bearing:
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `portainer`,
-`grafana`, monitoring backends, and future apps) — not top-level infra
+(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `openbao`,
+`portainer`, `grafana`, monitoring backends, and future apps) — not top-level infra
 processes that own a protocol NGINX can't meaningfully front. `postgres`,
 `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `grafana`, and the
 rest of LGTM/exporters deliberately have no `ports:` key. All host access
@@ -505,8 +541,8 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
   proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `minio:9000`
-  / `minio:9001`, `rabbitmq:15672`, `portainer:9443` (https upstream), and,
-  per-app, to whatever apps register.
+  / `minio:9001`, `rabbitmq:15672`, `openbao:8200`, `portainer:9443` (https
+  upstream), and, per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
   `127.0.0.1:5432` at the Compose level so it never reaches the LAN.
@@ -528,7 +564,7 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`minio`, `rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `openbao`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
@@ -871,6 +907,89 @@ needed so apps like Jarvis can run RAG migrations without CREATE EXTENSION
 privilege. After swapping an existing cluster onto the pgvector image,
 re-run `make provision-app app=<name>` for each app (idempotent) so the
 extension is installed into already-existing databases.
+
+### Secrets (OpenBao)
+
+`openbao` is the stack's secret store, at `vault.infra.famillelallier.net`
+(UI + API through NGINX) and at `http://openbao:8200` for anything on
+`infra-net`. Config is `openbao/config.hcl`; the scripts are
+`scripts/vault-*.sh`, driven by `make vault-init` / `vault-seed` /
+`vault-env` / `vault-status` / `vault-cli`.
+
+**Bootstrap order**, once per vault:
+
+```bash
+make seal-key     # only if this checkout predates OpenBao; make init does it
+make up           # openbao comes up initialised=false, and that is fine
+make vault-init   # initialise, write .openbao.env, mount KV v2 at infra/
+make vault-seed   # copy the current .env into infra/env
+```
+
+Four things here are load-bearing.
+
+- **Auto-unseal, via a `static` seal reading a bind-mounted key file.**
+  This is not a convenience. OpenBao's default Shamir seal comes up *sealed*
+  after every restart and refuses every request until an operator types
+  unseal keys in — and every `make up` force-recreates every container
+  (Portainer's git-redeploy always sets `forceCreate=true`; see
+  "Portainer-managed stack"). A Shamir vault here would be sealed after every
+  deploy of the whole stack, which is to say most of the time. The `static`
+  seal encrypts the root key with the 32 bytes in `openbao/seal.key`.
+  Understand the trade before defending it: **whoever holds that file and the
+  `openbao-data` volume can decrypt the vault offline.** That is the
+  documented use of this seal type — chaining the vault to an existing source
+  of trust — and here that source is the machine's own disk. Back the key up
+  somewhere the volume is not; lose it and the vault is unrecoverable, since
+  no recovery key unseals an auto-sealed vault (the recovery key in
+  `.openbao.env` only regenerates a *root token*).
+- **The seal key is a file, not a `.env` value.** `.env` is handed to
+  containers wholesale (`postgres` `env_file`s it) and shipped to Portainer as
+  the stack env. A key that decrypts the secret store belongs in neither —
+  the same reasoning that keeps `PORTAINER_API_KEY` in `.portainer.env`. Same
+  for the root token, which `make vault-init` writes to `.openbao.env`; only
+  the `vault-*` scripts read it, and they forward it to the container by name
+  (`docker compose exec -e BAO_TOKEN`) so it never enters the host's process
+  list.
+- **`.env` does not go away, and cannot.** Compose has no way to read a
+  vault: it interpolates `${FOO}` from the environment it is handed, full
+  stop. So the vault is the *record* and `.env` is a rendered artifact of it.
+  `make vault-seed` pushes `.env` → `infra/env` (one KV field per variable,
+  named exactly as the variable is); `make vault-env` renders it back, using
+  **`.env.example` as the template** so the regenerated file keeps every
+  explanatory comment and, by construction, passes the one thing `check-env`
+  diffs — that every key `.env.example` assigns is present. A key the vault
+  lacks keeps `.env.example`'s value and is reported rather than silently
+  blanked; keys the vault has and the template lacks (a hand-added
+  `<APP>_DB_PASSWORD`) are appended. The old `.env` is kept as `.env.bak`,
+  which is gitignored **because it has to be** — an untracked file in the
+  checkout trips the Portainer drift guard and blocks the next `make up`.
+  The flat 1:1 mapping is deliberate: it is what makes the round trip
+  lossless and leaves nothing that can drift. Per-app secrets with a policy
+  and a token each belong at `infra/apps/<name>`, *beside* `infra/env` and
+  read by the app itself at runtime — they cannot replace it.
+- **The audit device is declared in `config.hcl`, not enabled over the API.**
+  OpenBao refuses API-created audit devices unless
+  `unsafe_allow_api_audit_creation` is on, and reasonably so: a device the
+  API can create, the API can also remove. Declared devices are applied when
+  the active node starts and on `SIGHUP`, and a vault becomes active during
+  `sys/init` — i.e. after it has already read its config — so
+  `vault-init.sh` HUPs the container once and then checks `bao audit list`
+  rather than assuming. It writes to **stdout**, so Alloy collects the audit
+  trail into Loki with every other container log and it needs no volume.
+  Values are HMAC'd before they are written: this records who asked for what,
+  never the secrets.
+
+Not done here, and worth knowing before assuming otherwise: the vault's only
+login is the root token in `.openbao.env`. There is no Keycloak OIDC auth
+method, no per-app policy, and no app in this stack or any sibling repo reads
+its secrets from the vault yet — they all still get them from `.env` via
+Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
+the listener sets `unauthenticated_metrics_access`, the same posture as
+MinIO's public metrics), but there is no Grafana dashboard for it.
+
+`vault.infra.famillelallier.net` needs no cert or DNS work: it rides the
+`*.infra.famillelallier.net` wildcard in both `gen-certs.sh` and the
+`infra.famillelallier.net` zone, which is exactly what that wildcard is for.
 
 ### Certificates
 

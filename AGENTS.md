@@ -1,8 +1,8 @@
 # AGENTS.md
 
 This repo is a Docker Compose infrastructure stack (NGINX, PostgreSQL 18
-with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, Portainer, Technitium
-DNS, and the LGTM monitoring stack). There is no application code, build,
+with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, OpenBao, Portainer,
+Technitium DNS, and the LGTM monitoring stack). There is no application code, build,
 lint, or unit-test step — the "test" is bringing the stack up and exercising
 it.
 See `README.md` and `CLAUDE.md` for the architecture and the full list of
@@ -79,7 +79,17 @@ startup caveats that the update script deliberately does NOT handle.
   `postgres:5432`. AMQP is the same pattern at `127.0.0.1:5672` →
   `rabbitmq:5672`, and Bolt at `127.0.0.1:7687` → `neo4j:7687`. `make psql` opens a superuser shell inside the container.
   Do not add a `ports:` entry to `postgres`/`pgadmin`/`keycloak`/`grafana`
-  /`minio`/`rabbitmq`/`neo4j`/`airflow-*`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  /`minio`/`rabbitmq`/`neo4j`/`airflow-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+
+- **The vault needs two files this snapshot may not have.** `openbao` reads
+  `openbao/seal.key` as a bind-mounted file, and Docker turns a *missing*
+  bind-mount source into an empty directory, so the container dies on "is a
+  directory" rather than on anything naming the file. `make seal-key`
+  generates it (gitignored, so it never arrives with a `git pull`);
+  `make check-env` fails the deploy when it is absent. After the stack is up,
+  `make vault-init` initialises the vault and writes the root token to
+  `.openbao.env`, and `make vault-seed` copies `.env` into it. See
+  `CLAUDE.md` "Secrets (OpenBao)" for what the auto-unseal key trades away.
 
 - **DNS zones** are provisioned via the Technitium API, not env vars:
   `make dns-provision` (idempotent), then `make dns-check` to verify
