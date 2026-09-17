@@ -33,6 +33,7 @@ make seal-key                    # generate OpenBao's auto-unseal key (FORCE=1 r
 make vault-init                  # initialise the vault; root token -> .openbao.env
 make vault-seed                  # copy .env into the vault (infra/env)
 make vault-env                   # regenerate .env from the vault (old one -> .env.bak)
+make vault-render                # what 'make up' runs: render .env from the vault, then deploy
 make vault-status                # the vault's seal/init state
 make vault-cli args="kv list infra/"  # run any bao command against it
 make hosts                       # print the /etc/hosts lines this stack needs
@@ -46,12 +47,19 @@ The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
 is how a `.env` that `check-env` rejects gets repaired, so requiring it first
 would deadlock.
 
-`up`, `config`, `provision-app`, `dns-provision`, `dns-check`,
+`up`, `pull`, `config`, `provision-app`, `dns-provision`, `dns-check`,
 `keycloak-seed-users` and `obsidian-minio` run `check-env`
 (`scripts/check-env.sh`) first — see "Preflight: `make check-env`" below for
-what it asserts and why each check exists. `up`, `config`,
+what it asserts and why each check exists. `up`, `pull`, `config`,
 and `portainer-up` also run `check-docker` (see "Runtime: Docker Desktop"
 below).
+
+`up` and `pull` — the two targets that deploy — run **`vault-render` before
+`check-env`**, so what gets validated and deployed is a `.env` rendered from
+the vault seconds earlier rather than whatever the checkout happened to hold.
+That ordering is why the Makefile declares `.NOTPARALLEL:`: prerequisites are
+only made left to right in a serial build. See "Rendering `.env` at deploy
+time" under "Secrets (OpenBao)" below for when it skips and when it fails.
 
 There is no build/lint/test step — this repo is Compose config, NGINX
 config, and shell scripts, not an application. Validate changes by actually
@@ -914,7 +922,7 @@ extension is installed into already-existing databases.
 (UI + API through NGINX) and at `http://openbao:8200` for anything on
 `infra-net`. Config is `openbao/config.hcl`; the scripts are
 `scripts/vault-*.sh`, driven by `make vault-init` / `vault-seed` /
-`vault-env` / `vault-status` / `vault-cli`.
+`vault-env` / `vault-render` / `vault-status` / `vault-cli`.
 
 **Bootstrap order**, once per vault:
 
@@ -964,7 +972,9 @@ Four things here are load-bearing.
   which is gitignored **because it has to be** — an untracked file in the
   checkout trips the Portainer drift guard and blocks the next `make up`.
   The flat 1:1 mapping is deliberate: it is what makes the round trip
-  lossless and leaves nothing that can drift. Per-app secrets with a policy
+  lossless and leaves nothing that can drift. What keeps it from drifting in
+  practice is that `make up` renders the file itself — see "Rendering `.env`
+  at deploy time" below. Per-app secrets with a policy
   and a token each belong at `infra/apps/<name>`, *beside* `infra/env` and
   read by the app itself at runtime — they cannot replace it.
 - **The audit device is declared in `config.hcl`, not enabled over the API.**
@@ -978,6 +988,46 @@ Four things here are load-bearing.
   trail into Loki with every other container log and it needs no volume.
   Values are HMAC'd before they are written: this records who asked for what,
   never the secrets.
+
+#### Rendering `.env` at deploy time
+
+`make up` and `make pull` run `vault-render` (`make vault-render` on its own
+does the same thing) **before** `check-env`, and `check-env` before the
+deploy. The deployer authenticates against the vault with the token in
+`.openbao.env`, pulls `infra/env`, writes `.env`, and only then hands it to
+Portainer. Nothing inside any container knows the vault exists: the secrets
+still arrive as the same flat Compose env they always did, rendered a moment
+earlier from the record instead of edited by hand months ago. A `.env` that
+has quietly drifted from the vault cannot be deployed by accident any more,
+and `make vault-env && make check-env && make up` is now just `make up`.
+
+Ordering is load-bearing and the reason the Makefile declares
+`.NOTPARALLEL:`: `vault-render` writes the file `check-env` then reads, and
+make only guarantees prerequisites are made left to right in a serial build.
+
+**It skips rather than blocks when there is no vault to read**, because the
+vault is a service of the very stack being deployed and so cannot be a
+precondition for deploying it. No `.openbao.env` (the vault has never been
+initialised) or no running `openbao` container (the stack is down — which is
+exactly when `make up` is most needed) both deploy the `.env` already in the
+checkout, saying so on stderr; `check-env` still has to accept it. That is
+what keeps the bootstrap order above working: the first `make up` happens
+before there is anything to render from.
+
+A vault that *is* up but refuses to be read — sealed, or an expired
+`BAO_TOKEN` — is an **error**, not a skip. Silently deploying last week's
+secrets is the failure this whole arrangement exists to prevent, so
+`vault-env.sh`'s exit status is passed straight through and the deploy never
+starts.
+
+`VAULT_RENDER=0 make up` turns the render off entirely, for an environment
+that has no vault at all (CI, the cloud VM in `AGENTS.md`).
+
+The running container is found by its compose label
+(`docker ps --filter label=com.docker.compose.service=openbao`) rather than
+with `docker compose ps`, which would have to interpolate
+`docker-compose.yml` first and so would die on the very `${VAR:?}` guards a
+stale `.env` is there to fix.
 
 Not done here, and worth knowing before assuming otherwise: the vault's only
 login is the root token in `.openbao.env`. There is no Keycloak OIDC auth
