@@ -3,11 +3,15 @@ SHELL := bash
 
 .DEFAULT_GOAL := help
 
+# Prerequisites are made left to right only in a serial build, and 'up'
+# depends on that: vault-render writes the .env that check-env then reads.
+.NOTPARALLEL:
+
 .PHONY: help init net certs seal-key up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
-	vault-init vault-seed vault-env vault-status vault-cli \
+	vault-init vault-seed vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
@@ -120,7 +124,7 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
-up: check-env check-docker net ## Deploy/redeploy the stack via Portainer (Git main)
+up: check-docker vault-render check-env net ## Deploy/redeploy the stack via Portainer (Git main)
 	./scripts/portainer-stack.sh up
 
 down: ## Stop the stack via Portainer (keeps volumes)
@@ -137,7 +141,7 @@ ps: status
 status: ## Show service status (alias: ps)
 	docker compose ps
 
-pull: ## Redeploy via Portainer, re-pulling images
+pull: check-docker vault-render check-env net ## Redeploy via Portainer, re-pulling images
 	./scripts/portainer-stack.sh pull
 
 config: check-env check-docker ## Validate docker-compose.yml + .env
@@ -196,7 +200,8 @@ ea-minio: check-env ## Create/update the MinIO bucket + user the EA API stores f
 
 # --- OpenBao (the secret store) --------------------------------------------
 # vault-init runs once per vault; seed/env are the two directions of the .env
-# round trip. None of them takes check-env: vault-env is how a .env that
+# round trip, and vault-render is the deploy-time half of it that 'make up'
+# runs for you. None of them takes check-env: vault-env is how a .env that
 # check-env rejects gets fixed, so requiring it first would deadlock.
 
 vault-init: ## Initialise the vault (root token -> .openbao.env, mount KV v2)
@@ -207,6 +212,45 @@ vault-seed: ## Copy .env into the vault (infra/env)
 
 vault-env: ## Regenerate .env from the vault (keeps the old one as .env.bak)
 	@./scripts/vault-env.sh
+
+# What "render at deploy time" means here: 'make up' / 'make pull'
+# authenticate against the vault with the token in .openbao.env, pull
+# infra/env, write .env, and only then deploy. No container is ever told the
+# vault exists -- Compose gets the same flat file it always got, rendered a
+# moment earlier from the record instead of edited by hand and left to drift.
+#
+# It skips rather than blocks when there is no vault to read, because the
+# vault is a service of the very stack being deployed and cannot be a
+# precondition for deploying it: before 'make vault-init' there is no
+# .openbao.env, and while the stack is down there is no openbao container to
+# exec into. Both cases deploy the .env already in the checkout -- which
+# check-env still has to accept -- and say so. A vault that *is* up but
+# refuses to be read (sealed, expired token) is an error, not a skip:
+# deploying last week's secrets silently is the failure worth preventing.
+#
+# VAULT_RENDER=0 turns it off outright, for an environment that has no vault
+# at all (CI, the cloud VM in AGENTS.md).
+#
+# The container is found by compose label rather than 'docker compose ps',
+# which would have to interpolate docker-compose.yml first and so would die
+# on the very `${VAR:?}` guards a stale .env is here to fix.
+vault-render: ## Render .env from the vault, as 'make up' does (VAULT_RENDER=0 skips)
+	@if [ "$(VAULT_RENDER)" = "0" ]; then \
+		echo "make vault-render: VAULT_RENDER=0 -- deploying the .env in this checkout as-is."; \
+		exit 0; \
+	fi; \
+	if [ ! -f .openbao.env ]; then \
+		echo "make vault-render: no .openbao.env, so this vault has not been initialised yet." >&2; \
+		echo "  Deploying the .env in this checkout as-is; 'make vault-init && make vault-seed' once it is up." >&2; \
+		exit 0; \
+	fi; \
+	if ! docker ps --filter label=com.docker.compose.service=openbao \
+		--format '{{.State}}' 2>/dev/null | grep -q '^running$$'; then \
+		echo "make vault-render: the openbao container is not running -- nothing to read the secrets from." >&2; \
+		echo "  Deploying the .env in this checkout as-is; re-run once the vault is back up." >&2; \
+		exit 0; \
+	fi; \
+	./scripts/vault-env.sh
 
 vault-status: ## Show the vault's seal/init state
 	@./scripts/vault-cli.sh status

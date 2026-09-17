@@ -90,6 +90,10 @@ startup caveats that the update script deliberately does NOT handle.
   `make vault-init` initialises the vault and writes the root token to
   `.openbao.env`, and `make vault-seed` copies `.env` into it. See
   `CLAUDE.md` "Secrets (OpenBao)" for what the auto-unseal key trades away.
+  On the Mac, `make up` renders `.env` from the vault before deploying;
+  here the stack comes up with plain compose, so nothing renders and `.env`
+  stays hand-edited. `VAULT_RENDER=0` is the opt-out if a `make up` is ever
+  run in an environment with no vault.
 
 - **DNS zones** are provisioned via the Technitium API, not env vars:
   `make dns-provision` (idempotent), then `make dns-check` to verify

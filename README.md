@@ -119,7 +119,10 @@ docker compose down   # no -v: keeps the volumes/data step 2 initialised
 make up               # Portainer creates stack `infra` from GitHub main
 ```
 
-`make up` also refuses to run unless this checkout is on `main`, clean,
+`make up` renders `.env` from the vault first (see "Rendering at deploy
+time" under "Secrets" below) — before the first `make vault-init` there is
+nothing to render from, so it says so and deploys the `.env` you edited in
+step 2. It also refuses to run unless this checkout is on `main`, clean,
 and at `origin/main`, since Portainer deploys from GitHub rather than your
 working tree, and only from the main checkout (not a worktree). Every
 `make up` recreates every container, so expect a brief outage (including a
@@ -409,6 +412,42 @@ as the variable is, so `kv get -field=POSTGRES_PASSWORD -mount=infra env`
 does what it looks like. KV v2 keeps every version, so
 `kv rollback -mount=infra -version=3 env` undoes a bad edit.
 
+### Rendering at deploy time
+
+The second line above is what `make up` (and `make pull`) now does for you.
+It renders `.env` from the vault *before* checking it and deploying:
+
+```
+make up
+ ├── check-docker     is this the right Docker daemon?
+ ├── vault-render     authenticate, pull infra/env, write .env
+ ├── check-env        is the file it just wrote deployable?
+ └── portainer-stack.sh up
+```
+
+So after editing a secret in the vault, `make up` is the whole procedure —
+nothing has to remember to re-render first, and a `.env` that has silently
+drifted from the record cannot be deployed by accident. Nothing inside a
+container learns about any of this: the secrets still arrive as the ordinary
+Compose env they always did, rendered a moment earlier instead of edited by
+hand months ago.
+
+When there is **no vault to read**, it says so and deploys the `.env` already
+in the checkout — `check-env` still has to accept it. That covers the two
+cases where requiring the vault would be circular, since the vault is itself
+a service of the stack being deployed:
+
+- no `.openbao.env` yet (the bootstrap above hasn't run), or
+- the `openbao` container isn't running (the stack is down — precisely when
+  `make up` matters most).
+
+A vault that *is* up but won't answer — sealed, or an expired token in
+`.openbao.env` — **fails the deploy** instead. Quietly shipping last week's
+secrets is the thing worth preventing.
+
+`VAULT_RENDER=0 make up` turns the render off for an environment that has no
+vault at all (CI, the cloud VM in `AGENTS.md`).
+
 ### What this does not do yet
 
 The vault's only login is that root token: there's no Keycloak OIDC auth
@@ -465,7 +504,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | Command | What it does |
 |---|---|
 | `make docker-start` / `make docker-stop` | Launch / quit Docker Desktop (see "Runtime" above) |
-| `make up` / `make down` | Deploy-or-redeploy / stop the stack **via Portainer** (Git `main`; `up` checks `.env`, Docker Desktop and that this checkout is at `origin/main`; every `up` recreates every container — brief outage expected) |
+| `make up` / `make down` | Deploy-or-redeploy / stop the stack **via Portainer** (Git `main`; `up` renders `.env` from the vault, then checks it, Docker Desktop, and that this checkout is at `origin/main`; every `up` recreates every container — brief outage expected) |
 | `make logs` / `make logs s=nginx` | Tail logs (all services, or one via `s=`) |
 | `make ps` / `make status` | Show service status |
 | `make restart` / `make restart s=keycloak` | Restart services (all, or one via `s=`) |
@@ -473,7 +512,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make pull` | Redeploy via Portainer, re-pulling images |
+| `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
@@ -482,6 +521,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make seal-key` | Generate OpenBao's auto-unseal key (`FORCE=1` replaces it — destroys an existing vault) |
 | `make vault-init` | Initialise the vault: root token → `.openbao.env`, KV v2 at `infra/` (idempotent) |
 | `make vault-seed` / `make vault-env` | Copy `.env` into the vault / regenerate `.env` from it (old one → `.env.bak`) |
+| `make vault-render` | Render `.env` from the vault the way `make up` does — skipping, with a notice, when there is no vault to read (`VAULT_RENDER=0` skips it outright) |
 | `make vault-status` / `make vault-cli args="..."` | Seal/init state / run any `bao` command against the vault |
 | `make dns-provision` | Create/update the DNS zones & records the `dns` service serves |
 | `make dns-check` | Query the `dns` service to confirm it's answering correctly |
