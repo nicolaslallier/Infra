@@ -55,7 +55,7 @@
   "timezone": "browser",
   "title": "macOS machines",
   "uid": "macos-hosts",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "type": "row",
@@ -1478,13 +1478,310 @@
     },
     {
       "type": "row",
-      "title": "System and power",
+      "title": "GPU",
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
         "y": 70
+      },
+      "panels": [],
+      "id": 36
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU busy %",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "macos_gpu_utilization_ratio{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} {{gpu}}",
+          "refId": "A"
+        }
+      ],
+      "description": "IOKit's Device Utilization for each accelerator, sampled by scripts/macos-gpu-textfile.sh and served through node_exporter's textfile collector — node_exporter's darwin build has no GPU collector of its own, so a Mac that is up with no series here has not had scripts/install-macos-gpu-exporter.sh run on it.",
+      "id": 37
+    },
+    {
+      "type": "timeseries",
+      "title": "GPU memory",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 71
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "macos_gpu_memory_in_use_bytes{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} {{gpu}} in use",
+          "refId": "A"
+        },
+        {
+          "expr": "macos_gpu_memory_allocated_bytes{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} {{gpu}} allocated",
+          "refId": "B"
+        }
+      ],
+      "description": "On Apple silicon this is unified memory the GPU holds, so it is already counted in the Memory panels above rather than being extra RAM. Allocated is the reservation, in use is the live part of it.",
+      "id": 38
+    },
+    {
+      "type": "timeseries",
+      "title": "Renderer and tiler utilization",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 79
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "macos_gpu_renderer_utilization_ratio{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} {{gpu}} renderer",
+          "refId": "A"
+        },
+        {
+          "expr": "macos_gpu_tiler_utilization_ratio{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} {{gpu}} tiler",
+          "refId": "B"
+        }
+      ],
+      "description": "The two engines behind the overall busy figure. The tiler series is Apple silicon only — an Intel or AMD GPU reports no tiler, and an empty half here is the expected reading on those Macs, not a broken sampler.",
+      "id": 39
+    },
+    {
+      "type": "bargauge",
+      "title": "GPU busy % (now)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 79
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.9
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "displayMode": "gradient",
+        "orientation": "horizontal",
+        "showUnfilled": true,
+        "valueMode": "color",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "expr": "macos_gpu_utilization_ratio{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}} {{gpu}}",
+          "refId": "A"
+        }
+      ],
+      "id": 40,
+      "description": "Each GPU's latest sample. This is a point sample taken every 15s, not an average over the scrape interval like the CPU panels, so a short burst can fall between two samples and never appear."
+    },
+    {
+      "type": "table",
+      "title": "GPUs",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 79
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ]
+        }
+      },
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "job": true,
+              "__name__": true
+            },
+            "renameByName": {}
+          }
+        }
+      ],
+      "targets": [
+        {
+          "expr": "macos_gpu_info{job=\"macos\", instance=~\"$instance\"}",
+          "legendFormat": "",
+          "refId": "A",
+          "format": "table",
+          "instant": true
+        }
+      ],
+      "id": 41,
+      "description": "model is empty on Intel Macs: the IOKit property holds raw hex there rather than a readable name, and is left undecoded. If a Mac vanishes from this table while up{job=\"macos\"} is still 1, its sampler agent has stopped — check time() - node_textfile_mtime_seconds{job=\"macos\"}."
+    },
+    {
+      "type": "row",
+      "title": "System and power",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 87
       },
       "panels": [],
       "id": 30
@@ -1500,7 +1797,7 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 71
+        "y": 88
       },
       "fieldConfig": {
         "defaults": {
@@ -1557,7 +1854,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 71
+        "y": 88
       },
       "fieldConfig": {
         "defaults": {
@@ -1616,7 +1913,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 93
       },
       "fieldConfig": {
         "defaults": {
@@ -1678,7 +1975,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 76
+        "y": 93
       },
       "fieldConfig": {
         "defaults": {
@@ -1739,7 +2036,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 76
+        "y": 93
       },
       "fieldConfig": {
         "defaults": {
