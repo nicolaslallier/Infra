@@ -1,0 +1,25 @@
+# Windows machines scraped by the `windows` job in ../prometheus.yml.
+# One entry per machine running windows_exporter on :9182 -- see "Windows
+# machines" in README.md for the install command and the firewall rule.
+#
+# `hostname` is optional and cosmetic: when set it replaces IP:port as the
+# `instance` label, so dashboards, alerts and up{} name the machine.
+#
+# Prometheus re-reads this file every 30s, so adding a machine needs no
+# redeploy -- but it is bind-mounted from this checkout, so commit and push
+# the change before the next `make up` (the drift guard refuses untracked
+# files anyway).
+
+# The machine this stack itself runs on. host.docker.internal is Docker
+# Desktop's route from a container back to its own host: from inside
+# infra-net the laptop is not a container and has no service name.
+- targets: ["host.docker.internal:9182"]
+  labels:
+    hostname: laptop-dopbpc0j
+
+# Any other Windows machine on the LAN: reach it by address (this is exactly
+# the case the single-ingress rule does not cover -- the exporter runs on a
+# host we don't deploy to, not behind nginx).
+# - targets: ["192.168.2.20:9182"]
+#   labels:
+#     hostname: desk-nicolas
