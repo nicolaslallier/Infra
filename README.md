@@ -413,7 +413,8 @@ What you get:
 
 - **Metrics** — host (node-exporter), containers (cAdvisor), Postgres,
   NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
-  MinIO, RabbitMQ (`:15692/metrics`), Alloy, and sibling apps that expose
+  MinIO, RabbitMQ (`:15692/metrics`), Alloy, Windows machines
+  (windows_exporter, job `windows` — see below), and sibling apps that expose
   `/metrics` (Jarvis API at `jarvis-api:8000`, scraped as job `jarvis`)
 - **Logs** — Alloy reads every container's stdout/stderr via the Docker
   socket (this stack and sibling Compose projects on the same host) and
@@ -428,9 +429,75 @@ What you get:
   the same trace
 
 Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
-**Application logs**, and **Jarvis** (`uid: jarvis-overview`) covering
-API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs, and
-Tempo traces.
+**Application logs**, **Jarvis** (`uid: jarvis-overview`) covering
+API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs and
+Tempo traces, and **Windows machines** (`uid: windows-hosts`).
+
+### Windows machines
+
+**Windows machines** (`uid: windows-hosts`) charts the LAN's Windows hosts —
+CPU, memory and commit charge, volumes, disk and network I/O, uptime, and
+auto-start services that are not running. The **Machine** picker at the top
+filters every panel; leave it on *All* for the fleet.
+
+It is fed by [windows_exporter][we] running **on each Windows machine**, not
+by anything in this stack. That is the one place the single-ingress rule does
+not reach: the exporter lives on a host we don't deploy to, so it is scraped
+over the LAN rather than fronted by NGINX.
+
+[we]: https://github.com/prometheus-community/windows_exporter/releases
+
+Per machine, in an **Administrator** PowerShell — take the current
+`windows_exporter-<version>-amd64.msi` from the releases page above:
+
+```powershell
+msiexec /i windows_exporter-<version>-amd64.msi /qn `
+  ENABLED_COLLECTORS="cpu,logical_disk,memory,net,os,service,system" `
+  LISTEN_PORT=9182
+
+# Only if the installer did not add its own inbound rule (check first with
+# `Get-NetFirewallRule -DisplayName 'windows_exporter*'`) -- New-NetFirewallRule
+# happily creates a duplicate.
+New-NetFirewallRule -DisplayName "windows_exporter" -Direction Inbound `
+  -Protocol TCP -LocalPort 9182 -Action Allow
+
+Invoke-RestMethod http://localhost:9182/metrics | Select-Object -First 5
+```
+
+On a windows_exporter older than v0.30, add `cs` to `ENABLED_COLLECTORS`:
+total physical memory lived there before the `memory` collector gained it.
+The dashboard reads whichever of the two exists, so a fleet running mixed
+versions charts whole.
+
+Then list the machine in
+[`monitoring/prometheus/targets/windows.yml`](monitoring/prometheus/targets/windows.yml)
+— one entry per host, `hostname` optional and cosmetic (it becomes the
+`instance` label, so panels name the machine instead of an IP):
+
+```yaml
+- targets: ["192.168.2.20:9182"]
+  labels:
+    hostname: desk-nicolas
+```
+
+Prometheus re-reads that file every 30s, so a new machine appears without a
+restart — but it is bind-mounted from this checkout, so commit and push
+before the next `make up` (the drift guard refuses untracked files anyway).
+Confirm with Prometheus → Status → Targets, or the dashboard's *Machines*
+tile.
+
+Two things to know about the machine **this stack runs on**: it is scraped at
+`host.docker.internal:9182` (Docker Desktop's route from a container back to
+its own host — from inside `infra-net` the laptop is not a container), and
+its firewall rule has to cover the Docker/WSL virtual adapter, not just the
+LAN one. It is also the one machine node-exporter and cAdvisor already
+report on — but they see Docker Desktop's Linux VM, so windows_exporter is
+what actually describes the hardware.
+
+The `service` collector enumerates every service on the box, which is a few
+hundred series per machine. If that is more than you want to store, narrow it
+with `EXTRA_FLAGS="--collector.service.include=..."`; the *Auto-start services
+that are not running* panel then only covers the services you named.
 
 On an **already-running** Postgres volume (init scripts won't re-run):
 
@@ -579,6 +646,7 @@ nginx/stream.d/          Postgres + RabbitMQ + Neo4j TCP proxy blocks
 postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
 monitoring/              prometheus, loki, tempo, alloy, grafana provisioning
+monitoring/prometheus/targets/  file_sd target lists (Windows machines)
 scripts/                 check-docker.sh, migrate-volumes.sh, gen-certs.sh, provision-app.sh, print-hosts-entries.sh, dns-provision.sh, dns-check.sh
 scripts/portainer-stack.sh    make up/down/pull/clean via Portainer's API
 scripts/portainer-metrics.py  host-side exporter: Portainer API -> Prometheus (:9999)

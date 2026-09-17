@@ -170,6 +170,9 @@ never orphans another app that's still attached to it):
   Postgres database/role `grafana`. Alloy mounts the Docker socket to
   collect container logs (all Compose projects on the host) and accepts
   OTLP (`alloy:4317` / `alloy:4318`) for traces forwarded to Tempo.
+- **Windows machines** — no service of this stack at all: `windows_exporter`
+  runs *on* each Windows host and Prometheus scrapes it over the LAN as job
+  `windows`. See "Windows machines (`windows_exporter`)" below.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
@@ -526,6 +529,11 @@ template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
 host-facing port behind one process is the point of this stack.
 
+The `windows` scrape job is outside this rule rather than an exception to
+it: `windows_exporter` is not a container and not a service this repo
+deploys, it runs on a LAN machine. There is nothing to put behind NGINX and
+nothing to publish — Prometheus reaches out to `<host>:9182`.
+
 `nginx` (HTTP/S + Postgres/AMQP TCP) and `dns` (LAN DNS) are peers at a
 different, top tier: each is the sole host-facing process for its own
 protocol, not a backend NGINX fronts. `dns` publishing `ports:` for 53
@@ -703,6 +711,38 @@ console afterwards exactly like `jarvis`'s.
 `--import-realm` only seeds a realm that does not exist yet — editing this
 file after the first `make up` does not touch the live `ea` realm; repeat
 the change in the admin console too.
+
+### Windows machines (`windows_exporter`)
+
+Job `windows` in `monitoring/prometheus/prometheus.yml`, dashboard
+`monitoring/grafana/provisioning/dashboards/json/windows.json`
+(`uid: windows-hosts`). Four things here are deliberate:
+
+- **`file_sd_configs`, not `static_configs`.** These are the only targets
+  that aren't containers on `infra-net`, so they can't be named by service
+  name and the list churns as machines come and go. `file_sd` re-reads
+  `monitoring/prometheus/targets/windows.yml` every 30s, so adding a machine
+  doesn't need a Prometheus restart. The file is still bind-mounted from the
+  checkout (`${INFRA_DIR:-.}/monitoring/prometheus/targets`), so it must be
+  committed — the drift guard refuses untracked files, and Portainer mounts
+  the checkout, not Git.
+- **The `hostname` → `instance` relabel.** A target may carry a `hostname`
+  label; `relabel_configs` copies it over `instance` and drops it. Without
+  that, every legend, `up{}` series and the dashboard's Machine picker reads
+  `192.168.2.20:9182`. Set it for new machines.
+- **Every memory/uptime expression is `A or B`.** windows_exporter folded
+  the `cs` and `os` collectors into `memory`/`system` around v0.30 and
+  renamed the metrics with them (`windows_cs_physical_memory_bytes` →
+  `windows_memory_physical_total_bytes`, `windows_system_system_up_time` →
+  `windows_system_boot_time_timestamp_seconds`). `or` is per-series, so a
+  fleet on mixed versions charts whole. Don't "simplify" one side away until
+  every machine is upgraded.
+- **`(?i)` in the NIC filter, `_Total` out of the volume filter.** PromQL
+  regexes are case-sensitive and fully anchored, and the adapter is spelled
+  `Microsoft_ISATAP_Adapter` — a lowercase `.*isatap.*` silently matches
+  nothing and the tunnel adapters show up in every network panel. Likewise
+  `windows_logical_disk_*{volume="_Total"}` is the exporter's own rollup and
+  would double-count in any fleet-wide `max()`.
 
 ### PostgreSQL 18's data directory moved
 
