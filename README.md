@@ -415,7 +415,8 @@ What you get:
   NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
   MinIO, RabbitMQ (`:15692/metrics`), Alloy, Windows machines
   (windows_exporter, job `windows` — see below), Macs (node_exporter's darwin
-  build, job `macos` — see below), and sibling apps that expose `/metrics`
+  build plus a GPU sampler, job `macos` — see below), and sibling apps that
+  expose `/metrics`
   (Jarvis API at `jarvis-api:8000`, scraped as job `jarvis`)
 - **Logs** — Alloy reads every container's stdout/stderr via the Docker
   socket (this stack and sibling Compose projects on the same host) and
@@ -505,8 +506,8 @@ that are not running* panel then only covers the services you named.
 
 **macOS machines** (`uid: macos-hosts`) charts the LAN's Macs — CPU and load,
 memory the way Activity Monitor counts it, swap and paging, volumes, disk and
-network I/O, uptime, and battery. The **Mac** picker at the top filters every
-panel; leave it on *All* for the fleet.
+network I/O, GPU, uptime, and battery. The **Mac** picker at the top filters
+every panel; leave it on *All* for the fleet.
 
 It is fed by [node_exporter][ne]'s **darwin build, running on each Mac** — not
 by the `node-exporter` container in this stack, which sees Docker Desktop's
@@ -575,6 +576,77 @@ the place that notices it filling before the daemon does.
 
 Battery panels are empty on a desktop Mac: IOKit has no power source to
 report. That is the expected reading, not a broken scrape.
+
+#### GPU panels
+
+The **GPU** row — busy %, GPU memory, renderer/tiler split, and a table of the
+accelerators found — needs one extra step per Mac, because **node_exporter's
+darwin build has no GPU collector**. Not disabled: absent. There is no
+`node_*` GPU metric on macOS and no flag that produces one, so the numbers
+have to come from somewhere else.
+
+They come from IOKit, read with `ioreg` — which needs no root, unlike
+`powermetrics` — by [`scripts/macos-gpu-textfile.sh`](scripts/macos-gpu-textfile.sh),
+and are handed to node_exporter's **textfile collector** rather than to a
+second exporter on a second port. That keeps them on the same `job="macos"`
+scrape as everything else on the dashboard, so they carry the same `instance`
+label, answer to the same **Mac** picker, and need no new Prometheus job, no
+new targets file and no second firewall prompt.
+
+Per Mac, from a checkout of this repo:
+
+```bash
+./scripts/install-macos-gpu-exporter.sh
+
+curl -s http://localhost:9100/metrics | grep '^macos_gpu'
+```
+
+That installs two launchd agents under `~/Library/LaunchAgents` (no sudo): one
+runs the sampler every 15s, the other runs node_exporter itself with
+`--collector.textfile.directory`. The second one **replaces
+`brew services start node_exporter`**, and the installer stops the brew
+service so the two cannot fight over `:9100`. It has to: node_exporter takes
+that directory only as a command-line flag, and `brew services` runs the
+binary with no arguments and regenerates its plist on every restart, so an
+edited Homebrew plist does not survive. Same binary, same port, same default
+collectors, one added flag. To go back:
+
+```bash
+./scripts/install-macos-gpu-exporter.sh --uninstall
+brew services start node_exporter     # GPU panels go empty, everything else stays
+```
+
+What the panels read:
+
+| metric | |
+|---|---|
+| `macos_gpu_utilization_ratio` | IOKit *Device Utilization*, 0–1 — the headline busy figure |
+| `macos_gpu_renderer_utilization_ratio` / `macos_gpu_tiler_utilization_ratio` | the two engines behind it; **tiler is Apple silicon only** |
+| `macos_gpu_memory_in_use_bytes` / `macos_gpu_memory_allocated_bytes` | on Apple silicon this is unified memory, already counted in the Memory panels — not extra RAM |
+| `macos_gpu_info` | registry name, IOKit class, and model (empty on Intel, where the property is raw hex and is left undecoded) |
+| `macos_gpu_accelerators` | how many GPUs `ioreg` found; `0` means the sampler ran and saw nothing |
+
+Three things worth knowing:
+
+- **These are point samples, not rates.** Every other panel on this dashboard
+  averages a counter over the scrape window; `ioreg` reports an instantaneous
+  gauge, so the GPU panels have the sampler's 15s resolution and a burst
+  shorter than that can fall between two samples. Raise the cadence with
+  `SAMPLE_INTERVAL=5 ./scripts/install-macos-gpu-exporter.sh` if that matters.
+- **The launchd agent points at the script's path in your checkout**, so a
+  `git pull` updates it in place — but moving or deleting the checkout breaks
+  the agent. Re-run the installer after moving it.
+- **A silent sampler looks exactly like an idle GPU**, since both are "no
+  recent data". `time() - node_textfile_mtime_seconds{job="macos"}` is the
+  distinguishing query: if it climbs past a minute, the agent has stopped
+  (`launchctl list | grep famillelallier`, and
+  `$(brew --prefix)/var/log/macos-gpu-textfile.err.log`).
+
+The IOKit key spelling is not stable across macOS releases and GPU families —
+the same counter appears as `"Device Utilization %"` and as
+`"device utilization"` — so the sampler matches both, case-insensitively.
+Don't "simplify" that to one spelling; it is the same
+chart-on-whichever-exists idiom as the network-counter regex above.
 
 On an **already-running** Postgres volume (init scripts won't re-run):
 

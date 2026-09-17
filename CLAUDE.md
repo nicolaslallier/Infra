@@ -755,9 +755,10 @@ Job `windows` in `monitoring/prometheus/prometheus.yml`, dashboard
 Job `macos` in `monitoring/prometheus/prometheus.yml`, targets in
 `monitoring/prometheus/targets/macos.yml`, dashboard
 `monitoring/grafana/provisioning/dashboards/json/macos.json`
-(`uid: macos-hosts`). The `file_sd` + `hostname` → `instance` relabel is
-the same machinery as the `windows` job above and is load-bearing for the
-same reasons. What is specific to darwin:
+(`uid: macos-hosts`), GPU sampler `scripts/macos-gpu-textfile.sh` +
+`scripts/install-macos-gpu-exporter.sh`. The `file_sd` + `hostname` →
+`instance` relabel is the same machinery as the `windows` job above and is
+load-bearing for the same reasons. What is specific to darwin:
 
 - **`macos` and `node` are two jobs over one metric namespace.** Both emit
   `node_*`: `node` is the node-exporter *container*, which sees Docker
@@ -809,6 +810,31 @@ same reasons. What is specific to darwin:
   power source to enumerate there. Don't "fix" it. On a laptop,
   `node_power_supply_time_to_empty_seconds` is `-1` while charging or still
   estimating, hence the `> 0` filter on that panel.
+- **The GPU row is not node_exporter's.** The darwin build has no GPU
+  collector — absent, not disabled, and no flag produces one — so
+  `scripts/macos-gpu-textfile.sh` reads IOKit via `ioreg` (no root, unlike
+  `powermetrics`) and writes `macos_gpu_*` into node_exporter's **textfile
+  collector** directory. Riding the existing `job="macos"` scrape rather than
+  standing up a second exporter on a second port is what keeps the `instance`
+  label, the **Mac** picker and the targets file working unchanged; a separate
+  job would have needed all three duplicated. `scripts/install-macos-gpu-exporter.sh`
+  installs the sampler's launchd agent **and** one for node_exporter itself,
+  replacing `brew services start node_exporter`: the textfile directory is a
+  command-line flag only, and `brew services` runs the binary bare and
+  rewrites its plist on every restart, so an edited Homebrew plist does not
+  survive. The installer stops the brew service so the two never contend for
+  `:9100`; `--uninstall` reverses both halves.
+- **`macos_gpu_*` are point samples, not rates.** Every other panel here
+  averages a counter over the scrape window; IOKit reports an instantaneous
+  gauge, so the resolution is the sampler's `SAMPLE_INTERVAL` (15s). A stopped
+  sampler and an idle GPU both read as "no recent data" — the query that tells
+  them apart is `time() - node_textfile_mtime_seconds{job="macos"}`.
+- **Both IOKit spellings are matched, case-insensitively.** The same counter
+  is `"Device Utilization %"` on some macOS/GPU combinations and
+  `"device utilization"` on others, and the tiler counter does not exist at
+  all outside Apple silicon. That is the same chart-on-whichever-exists idiom
+  as the `or`-ed Windows expressions and the network-counter regex above —
+  don't collapse it to one spelling.
 
 ### PostgreSQL 18's data directory moved
 
