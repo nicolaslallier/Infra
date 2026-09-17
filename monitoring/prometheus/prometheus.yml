@@ -51,6 +51,18 @@ scrape_configs:
     static_configs:
       - targets: ["rabbitmq:15692"]
 
+  # OpenBao. /v1/sys/metrics is an authenticated endpoint by default, which
+  # would make this scrape a 403 with no obvious cause; the listener in
+  # openbao/config.hcl opens it with unauthenticated_metrics_access, the same
+  # posture as minio's public metrics. `format=prometheus` matters too --
+  # without it the endpoint answers in Telemetry's own JSON.
+  - job_name: openbao
+    metrics_path: /v1/sys/metrics
+    params:
+      format: ["prometheus"]
+    static_configs:
+      - targets: ["openbao:8200"]
+
   # Windows machines, each running windows_exporter on :9182. The only job
   # whose targets are not containers on infra-net, so they live in a file
   # rather than inline here: file_sd is re-read every 30s, so adding a machine

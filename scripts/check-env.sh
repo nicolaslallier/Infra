@@ -21,6 +21,10 @@
 #      service publishes its ports on that address, and a stale one fails
 #      the bind and leaves every later service stuck in "Created").
 #
+# Section 3 also covers the one file outside .env that a deploy cannot be
+# missing, openbao/seal.key, for the same reason the rest is here: its
+# absence surfaces as a container dying on something that never names it.
+#
 # The two oauth2-proxy *client* secrets are deliberately not errors: Keycloak
 # generates them when it imports the realm, so they cannot exist before the
 # first deploy. They are warned about instead, which is also what makes the
@@ -252,6 +256,27 @@ else
 	elif [ -z "${DOCKER_HOST:-}" ] && [ -n "$addrs" ] \
 		&& ! printf '%s\n' "$addrs" | grep -qxF "$LAN_IP"; then
 		errors+=("LAN_IP=$LAN_IP is not an address on this host (have: $(echo $addrs))")
+	fi
+fi
+
+# openbao/seal.key is bind-mounted into the openbao container as a file. A
+# bind mount whose source does not exist gets auto-created by Docker as an
+# empty *directory*, so a missing key does not fail the deploy -- it starts
+# OpenBao against a directory, which dies on "is a directory" and takes the
+# secret store down with it. A key of the wrong size fails later and more
+# obscurely: the static seal is AES-256 and takes 32 bytes, nothing else.
+# Not gated on .env, because this file is generated (`make seal-key`), not
+# copied, and a checkout that ran `make init` before OpenBao existed has none.
+SEAL_KEY=openbao/seal.key
+if [ ! -f "$SEAL_KEY" ]; then
+	errors+=("$SEAL_KEY is missing -- openbao would start against an auto-created directory and die. Generate it with 'make seal-key' (it is gitignored; back it up, it is what decrypts the vault).")
+elif [ -d "$SEAL_KEY" ]; then
+	errors+=("$SEAL_KEY is a directory, which is what Docker leaves behind when the stack was deployed without it. Remove it and run 'make seal-key'.")
+else
+	seal_size=$(wc -c <"$SEAL_KEY")
+	seal_size=${seal_size//[[:space:]]/}
+	if [ "$seal_size" != "32" ]; then
+		errors+=("$SEAL_KEY is $seal_size bytes; OpenBao's static seal only accepts a 32-byte key. If the vault has never been initialised, delete it and run 'make seal-key'; if it has, restore the real key from your backup -- nothing else can decrypt openbao-data.")
 	fi
 fi
 

@@ -3,10 +3,11 @@ SHELL := bash
 
 .DEFAULT_GOAL := help
 
-.PHONY: help init net certs up down restart logs ps status pull config \
+.PHONY: help init net certs seal-key up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
+	vault-init vault-seed vault-env vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
@@ -29,7 +30,7 @@ endif
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-init: net certs ## Create network, certs, and .env from .env.example
+init: net certs seal-key ## Create network, certs, OpenBao's seal key, and .env
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "Created .env — edit passwords, LAN_IP, and DNS_ADMIN_PASSWORD before 'make up'."; \
@@ -44,6 +45,12 @@ net: ## Ensure the external infra-net Docker network exists
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
+
+# openbao/seal.key is what lets the vault unseal itself after a restart, and
+# the only thing that can decrypt the openbao-data volume. Never regenerate it
+# for a vault that holds anything (FORCE=1 says so before it does).
+seal-key: ## Generate OpenBao's auto-unseal key (FORCE=1 to replace)
+	@./scripts/gen-seal-key.sh $(if $(filter 1,$(FORCE)),--force,)
 
 hosts: ## Print /etc/hosts lines for this stack
 	@./scripts/print-hosts-entries.sh
@@ -186,6 +193,27 @@ obsidian-minio: check-env ## Create/update the MinIO bucket + user Obsidian sync
 
 ea-minio: check-env ## Create/update the MinIO bucket + user the EA API stores files in
 	@./scripts/provision-ea-minio.sh
+
+# --- OpenBao (the secret store) --------------------------------------------
+# vault-init runs once per vault; seed/env are the two directions of the .env
+# round trip. None of them takes check-env: vault-env is how a .env that
+# check-env rejects gets fixed, so requiring it first would deadlock.
+
+vault-init: ## Initialise the vault (root token -> .openbao.env, mount KV v2)
+	@./scripts/vault-init.sh
+
+vault-seed: ## Copy .env into the vault (infra/env)
+	@./scripts/vault-seed.sh
+
+vault-env: ## Regenerate .env from the vault (keeps the old one as .env.bak)
+	@./scripts/vault-env.sh
+
+vault-status: ## Show the vault's seal/init state
+	@./scripts/vault-cli.sh status
+
+vault-cli: ## Run a bao command (args="kv list infra/")
+	@test -n "$(args)" || { echo 'usage: make vault-cli args="kv list infra/"' >&2; exit 1; }
+	@./scripts/vault-cli.sh $(args)
 
 # Deleting the Portainer stack only removes its containers; 'down -v' then
 # drops the volumes docker-compose.yml declares -- infra_portainer-data is

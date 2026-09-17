@@ -17,6 +17,7 @@ CHAT_HOST="chat.famillelallier.net"
 EA_HOST="ea.infra.famillelallier.net"
 OBSIDIAN_HOST="obsidian.infra.famillelallier.net"
 AIRFLOW_HOST="airflow.infra.famillelallier.net"
+VAULT_HOST="vault.infra.famillelallier.net"
 
 # The stack's host (LAN_IP from .env), not this machine: the stack runs on
 # the Windows laptop, and loopback only reaches it when run from there.
@@ -40,6 +41,7 @@ $IP $CHAT_HOST
 $IP $EA_HOST
 $IP $OBSIDIAN_HOST
 $IP $AIRFLOW_HOST
+$IP $VAULT_HOST
 
 One way to append them:
 
@@ -57,5 +59,6 @@ $IP $CHAT_HOST
 $IP $EA_HOST
 $IP $OBSIDIAN_HOST
 $IP $AIRFLOW_HOST
+$IP $VAULT_HOST
 HOSTS
 EOF
