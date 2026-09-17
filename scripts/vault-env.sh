@@ -32,7 +32,13 @@ die() { echo "vault-env.sh: $*" >&2; exit 1; }
 : "${BAO_TOKEN:?vault-env.sh: BAO_TOKEN not set in .openbao.env}"
 export BAO_TOKEN
 
-bao() { docker compose exec -T -e BAO_TOKEN openbao bao "$@"; }
+# The token goes in as the first line of stdin, never as an argument, so it
+# stays out of the host's process list. Not `-e BAO_TOKEN`: on this host
+# neither `docker compose exec` nor `docker exec` forwards a bare `-e VAR`.
+bao() {
+  printf '%s\n' "$BAO_TOKEN" \
+    | docker compose exec -T openbao sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' bao "$@"
+}
 
 secret_json="$(bao kv get -format=json -mount="$MOUNT" "$SECRET" 2>/dev/null | jq -c '.data.data' || true)"
 if [ -z "$secret_json" ] || [ "$secret_json" = "null" ]; then

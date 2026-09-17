@@ -11,7 +11,7 @@ SHELL := bash
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
-	vault-init vault-seed vault-env vault-render vault-status vault-cli \
+	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
@@ -204,11 +204,17 @@ ea-minio: check-env ## Create/update the MinIO bucket + user the EA API stores f
 # runs for you. None of them takes check-env: vault-env is how a .env that
 # check-env rejects gets fixed, so requiring it first would deadlock.
 
+# The EA checkout sits beside this one; override for another layout.
+EA_ENV ?= ../EA/deploy/ea.env
+
 vault-init: ## Initialise the vault (root token -> .openbao.env, mount KV v2)
 	@./scripts/vault-init.sh
 
 vault-seed: ## Copy .env into the vault (infra/env)
 	@./scripts/vault-seed.sh
+
+vault-seed-ea: ## Copy EA's deploy/ea.env into the vault (ea/env)
+	@./scripts/vault-seed.sh $(EA_ENV) ea
 
 vault-env: ## Regenerate .env from the vault (keeps the old one as .env.bak)
 	@./scripts/vault-env.sh

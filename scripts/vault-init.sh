@@ -17,14 +17,19 @@ cd "$(dirname "$0")/.."
 
 CRED_FILE=".openbao.env"
 MOUNT="infra"
+# Every KV v2 engine this vault has: infra/ (this stack's .env) plus one per
+# app that keeps its own secrets. Add a name here and re-run to mount it.
+MOUNTS=(infra ea)
 
 die() { echo "vault-init.sh: $*" >&2; exit 1; }
 
-# `bao` inside the container. `-e BAO_TOKEN` with no value forwards this
-# shell's exported copy, so the token never appears in the argv of the host
-# `docker` process and cannot be read out of another user's `ps`.
+# `bao` inside the container. The token goes in as the first line of stdin,
+# never as an argument, so it cannot be read out of another user's `ps`.
+# Not `-e BAO_TOKEN`: on this host neither `docker compose exec` nor
+# `docker exec` forwards a bare `-e VAR`, and the container gets it unset.
 bao() {
-  docker compose exec -T ${BAO_TOKEN:+-e BAO_TOKEN} openbao bao "$@"
+  printf '%s\n' "$BAO_TOKEN" \
+    | docker compose exec -T openbao sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' bao "$@"
 }
 
 [ -f openbao/seal.key ] || die "openbao/seal.key is missing -- run 'make seal-key' first, then redeploy."
@@ -101,15 +106,18 @@ sealed="$(bao status -format=json | jq -r '.sealed')"
   'make logs s=openbao' for a seal error (a key of the wrong length, or the
   bind mount having become a directory)."
 
-# --- 2. the KV v2 engine everything else reads and writes ------------------
-if bao secrets list -format=json | jq -e --arg m "$MOUNT/" 'has($m)' >/dev/null; then
-  echo "vault-init.sh: secrets engine '$MOUNT/' already mounted."
-else
-  # -version=2 is not the default: a bare 'secrets enable kv' gives KV v1,
-  # which has no versioning, so an overwritten secret is simply gone.
-  bao secrets enable -path="$MOUNT" -version=2 kv
-  echo "vault-init.sh: mounted KV v2 at '$MOUNT/'."
-fi
+# --- 2. the KV v2 engines everything else reads and writes -----------------
+mounted="$(bao secrets list -format=json)"
+for m in "${MOUNTS[@]}"; do
+  if jq -e --arg m "$m/" 'has($m)' >/dev/null <<<"$mounted"; then
+    echo "vault-init.sh: secrets engine '$m/' already mounted."
+  else
+    # -version=2 is not the default: a bare 'secrets enable kv' gives KV v1,
+    # which has no versioning, so an overwritten secret is simply gone.
+    bao secrets enable -path="$m" -version=2 kv
+    echo "vault-init.sh: mounted KV v2 at '$m/'."
+  fi
+done
 
 # --- 3. the audit device declared in openbao/config.hcl ---------------------
 # Declared audit devices are applied when the active node starts and on
@@ -131,5 +139,5 @@ else
 fi
 
 echo
-echo "Vault ready at https://vault.infra.famillelallier.net (KV v2 at $MOUNT/)."
+echo "Vault ready at https://vault.infra.famillelallier.net (KV v2 at ${MOUNTS[*]/%//})."
 echo "Next: 'make vault-seed' copies this checkout's .env into $MOUNT/env."

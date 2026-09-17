@@ -354,8 +354,9 @@ UI, `http://openbao:8200` on `infra-net` for anything in the stack.
 Bootstrap it once, after the stack is up:
 
 ```bash
-make vault-init   # initialise; writes the root token to .openbao.env, mounts KV v2 at infra/
+make vault-init   # initialise; writes the root token to .openbao.env, mounts KV v2 at infra/ and ea/
 make vault-seed   # copy this checkout's .env into infra/env
+make vault-seed-ea  # copy ../EA/deploy/ea.env into ea/env
 ```
 
 `make vault-init` is idempotent, so re-running it after a redeploy is
@@ -519,7 +520,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make seal-key` | Generate OpenBao's auto-unseal key (`FORCE=1` replaces it — destroys an existing vault) |
-| `make vault-init` | Initialise the vault: root token → `.openbao.env`, KV v2 at `infra/` (idempotent) |
+| `make vault-init` | Initialise the vault: root token → `.openbao.env`, KV v2 at `infra/` and `ea/` (idempotent) |
 | `make vault-seed` / `make vault-env` | Copy `.env` into the vault / regenerate `.env` from it (old one → `.env.bak`) |
 | `make vault-render` | Render `.env` from the vault the way `make up` does — skipping, with a notice, when there is no vault to read (`VAULT_RENDER=0` skips it outright) |
 | `make vault-status` / `make vault-cli args="..."` | Seal/init state / run any `bao` command against the vault |
