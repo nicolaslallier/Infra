@@ -192,6 +192,9 @@ never orphans another app that's still attached to it):
   `airflow/dags/` — they must be committed, since the drift guard refuses
   untracked files. No triggerer: add an `airflow-triggerer` service
   (`command: triggerer`) the day a DAG uses deferrable operators.
+  `airflow-scheduler` alone carries the Docker socket and the
+  `/tmp/infra-ci` workspace — see "Airflow: nightly PR validation" below for
+  what they are for and what the socket costs.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
@@ -761,6 +764,79 @@ console afterwards exactly like `jarvis`'s.
 `--import-realm` only seeds a realm that does not exist yet — editing this
 file after the first `make up` does not touch the live `ea` realm; repeat
 the change in the admin console too.
+
+### Airflow: nightly PR validation
+
+`airflow/dags/infra_pr_validation.py` is this repo's first DAG. At 03:00 it
+lists the open, non-draft PRs on GitHub, and for each one clones the head,
+renders a throwaway `.env` into it, runs the file-level checks, and posts (or
+updates) a single comment on the PR. A failing check fails the mapped task,
+so the UI shows which PR is red without opening GitHub.
+
+Why here and not in GitHub Actions: a GitHub-hosted runner cannot reach
+`infra-net`, this daemon, or anything on the LAN. The checks below do not
+need any of that — but the smoke test this DAG is scaffolding for (actually
+bringing the stack up and exercising it) can only ever run on this machine,
+and that is what the workspace and socket plumbing is for.
+
+Four things here are load-bearing.
+
+- **`WORKSPACE_ROOT` is mounted at the same path inside and outside the
+  container** (`/tmp/infra-ci:/tmp/infra-ci` on `airflow-scheduler`). The
+  checks run as *sibling* containers, so their `-v <path>:/repo` is resolved
+  by the **daemon**, against the host filesystem — not against the
+  scheduler's. A clone written to an ordinary temp dir inside the scheduler
+  would be invisible to them, and Docker would auto-create an empty directory
+  in its place: the same trap `${INFRA_DIR:-.}` exists for (see
+  "Portainer-managed stack"), with the same silent symptom. Identical paths on
+  both sides is what makes the nested bind mount agree with no translation.
+  The cost is that this DAG assumes Airflow and the daemon share a
+  filesystem — it does not work against a remote `DOCKER_HOST`.
+- **Only `airflow-scheduler` gets the Docker socket.** LocalExecutor runs
+  every task inside it, so the api-server and the dag-processor have no reason
+  to hold it. Understand what it buys: the socket is root on the daemon, so
+  any DAG can do anything to any container on this host, and
+  `airflow.infra.famillelallier.net` sits behind Airflow's own FAB login and
+  nothing else — no oauth2-proxy. That is a weaker gate than Portainer's
+  equivalent power has, and Portainer's is at least not proxied. If the DAG
+  goes away, remove the mount with it.
+- **Each check runs in the image the real service uses**, mounted the way the
+  real service mounts the repo — `nginx -t` inside `nginx:alpine-otel` with
+  `nginx/` and `certs/` at their deployed paths, `promtool check config` with
+  `monitoring/prometheus/` at `/etc/prometheus` (it resolves the `file_sd`
+  target files by their in-container absolute path, so mounting the repo at
+  `/repo` would make it report them missing). A generic linter image would
+  validate a configuration nothing deploys.
+- **`scripts/ci-fake-env.sh` comes from the PR's own checkout**, not from
+  `main`, so a PR that breaks it fails on its own change. It renders a
+  throwaway `.env`, a 32-byte `openbao/seal.key` and a self-signed `certs/`
+  pair into a clone that has none of them (all three are gitignored). Values
+  are shaped the way `check-env.sh` demands rather than merely non-empty —
+  url-safe cookie keys, a padded Fernet key, a url-safe `AIRFLOW_DB_PASSWORD`,
+  `LAN_IP=127.0.0.1` — which is why running the repo's own preflight against
+  it is a meaningful check and not a tautology. It refuses to overwrite an
+  existing `.env` unless `CI_FAKE_ENV_FORCE=1`: in the real checkout that file
+  is the deployed secret set, gitignored, with no copy to restore from.
+
+Setup, once:
+
+```bash
+# in the airflow-scheduler container, or through the UI (Admin -> Variables)
+airflow variables set infra_ci_github_token <a PAT with pull_requests:write>
+airflow variables set infra_ci_repo nicolaslallier/Infra   # optional
+```
+
+The token is an Airflow Variable, not a `.env` key, for the reason
+`PORTAINER_API_KEY` lives in `.portainer.env`: `.env` is handed to containers
+wholesale and shipped to Portainer as the stack env, and this one can write to
+GitHub. Airflow encrypts Variables with `AIRFLOW__CORE__FERNET_KEY`. The
+obvious next move is `infra/apps/airflow` in OpenBao — it would be the vault's
+first real consumer (see "Secrets (OpenBao)").
+
+The DAG arrives **paused** (`AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION` is
+`"true"`); unpause it once in the UI. And a nightly schedule on a Mac that
+sleeps does not fire — either `sudo pmset repeat wakeorpoweron MTWRFSU
+02:55:00`, or move the schedule to an hour the machine is awake.
 
 ### Windows machines (`windows_exporter`)
 
