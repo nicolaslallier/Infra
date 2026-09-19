@@ -518,6 +518,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make runner-status` | Is it running here, and does GitHub have it registered with the `infra` label? |
 | `make runner-pull` | Re-pull the runner image and recreate it (the tag moves; GitHub retires old versions) |
 | `make runner-shell` | Open a shell in the running runner |
+| `make runner-env` | Write `.runner.env` from a GitHub PAT, checking first that it may administer runners (`FORCE=1` replaces it) |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -862,7 +863,8 @@ Setup is a token, a `make`, and one settings change:
 # 1. a PAT that may register runners on this repo:
 #    GitHub -> Settings -> Developer settings -> Personal access tokens
 #    (classic, 'repo' scope; or fine-grained with Administration: RW here)
-printf 'GH_RUNNER_TOKEN=%s\n' '<the token>' > .runner.env
+#    Minting it is a web-UI step -- GitHub has no API that issues a PAT.
+make runner-env         # paste it; writes .runner.env, mode 600
 
 # 2. start it; it registers itself with the label 'infra'
 make runner-up
