@@ -24,6 +24,7 @@ import http.server
 import json
 import ssl
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -173,7 +174,7 @@ def render(state):
     out.append(f'portainer_endpoint_count{{type=\"local\"}} {int(state.get("endpoint_local", 0))}')
     out.append(f'portainer_endpoint_count{{type=\"total\"}} {int(state.get("endpoint_total", 0))}')
 
-    out.append("# HELP portainer_stack_count Stacks by status (1=stopped 2=running).")
+    out.append("# HELP portainer_stack_count Stacks by status (stopped/running/unknown).")
     out.append("# TYPE portainer_stack_count gauge")
 
     out.append("# HELP portainer_stack_running 1 when the named stack is running.")
@@ -186,12 +187,13 @@ def render(state):
     out.append("# TYPE portainer_stack_last_deploy_timestamp_seconds timestamp")
 
     stacks = sorted(state.get("stacks", []), key=lambda s: str(s.get("Name", "")))
-    by_status = {STATUS_STOPPED: 0, STATUS_RUNNING: 0, "unknown": 0}
+    by_status = {"stopped": 0, "running": 0, "unknown": 0}
     for st in stacks:
-        by_status[st.get("Status")] = by_status.get(st.get("Status"), 0) + 1
-    out.append(f'portainer_stack_count{{status=\"stopped\"}} {by_status[STATUS_STOPPED]}')
-    out.append(f'portainer_stack_count{{status=\"running\"}} {by_status[STATUS_RUNNING]}')
-    out.append(f'portainer_stack_count{{status=\"unknown\"}} {by_status["unknown"]}')
+        bucket = {STATUS_STOPPED: "stopped", STATUS_RUNNING: "running"}.get(st.get("Status"), "unknown")
+        by_status[bucket] += 1
+    out.append(f'portainer_stack_count{{status="stopped"}} {by_status["stopped"]}')
+    out.append(f'portainer_stack_count{{status="running"}} {by_status["running"]}')
+    out.append(f'portainer_stack_count{{status="unknown"}} {by_status["unknown"]}')
 
     for st in stacks:
         name = _label(st.get("Name", "unknown"))
@@ -220,26 +222,31 @@ def serve(base, key, bind, port, interval, state):
 
     Polling is lazy inside the handler rather than a background thread, so a
     stuck poll can never desync the served metrics from the request that asked
-    for them, and there is no shared-state locking to get wrong. The state and
-    its inputs ride on the server instance, so the handler keeps the plain
-    (request, client_address, server) constructor http.server expects.
-    """
+    for them. The ThreadingHTTPServer runs each scrape on its own thread, so a
+    single lock serializes the interval check plus collect() -- it both stops two
+    close scrapes from both re-polling and keeps collect()'s mutation of the
+    shared state from racing a concurrent read. The state and its inputs ride on
+    the server instance, so the handler keeps the plain
+     (request, client_address, server) constructor http.server expects.
+     """
     state.setdefault("last_poll", 0)
     server = _MetricsServer((bind, port), _MetricsHandler)
     server.state = state
     server.base = base
     server.key = key
     server.interval = interval
+    server.poll_lock = threading.Lock()
     server.serve_forever()
 
 
 class _MetricsServer(http.server.ThreadingHTTPServer):
-     # A plain HTTPServer subclass; these per-instance fields are set by serve()
-     # and read by the handler. Declared here so static analysis is happy.
+      # A plain HTTPServer subclass; these per-instance fields are set by serve()
+      # and read by the handler. Declared here so static analysis is happy.
     state: dict = {}
     base: str = ""
     key: str = ""
     interval: int = 0
+    poll_lock: threading.Lock = threading.Lock()
 
 
 class _MetricsHandler(http.server.BaseHTTPRequestHandler):
@@ -253,13 +260,15 @@ class _MetricsHandler(http.server.BaseHTTPRequestHandler):
             return
         state = server.state
         now = time.time()
-            # Skip re-polling tighter than the interval: the 15s scrape window is
-            # shorter than the default 30s poll window.
-        if now - state.get("last_poll", 0) >= server.interval:
-            state["last_poll"] = now
-            collect(server.base, server.key, state)
-            if state.get("controlplane_up") == 1:
-                state["last_success_timestamp"] = now
+        with server.poll_lock:
+             # Skip re-polling tighter than the interval: the 15s scrape window is
+             # shorter than the default 30s poll window. Held under the lock so two
+             # close scrapes can't both pass the check and both call collect().
+            if now - state.get("last_poll", 0) >= server.interval:
+                state["last_poll"] = now
+                collect(server.base, server.key, state)
+                if state.get("controlplane_up") == 1:
+                    state["last_success_timestamp"] = now
         body = render(state).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
@@ -299,7 +308,18 @@ def selftest():
     assert 'portainer_stack_last_deploy_timestamp_seconds{stack="infra"} ' in text, text
     assert "portainer_api_last_success_timestamp_seconds 1700000000" in text, text
 
-        # --- every metric sample has a matching HELP/TYPE block (well-formed) ---
+         # --- a non-1/2 status and a missing-Status stack both land in "unknown",
+         #     not in a ghost bucket that render() never prints ---
+    odd = dict(state, stacks=[
+        dict(FIXTURE_STACKS[0]),
+        {"Id": 3, "Name": "deploying", "Status": 3},
+        {"Id": 4, "Name": "no-status"},
+    ])
+    odd_text = render(odd)
+    assert 'portainer_stack_count{status="unknown"} 2' in odd_text, odd_text
+    assert 'portainer_stack_count{status="running"} 1' in odd_text, odd_text
+
+         # --- every metric sample has a matching HELP/TYPE block (well-formed) ---
     typed = [ln.split(" ")[2] for ln in text.splitlines() if ln.startswith("# TYPE")]
     samples = [ln.split("{")[0].split(" ")[0] for ln in text.splitlines()
                 if ln and not ln.startswith("#")]
