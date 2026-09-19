@@ -207,7 +207,16 @@ b64url_len() {
 	while [ $(( ${#value} % 4 )) -ne 0 ]; do
 		value="${value}="
 	done
-	out=$(printf '%s' "$value" | { base64 --decode 2>/dev/null || base64 -D 2>/dev/null; } | wc -c) || return 0
+	# -d, not --decode: GNU, busybox and BSD all accept -d, but busybox has
+	# neither --decode nor -D -- and busybox is what `base64` is inside the
+	# Alpine deploy container scripts/ci-deploy.sh runs make in, which
+	# installs only bash/make/jq/git and no coreutils. With both of the old
+	# spellings failing there, `set -o pipefail` above made this whole
+	# pipeline non-zero, the `|| return 0` returned nothing, and a perfectly
+	# good 32-byte key was reported as a raw 44-byte one -- a check that
+	# passed on the dev machine and failed every CI deploy on the same file.
+	# -D stays as the fallback for macOS releases that predate -d.
+	out=$(printf '%s' "$value" | { base64 -d 2>/dev/null || base64 -D 2>/dev/null; } | wc -c) || return 0
 	printf '%s' "${out//[[:space:]]/}"
 }
 
