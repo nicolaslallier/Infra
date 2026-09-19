@@ -24,6 +24,7 @@ make logs                        # tail logs (optional: s=<service>)
 make ps / make status            # service status
 make pull / make config          # redeploy re-pulling images / validate compose + .env
 make portainer-up / -down        # Portainer itself (its own compose project)
+make runner-env                  # write .runner.env from a GitHub PAT (checks it first)
 make runner-up / -down           # the self-hosted CI runner that deploys on a push to main
 make runner-status               # its container here + what GitHub has registered
 make runner-pull / -restart / -logs / -shell  # update image / restart / tail / shell in
@@ -622,7 +623,16 @@ routine housekeeping.
 (Settings → Secrets and variables → Actions → Variables) and fall back to the
 two values the Makefile already hard-codes for the Mac. `GH_RUNNER_TOKEN` —
 a PAT allowed to register runners — lives in `.runner.env`, gitignored, for
-the reason `PORTAINER_API_KEY` lives in `.portainer.env`.
+the reason `PORTAINER_API_KEY` lives in `.portainer.env`. `make runner-env`
+(`scripts/gen-runner-env.sh`) writes that file, and the check it makes first
+is the point of it: it asks GitHub for `/repos/<repo>/actions/runners` with
+the token, and refuses to write one that gets a 401/403/404. A token with
+the wrong scope otherwise registers nothing while `make runner-up` reports
+success — the failure surfaces only as a 403 in the runner's own logs, from
+a container that then restarts forever, and `deploy.yml` meanwhile queues
+against a label no runner holds. The file is written where `make` runs, not
+on the Docker host: compose reads `--env-file` locally and only the
+interpolated result crosses `DOCKER_HOST`.
 
 Docs-only pushes do not deploy (`paths-ignore` covers `**/*.md`, `docs/**`
 and `.github/**`): a deploy force-recreates `dns` among everything else, so
