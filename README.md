@@ -515,6 +515,9 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
 | `make runner-up` / `make runner-down` | Start / stop the self-hosted CI runner that deploys on a push to `main` (its own compose project, `docker-compose.runner.yml`) |
 | `make runner-restart` / `make runner-logs` | Restart the runner / tail its logs |
+| `make runner-status` | Is it running here, and does GitHub have it registered with the `infra` label? |
+| `make runner-pull` | Re-pull the runner image and recreate it (the tag moves; GitHub retires old versions) |
+| `make runner-shell` | Open a shell in the running runner |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -863,8 +866,25 @@ printf 'GH_RUNNER_TOKEN=%s\n' '<the token>' > .runner.env
 
 # 2. start it; it registers itself with the label 'infra'
 make runner-up
+make runner-status      # the container here, and what GitHub has registered
 make runner-logs        # until "Listening for Jobs"
 ```
+
+`make runner-status` is worth preferring over the browser, because it
+answers the question that actually bites: the runner is `EPHEMERAL`, so it
+de-registers after every job and re-registers on restart, and a container
+that is up says nothing about whether GitHub still has a runner to hand the
+next deploy to. GitHub does not report the gap — a job whose labels match
+nothing queues silently rather than failing — so the two sides have to be
+read together.
+
+`runner-down`, `-restart` and `-pull` refuse while a job is running, since
+recreating the container mid-job leaves that workflow run with no result;
+`FORCE=1 make runner-down` overrides. If GitHub cannot be reached to ask,
+they warn and continue rather than trapping you with a runner you cannot
+stop. `make runner-pull` is the fix for a runner GitHub has stopped
+accepting: the image tag moves on purpose, because pinning a digest ages
+into a version the service refuses.
 
 Then check it is listed at **Settings → Actions → Runners**, and set
 **Settings → Actions → General → "Fork pull request workflows from outside

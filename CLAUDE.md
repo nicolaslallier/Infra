@@ -25,6 +25,8 @@ make ps / make status            # service status
 make pull / make config          # redeploy re-pulling images / validate compose + .env
 make portainer-up / -down        # Portainer itself (its own compose project)
 make runner-up / -down           # the self-hosted CI runner that deploys on a push to main
+make runner-status               # its container here + what GitHub has registered
+make runner-pull / -restart / -logs / -shell  # update image / restart / tail / shell in
 make shell s=<service>           # shell into a running service
 make psql                        # psql shell as the superuser (via docker compose exec)
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
@@ -596,6 +598,25 @@ Five things here are load-bearing.
   `SKIP_DOCKER_CHECK=1` is set for the reason `AGENTS.md` already documents:
   `check-docker.sh` asserts macOS/Docker-Desktop facts that mean nothing in
   here.
+
+The `runner-*` targets are the whole management surface, and two of their
+behaviours are load-bearing rather than polish. **`runner-status` reports
+both sides** — the container on this daemon *and* `GET
+/repos/<repo>/actions/runners` — because the runner is `EPHEMERAL` and the
+two routinely disagree: it de-registers after every job, so a healthy
+container is no evidence GitHub has a runner for the next deploy, and
+GitHub never surfaces the gap (a job matching no labels queues silently
+instead of failing). It reads the same PAT from `.runner.env`, so there is
+nothing extra to provision, and it degrades to a warning — not an error —
+when jq, the token or the network is missing, since an operator who cannot
+reach GitHub must still be able to stop the runner. **`runner-down`,
+`-restart` and `-pull` refuse while a job is running** (`--busy`, exit 3;
+`FORCE=1` overrides), scoped to the `infra` label because that label is the
+contract with `deploy.yml`: recreating the container mid-job kills it and
+the workflow run never reports a result. `runner-pull` exists because the
+image tag moves on purpose — GitHub retires old runner versions server-side
+— so it is the fix for a runner the service has stopped accepting, not
+routine housekeeping.
 
 `INFRA_CHECKOUT` and `INFRA_HOST` come from repository variables
 (Settings → Secrets and variables → Actions → Variables) and fall back to the

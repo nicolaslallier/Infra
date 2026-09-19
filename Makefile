@@ -13,7 +13,8 @@ SHELL := bash
 	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
 	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs \
-	runner-up runner-down runner-restart runner-logs check-runner-env
+	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
+	runner-shell check-runner-env
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -194,20 +195,42 @@ check-runner-env:
 		exit 1; \
 	}
 
+# Stopping or recreating the runner mid-job kills that job, and GitHub gets
+# no result for it -- the workflow run simply stops reporting. Every target
+# that does so asks scripts/runner-status.sh first; FORCE=1 means it.
+RUNNER_NOT_BUSY = test -n "$(FORCE)" || ./scripts/runner-status.sh --busy
+
 runner-up: check-runner-env ## Start the self-hosted CI runner (its own compose project)
 	$(RUNNER_COMPOSE) up -d
 	@echo
 	@echo "Runner -> https://github.com/nicolaslallier/Infra/settings/actions/runners"
 	@echo "It must show up there with the label 'infra' before a push to main can deploy."
+	@echo "Confirm with 'make runner-status'; 'make runner-logs' until \"Listening for Jobs\"."
 
-runner-down: check-runner-env ## Stop the CI runner
+runner-down: check-runner-env ## Stop the CI runner (FORCE=1 even mid-job)
+	@$(RUNNER_NOT_BUSY)
 	$(RUNNER_COMPOSE) down
 
-runner-restart: check-runner-env ## Restart the CI runner
+runner-restart: check-runner-env ## Restart the CI runner (FORCE=1 even mid-job)
+	@$(RUNNER_NOT_BUSY)
 	$(RUNNER_COMPOSE) restart
 
 runner-logs: check-runner-env ## Tail the CI runner's logs
 	$(RUNNER_COMPOSE) logs -f
+
+runner-status: check-runner-env ## Runner state: the container here, and what GitHub has registered
+	@./scripts/runner-status.sh
+
+# The image tag moves on purpose (GitHub retires old runner versions
+# server-side, and then refuses to talk to them), so this is the fix for a
+# runner the service has stopped accepting -- not routine housekeeping.
+runner-pull: check-runner-env ## Re-pull the runner image and recreate it (FORCE=1 even mid-job)
+	@$(RUNNER_NOT_BUSY)
+	$(RUNNER_COMPOSE) pull
+	$(RUNNER_COMPOSE) up -d
+
+runner-shell: check-runner-env ## Open a shell in the running CI runner
+	$(RUNNER_COMPOSE) exec runner bash
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
