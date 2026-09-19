@@ -281,7 +281,13 @@ because the failure it prevents surfaces somewhere other than `.env`:
   Hence the `| tr -- '+/' '-_'` on every generation recipe in `.env.example`,
   the README and the `:?` guards, and hence check-env naming that case
   specially: the fix is to re-spell the existing key, not to mint a new one
-  (which invalidates every live session).
+  (which invalidates every live session). The decode itself must stay
+  portable, and `-d` is the only spelling that is: busybox has neither
+  `--decode` nor `-D`, and busybox is what `base64` is inside the Alpine
+  container `scripts/ci-deploy.sh` runs `make` in. With `set -o pipefail` on,
+  a failed decode there returned *no* length rather than a wrong one, so a
+  valid 32-byte key read as a raw 44-byte one and every CI deploy failed a
+  check that passed by hand on the same file.
 - **A missing or wrong-sized `openbao/seal.key`.** The only check here that
   is not about a value in `.env`, and it is here for exactly the reason the
   rest are: it fails somewhere that never names the file. The key is
