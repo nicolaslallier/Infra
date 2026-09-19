@@ -128,6 +128,35 @@
           "config": { "included.custom.audience": "ea-api", "id.token.claim": "false", "access.token.claim": "true" }
         }
       ]
+    },
+    {
+      "clientId": "darkangel-spa",
+      "name": "DarkAngel — SPA",
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://darkangel.infra.famillelallier.net/##http://localhost:5173/##http://127.0.0.1:5173/"
+      },
+      "redirectUris": [
+        "https://darkangel.infra.famillelallier.net/auth/callback",
+        "http://localhost:5173/auth/callback",
+        "http://127.0.0.1:5173/auth/callback"
+      ],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "darkangel-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.custom.audience": "darkangel-api", "id.token.claim": "false", "access.token.claim": "true" }
+        }
+      ]
     }
   ],
   "users": [
