@@ -1,6 +1,7 @@
 .env
 .env.bak
 .portainer.env
+.runner.env
 .openbao.env
 certs/*
 !certs/.gitkeep

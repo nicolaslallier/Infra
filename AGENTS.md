@@ -95,6 +95,16 @@ startup caveats that the update script deliberately does NOT handle.
   stays hand-edited. `VAULT_RENDER=0` is the opt-out if a `make up` is ever
   run in an environment with no vault.
 
+- **The CD runner is not part of this stack and does not belong on this VM.**
+  `docker-compose.runner.yml` (`make runner-up`) registers a self-hosted
+  GitHub Actions runner that redeploys the stack through Portainer on a push
+  to `main` — it only makes sense on the machine that runs Portainer. Here
+  there is no Portainer and nothing to deploy to, so leave it down;
+  `.runner.env` is absent and every `runner-*` target refuses without it.
+  `scripts/ci-deploy.sh` is that workflow's entry point and is likewise
+  meant for the deploy host, not for this VM. See `CLAUDE.md`
+  ("CI: deploying on a push to main").
+
 - **DNS zones** are provisioned via the Technitium API, not env vars:
   `make dns-provision` (idempotent), then `make dns-check` to verify
   `*.infra.famillelallier.net`, `pgadmin.`, and `keycloak.` resolve to

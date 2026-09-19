@@ -1,0 +1,54 @@
+# The self-hosted GitHub Actions runner that deploys this stack after a push
+# to main. Its own compose project, outside the "infra" stack it deploys --
+# for the same reason Portainer is (see CLAUDE.md "Portainer-managed stack"):
+# every `make up` force-recreates every container in that stack, and a runner
+# recreated mid-job is a job that never reports its result.
+#
+# A GitHub-hosted runner cannot do this work at all: Portainer publishes its
+# API on ${LAN_IP}:9443 and is otherwise only on infra-net, and there is no
+# public ingress to either. The runner has to be on this LAN.
+#
+# Driven by `make runner-up` / -down / -restart / -logs. See CLAUDE.md
+# "CI: deploying on a push to main", and read its security note before
+# widening who can merge to main.
+name: runner
+
+services:
+  runner:
+    # A moving tag on purpose. GitHub retires old runner versions
+    # server-side, so a digest pinned today ages into a runner the service
+    # refuses to talk to -- the same moving-tag tradeoff as
+    # portainer-ce:lts, made for a harder reason.
+    image: myoung34/github-runner:ubuntu-noble
+    restart: unless-stopped
+    environment:
+      RUNNER_SCOPE: repo
+      REPO_URL: https://github.com/nicolaslallier/Infra
+      RUNNER_NAME: ${GH_RUNNER_NAME:-infra-host}
+      # .github/workflows/deploy.yml selects this runner by label. Keep the
+      # two in step: a renamed label leaves the deploy job queued forever
+      # with no error, since "no runner matches" is not a failure to GitHub.
+      LABELS: infra
+      # De-register after every job; `restart: unless-stopped` then brings
+      # up a freshly registered one. No job inherits a working tree, a
+      # container or an env var another job left behind -- which matters
+      # more than usual here, because this runner holds the Docker socket.
+      EPHEMERAL: "true"
+      # A PAT, exchanged at startup for the short-lived registration token
+      # the runner actually uses. It lives in .runner.env, never in .env:
+      # .env is handed to containers wholesale (postgres's env_file) and
+      # shipped to Portainer as the stack env, and this token can register
+      # runners on the repo. Same reasoning as PORTAINER_API_KEY.
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN:?Set GH_RUNNER_TOKEN in .runner.env (see .env.example)}
+    volumes:
+      # Root on this host's Docker daemon -- the same power Portainer's UI
+      # has, and the whole reason this runner can deploy anything. Every
+      # step of the deploy goes through it.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-work:/_work
+    # Deliberately not on infra-net. It needs outbound HTTPS to GitHub and
+    # nothing else: the containers scripts/ci-deploy.sh starts join the
+    # networks they need themselves.
+
+volumes:
+  runner-work:

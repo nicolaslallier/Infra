@@ -1,0 +1,65 @@
+# Redeploy the stack through Portainer after a push to main.
+#
+# runs-on is the self-hosted runner from docker-compose.runner.yml, and it
+# has to be: Portainer publishes its API on ${LAN_IP}:9443 and is otherwise
+# only reachable on infra-net, with no public ingress to either, so a
+# GitHub-hosted runner cannot deploy this stack at all. See CLAUDE.md
+# "CI: deploying on a push to main" -- including the security note, which is
+# the part to read before changing anything here.
+#
+# Never add a pull_request (or pull_request_target) trigger to a workflow
+# that runs on this label. This repo is public, the runner holds the Docker
+# socket, and a fork's PR brings its own workflow file: that combination is
+# arbitrary code execution as root on the deploy host.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    # A deploy force-recreates every container, including dns -- a real if
+    # brief LAN outage (CLAUDE.md "Portainer-managed stack"). Changes that
+    # cannot reach a container are not worth one.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - '.github/**'
+  workflow_dispatch:
+    inputs:
+      pull_images:
+        description: 'Re-pull every image (make pull instead of make up)'
+        type: boolean
+        default: false
+
+# One deploy at a time, and never cancel one in flight: the cancelled job
+# would leave Portainer mid-redeploy.
+concurrency:
+  group: deploy-infra
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, infra]
+    steps:
+      # This checkout supplies scripts/ci-deploy.sh and nothing else. What
+      # gets deployed is the *host* checkout at INFRA_CHECKOUT, which the
+      # script brings to origin/main itself -- see its header for why the
+      # two must not be confused.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          # This runner holds the Docker socket; don't leave a credential
+          # in the workspace's .git/config for the deploy to run beside.
+          persist-credentials: false
+
+      - name: Deploy via Portainer
+        env:
+          # Repository variables (Settings -> Secrets and variables ->
+          # Actions -> Variables) override these defaults, which are the
+          # same two values the Makefile already hard-codes for the Mac.
+          # INFRA_CHECKOUT is the host checkout as the *daemon* sees it.
+          INFRA_CHECKOUT: ${{ vars.INFRA_CHECKOUT || '/run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra' }}
+          INFRA_HOST: ${{ vars.INFRA_HOST || '192.168.2.10' }}
+        run: ./scripts/ci-deploy.sh ${{ inputs.pull_images && 'pull' || 'up' }}
