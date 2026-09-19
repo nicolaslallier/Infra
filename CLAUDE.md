@@ -14,38 +14,7 @@ over a shared Docker network rather than being folded into this one.
 
 ## Commands
 
-```bash
-make / make help                 # list targets (default goal)
-make init                        # create infra-net, dev certs, OpenBao's seal key, copy .env.example -> .env
-make docker-start / make docker-stop  # launch / quit Docker Desktop (and wait for its daemon)
-make up / make down              # deploy-or-redeploy / stop the stack via Portainer (Git main)
-make restart                     # docker compose restart (optional: s=<service>)
-make logs                        # tail logs (optional: s=<service>)
-make ps / make status            # service status
-make pull / make config          # redeploy re-pulling images / validate compose + .env
-make portainer-up / -down        # Portainer itself (its own compose project)
-make runner-env                  # write .runner.env from a GitHub PAT (checks it first)
-make runner-up / -down           # the self-hosted CI runner that deploys on a push to main
-make runner-status               # its container here + what GitHub has registered
-make runner-pull / -restart / -logs / -shell  # update image / restart / tail / shell in
-make shell s=<service>           # shell into a running service
-make psql                        # psql shell as the superuser (via docker compose exec)
-make provision-app app=<name>    # add a new app DB/role to an already-running cluster
-make provision-monitoring-role   # create/update postgres-exporter monitoring role
-make certs                       # generate TLS certs (FORCE=1 to regenerate)
-make seal-key                    # generate OpenBao's auto-unseal key (FORCE=1 replaces it)
-make vault-init                  # initialise the vault; root token -> .openbao.env
-make vault-seed                  # copy .env into the vault (infra/env)
-make vault-env                   # regenerate .env from the vault (old one -> .env.bak)
-make vault-render                # what 'make up' runs: render .env from the vault, then deploy
-make vault-status                # the vault's seal/init state
-make vault-cli args="kv list infra/"  # run any bao command against it
-make hosts                       # print the /etc/hosts lines this stack needs
-make dns-provision               # create/update the DNS zones & records the dns service serves
-make dns-check                   # query the dns service to confirm it's answering correctly
-make migrate-volumes             # copy the stack's volumes off the old Colima VM (DRY=1 previews)
-make clean CONFIRM=1             # delete the Portainer stack + its volumes (keeps Portainer, infra-net, certs/)
-```
+Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runner-*` the CI runner, `make clean CONFIRM=1` deletes the stack + volumes.
 
 The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
 is how a `.env` that `check-env` rejects gets repaired, so requiring it first
@@ -241,235 +210,18 @@ produces connection-refused, not a DNS or reachability problem.
 
 ### Preflight: `make check-env`
 
-`scripts/check-env.sh` refuses to let anything deploy or provision against
-a `.env` that cannot bring the stack up. Everything it finds goes to stderr
-— warnings first, then the blockers — and it exits 1 if there was a blocker,
-having reported all of them rather than the first. Every check is there
-because the failure it prevents surfaces somewhere other than `.env`:
-
-- **Settings `.env.example` defines that this `.env` never got.** `.env` is
-  copied once, by `make init`, and then lives on (gitignored) while
-  `.env.example` keeps growing — so a variable introduced with a new service
-  is simply absent from a long-lived `.env`. Compose interpolates an absent
-  variable as an **empty string and deploys anyway**, so the symptom is a
-  container dying on its own config with nothing naming `.env`:
-  `oauth2-proxy-ea`, handed an empty `EA_OBSIDIAN_OAUTH_COOKIE_SECRET`,
-  logs `invalid configuration: missing setting: cookie-secret` and
-  crash-loops. The check diffs the assigned keys of the two files and prints
-  the missing lines ready to append. Keys assigned only inside a comment in
-  `.env.example` (`PORTAINER_API_KEY`, which belongs in `.portainer.env`)
-  are not keys and never trip it. To decline a setting that has a Compose
-  `:-` default (`UPSTREAM_DNS`, `GRAFANA_ADMIN_USER`), keep its line and
-  leave the value empty rather than deleting it.
-- **Placeholders, empties, and absences** in the password-like values with
-  no source other than `.env` — the `change-me` check — plus a
-  `<APP>_DB_PASSWORD` for every entry in `APP_DATABASES` (an app added to
-  that list by hand has no `.env.example` line to diff against, hence the
-  separate loop). The three states are reported separately because they are
-  three different mistakes.
-- **oauth2-proxy cookie keys of the wrong length *or alphabet*.**
-  oauth2-proxy accepts only a 16, 24 or 32 byte `cookie-secret` and dies at
-  startup otherwise, so `JARVIS_OAUTH_COOKIE_SECRET` /
-  `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` are checked rather than just checked
-  for being filled in. The check mirrors `pkg/encryption.SecretBytes`
-  rather than asking "is this base64 of 32 bytes", because the container
-  does not: it decodes with Go's `base64.RawURLEncoding` — the **URL-safe**
-  alphabet — and falls back to the *raw string* when that fails. So a
-  standard-base64 key is a 44-byte key to it
-  (`cookie_secret must be 16, 24, or 32 bytes ... but is 44 bytes`), and
-  `openssl rand -base64 32` alone produces one about three times in four.
-  Hence the `| tr -- '+/' '-_'` on every generation recipe in `.env.example`,
-  the README and the `:?` guards, and hence check-env naming that case
-  specially: the fix is to re-spell the existing key, not to mint a new one
-  (which invalidates every live session). The decode itself must stay
-  portable, and `-d` is the only spelling that is: busybox has neither
-  `--decode` nor `-D`, and busybox is what `base64` is inside the Alpine
-  container `scripts/ci-deploy.sh` runs `make` in. With `set -o pipefail` on,
-  a failed decode there returned *no* length rather than a wrong one, so a
-  valid 32-byte key read as a raw 44-byte one and every CI deploy failed a
-  check that passed by hand on the same file.
-- **A missing or wrong-sized `openbao/seal.key`.** The only check here that
-  is not about a value in `.env`, and it is here for exactly the reason the
-  rest are: it fails somewhere that never names the file. The key is
-  bind-mounted into `openbao` as a *file*, and Docker silently auto-creates a
-  **directory** for a bind mount whose source does not exist — so a checkout
-  that ran `make init` before OpenBao existed deploys a vault that dies on
-  "is a directory", with the whole secret store down. A key of the wrong
-  length fails later and more obscurely still: the static seal is AES-256 and
-  takes 32 bytes, nothing else. `make seal-key` generates it; it is
-  gitignored, so it can never arrive with a `git pull`.
-- **`LAN_IP` the host does not own.** `dns` publishes its ports on that
-  address; a stale one (an old VM's, a changed DHCP lease) fails the bind
-  and leaves every later service stuck in `Created`. Against a remote daemon
-  (`DOCKER_HOST=ssh://…`, the normal Mac → Windows-laptop case) the
-  addresses of *this* machine say nothing, so `LAN_IP` is compared to the
-  Makefile's `INFRA_HOST` instead; standalone, that host is derived from
-  `DOCKER_HOST`. Where neither `ifconfig` nor `ip` exists to enumerate
-  addresses, the check passes rather than guessing.
-
-The **two oauth2-proxy client secrets are warnings, never errors**:
-Keycloak generates them when it imports a realm, so they cannot exist
-before the first deploy — erroring on them would make the documented
-bootstrap order (deploy, then copy the secret out of the admin console)
-impossible. The warning names the realm and client to copy it from, and
-which container crash-loops until then. For the same reason
-`docker-compose.yml` guards the *cookie* secrets with
-`${...:?Set ... in .env}` (like `LAN_IP` and `DNS_ADMIN_PASSWORD`) but
-leaves the *client* secrets unguarded: the cookie key is required before
-first boot and choosable offline, so failing the compose parse is right,
-while a `:?` on the client secret would block the very deploy that creates
-it. Non-Mac environments that run `docker compose up -d` directly
-(CI, the cloud VM in `AGENTS.md`) never call `check-env`, so those `:?`
-guards are the only thing standing between them and a silently empty value.
+`scripts/check-env.sh` blocks deploys against a `.env` that can't bring the
+stack up (keys missing vs `.env.example`, `change-me`/empty passwords,
+bad oauth2-proxy cookie keys, a missing/wrong-sized `openbao/seal.key`, a
+`LAN_IP` the host doesn't own). Rules that apply outside `scripts/`: every
+cookie-secret recipe must end in `| tr -- '+/' '-_'` (oauth2-proxy decodes
+URL-safe base64 only), and the oauth2-proxy *client* secrets must never get
+a `:?` guard in `docker-compose.yml` — Keycloak creates them on first realm
+import. Full rationale per check in `scripts/CLAUDE.md`.
 
 ### Runtime: Docker Desktop
 
-The stack runs on **Docker Desktop for Mac**, sized **6 CPU / 12 GB / 100 GB**
-under Settings → Resources — the defaults cannot hold Keycloak's JVM,
-Postgres, the whole LGTM stack, MinIO and RabbitMQ at once. Sibling app repos
-(Jarvis and others) share this same daemon and context automatically; there is
-no per-repo VM.
-
-This replaced a **Colima** VM. Notes mentioning `colima start`,
-`~/.colima/_lima`, `socket_vmnet`, bridged networking or `make vm-start`
-describe that old runtime and no longer apply. Two things changed that are
-not cosmetic — what `LAN_IP` means, and what the `dns` container sees as a
-client address. Both are below.
-
-**The one thing the migration can silently get wrong** is the daemon the
-`docker` CLI talks to. A leftover `docker context use colima`, `DOCKER_HOST`,
-or `DOCKER_CONTEXT` still resolves, so `make up` would bring the whole stack
-back up on the old VM, against the old volumes, and look entirely healthy.
-`scripts/check-docker.sh` asserts `docker info` reports Docker Desktop and
-fails the build otherwise; that check is the reason it exists.
-
-#### The disk image must live on the external volume
-
-Point **Settings → Resources → Advanced → "Disk image location"** at
-`/Volumes/Docker`. The Mac's internal SSD has under 90 GB free, and Docker
-Desktop's sparse disk image grows toward the VM's full 100 GB. (Docker
-Desktop used a `~/Library/Containers/com.docker.docker/Data` symlink to
-`/Volumes/Docker` on this machine historically; the built-in setting is the
-supported way and `check-docker.sh` accepts either.)
-
-**Do not start Docker Desktop while that volume is unmounted.** Unlike
-Colima, which refused, Docker Desktop builds a *fresh empty VM* in the
-default location and comes up looking fine — a new Postgres cluster, no app
-databases, no Keycloak realms, an empty MinIO. `scripts/check-docker.sh`
-therefore checks the disk image location *first*, before it even asks
-whether a daemon is reachable, so `make docker-start` can refuse to launch
-the app rather than discovering the problem afterwards.
-
-#### `LAN_IP` is the Mac's address now, not a VM's
-
-Colima ran bridged, with the VM holding its own DHCP lease, and `LAN_IP` was
-*the VM's* address. Docker Desktop has no bridged mode: it publishes
-container ports on the Mac itself. So `LAN_IP` is now **this Mac's** LAN IP
-(`ipconfig getifaddr en1`), and `ports: ["${LAN_IP}:53:53/udp", ...]` on the
-`dns` service binds the Mac's LAN interface directly. Move the router's
-static DHCP reservation from the VM's MAC to the Mac's.
-
-What this buys and costs:
-
-- **UDP/53 works.** Bridged mode existed because Colima's default `ssh`
-  port-forwarder does not forward UDP at all. Docker Desktop's forwarder
-  does, so Technitium answers LAN clients through ordinary port publishing
-  and none of that machinery is needed.
-- **The `dns` container no longer sees real client addresses.** Docker
-  Desktop's forwarder rewrites the source IP to its internal gateway, so
-  every query arrives from one address. `DNS_SERVER_RECURSION` is still
-  satisfied (that gateway is a private address, and the policy is
-  `AllowOnlyForPrivateNetworks`), but Technitium's per-client ACLs,
-  stats and query logs now describe the forwarder, not the phone that
-  asked. Do not build anything on them.
-- macOS prompts once to allow incoming connections, and nothing else may
-  already hold `:53` on that address.
-
-`127.0.0.1:5432` and `127.0.0.1:5672` on the `nginx` service now bind the
-Mac's loopback directly, with no Lima forwarder in the path — simpler than
-before. Keep them on `127.0.0.1` rather than `${LAN_IP}`: binding them to the
-LAN address would expose Postgres and AMQP to every device on the network and
-defeat the single-ingress rule.
-
-#### Bind mounts and file sharing
-
-Docker Desktop shares `/Users`, `/Volumes`, `/private` and `/tmp` by default
-(Settings → Resources → File sharing). A repo outside those resolves to an
-empty auto-created directory *inside the VM*, and the stack then fails the
-same split way it did under a mountless Colima VM:
-
-- services mounting a single file (`loki`, `tempo`, `prometheus`, `alloy`,
-  `nginx`, `oauth2-proxy`, `rabbitmq`) die with
-  `error mounting ".../monitoring/loki/config.yml": ... not a directory`
-- services mounting a directory (`grafana` provisioning, `postgres` initdb,
-  `keycloak` realm-import) start **successfully against empty config**
-
-`scripts/check-docker.sh` checks the repo path against the shared roots so
-this surfaces as one clear error instead of half a stack behaving oddly.
-
-#### Preflight: `make check-docker` / `make docker-start`
-
-`scripts/check-docker.sh` reports state as an exit code, the same pattern the
-old `check-vm.sh` used:
-
-| code | meaning |
-|---|---|
-| 0 | running, Docker Desktop, repo bind-mountable, sized right |
-| 1 | the disk image location does not resolve (external volume unmounted) |
-| 2 | no docker CLI, or no reachable daemon (Docker Desktop is not running) |
-| 3 | a daemon answers, but it is not Docker Desktop |
-| 4 | the repo is outside Docker Desktop's shared directories |
-| 5 | usable, but under-sized or storing its disk image on the internal SSD |
-
-Setting `SKIP_DOCKER_CHECK=1` short-circuits the whole script to 0. Every
-check in it is macOS/Docker-Desktop specific, so that is the escape hatch for
-the non-Mac environments this stack is also brought up in (CI, a cloud dev
-VM, a plain Linux `dockerd` — see `AGENTS.md`); the compose stack itself is
-portable.
-
-`make check-docker` (a prerequisite of `up`, `config` and `portainer-up`)
-fails the build on 1–4 and only warns on 5, since a small VM or a misplaced
-disk image degrades the stack rather than breaking it. `make docker-start`
-reads the same code: it no-ops when the daemon is already correct, refuses on
-1 (mount the volume first), launches Docker.app and waits up to three minutes
-on 2, and re-checks afterwards.
-
-#### Autostart
-
-Settings → General → **"Start Docker Desktop when you sign in"** brings the
-daemon up at login, and the containers' `restart: unless-stopped` follows.
-Turn off "put hard disks to sleep when possible" in Energy settings: a
-spin-down under a live disk image stalls every container.
-
-The autostart caveat is the mirror of Colima's. Colima's flagless
-`brew services` start silently rebuilt a small, mountless VM; Docker Desktop
-keeps its Settings across restarts, so the sizing and file-sharing config
-persist — but it will happily start with `/Volumes/Docker` absent and build
-an empty VM there and then. That is why `check-docker.sh`'s disk-image check
-runs before anything else, and why `make up` runs it every time.
-
-#### Migrating the volumes off the old Colima VM
-
-Named volumes live inside the daemon's own VM: switching contexts does not
-bring them along. With both daemons installed and the stack stopped on both:
-
-```bash
-make migrate-volumes DRY=1   # list what would be copied
-make migrate-volumes         # colima -> desktop-linux, streamed through tar
-```
-
-`scripts/migrate-volumes.sh` enumerates the volumes by their
-`com.docker.compose.project` label (falling back to the `<project>_` name
-prefix), refuses to run while any of the project's containers are up on
-either daemon — copying a live Postgres data directory yields a corrupt
-cluster — and skips volumes that already hold data on the target unless
-`OVERWRITE=1`. It never modifies the source. Data that is *not* in a volume
-(`certs/`, `.env`, everything bind-mounted from the repo) needs nothing: it
-lives in the working tree.
-
-After migrating, re-run `make provision-app app=<name>` for each app — it is
-idempotent, and it is what re-asserts the `vector` extension and the
-`CONNECT` revocation if anything was missed.
+Docker Desktop for Mac (6 CPU / 12 GB / 100 GB, disk image on `/Volumes/Docker`). Details — `check-docker.sh` exit codes, `LAN_IP` semantics, Colima migration — live in `scripts/CLAUDE.md`.
 
 ### Portainer-managed stack
 
@@ -732,159 +484,9 @@ default is 10 minutes, which silently drops idle Postgres connections
 (pooled connections, an idle `psql` session) and shows up as confusing
 "connection reset" errors far from the actual cause.
 
-### Jarvis: Keycloak login gate (oauth2-proxy)
+### Jarvis / EA Keycloak gates
 
-`jarvis.famillelallier.net` (and its `.infra.` alias) is one of the two
-application vhosts in this repo that require a login — the other is
-Obsidian, which runs the same recipe against a different realm through its
-own `oauth2-proxy-ea` container (see the `obsidian` service above). Every
-other backend app listed in "Single-ingress rule" above is reachable by
-anyone who can resolve its hostname. The gate is the standard
-`oauth2-proxy` + NGINX `auth_request` recipe:
-
-- **`keycloak/realm-import/jarvis-realm.json`** — a dedicated realm
-  (`jarvis`), separate from `nurse-realm.json`, holding one confidential
-  client (`clientId: jarvis`) with a single redirect URI
-  (`https://jarvis.famillelallier.net/oauth2/callback`, owned by
-  oauth2-proxy, not the Jarvis app itself). It deliberately omits both a
-  client `secret` (Keycloak auto-generates one for a confidential client
-  on import, so no secret value — even a placeholder — ever lands in git)
-  and a `users` array (a real login password shouldn't live in a
-  committed JSON file either). Both are manual admin-console steps after
-  the first `make up` — see the `JARVIS_OAUTH_CLIENT_SECRET` comment in
-  `.env.example`. This mirrors `nurse-realm.json`'s own seed-user
-  precedent: `NURSE_SEED_PASSWORD`/`EXAMINER_SEED_PASSWORD` are likewise
-  applied after boot via `make keycloak-seed-users`, not baked into the
-  realm JSON.
-- **`oauth2-proxy` service** (`docker-compose.yml`) — publishes no host
-  port; reached only by `nginx` over `infra-net` at
-  `oauth2-proxy:4180`. Its own `OAUTH2_PROXY_UPSTREAMS` is a dummy
-  (`static://202`) because it's never used as an actual reverse proxy
-  here, only as the `auth_request` subrequest target and the handler for
-  `/oauth2/*` (sign-in, callback, logout). Points at Keycloak via the
-  internal `http://keycloak:8080/realms/jarvis` issuer URL, not the
-  external `https://keycloak.famillelallier.net` one, for the same
-  same-network reason the `minio` service avoids `MINIO_SERVER_URL`
-  (hairpinning back out through NGINX from inside `infra-net`). This
-  internal-URL/external-issuer split hits a real Keycloak hostname-v2
-  quirk — `KC_HOSTNAME` is set to the full external URL
-  (`https://keycloak.famillelallier.net`, not a bare hostname) so the
-  discovery document's `issuer` is stable regardless of which request
-  triggers it, but that issuer then never matches the internal
-  `OIDC_ISSUER_URL` used to fetch it, so strict verification always
-  fails. `OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true` is
-  therefore enabled — this is the documented escape hatch, deliberately
-  on here rather than the exceptional case. oauth2-proxy's own
-  server-to-server calls (token exchange, jwks) hit the endpoints named
-  in that discovery doc, i.e. the external `https://keycloak.famillelallier.net`
-  hostname — which otherwise has no route from inside `infra-net` — so
-  the `nginx` service carries a `keycloak.famillelallier.net` network
-  alias pointing that hostname back at itself (it already TLS-terminates
-  and proxies it via `nginx/conf.d/keycloak.conf`). Those calls then hit
-  the local dev CA (`certs/infra-ca.crt`), which isn't in oauth2-proxy's
-  default trust store and whose distroless image has no shell for a
-  `--provider-ca-file`-at-build-time trick; instead
-  `scripts/gen-certs.sh`'s `gen_oauth2proxy_bundle` bakes a
-  `certs/oauth2proxy-ca-bundle.crt` (the image's own CA bundle plus our
-  CA) that's bind-mounted over `/etc/ssl/certs/ca-certificates.crt`, so
-  every Go `http.Client` in the process picks it up via the system pool.
-  The `keycloak` service also carries a `healthcheck` (`/health/ready` on
-  its management port, probed with a `/dev/tcp` one-liner since the image
-  ships no curl/wget) so `oauth2-proxy` can `depends_on: condition:
-  service_healthy` instead of `service_started` — without it, oauth2-proxy
-  starts as soon as Keycloak's container process launches, long before its
-  HTTP listener is actually up, and its one-shot OIDC discovery call fails
-  with a DNS/connection error that only clears on a lucky restart.
-- **`nginx/conf.d/jarvis.conf`** — adds `location = /oauth2/auth`
-  (internal-only `auth_request` target), `location /oauth2/` (proxies
-  sign-in/callback/logout to oauth2-proxy), and gates the existing
-  `location /` with `auth_request` + `error_page 401 = /oauth2/sign_in`.
-  This only protects the frontend's static-file location — **it does
-  not cover the Jarvis backend API or its `GET /ws/ingest-status`
-  WebSocket.** Per the Jarvis repo's `frontend/src/useFiles.ts` and
-  `frontend/Dockerfile`, `VITE_API_URL` is a browser-facing build-time
-  value baked into the static bundle and pointed at the backend's own
-  published host port (e.g. `http://localhost:8000`) — the browser calls
-  `fetch()`/`new WebSocket()` against that URL directly, never through
-  this NGINX vhost. So the usual "`auth_request` breaks WebSocket
-  upgrades" failure mode doesn't apply here (there's no `auth_request` on
-  a WS route in this file), but it also means logging into the frontend
-  page does **not** by itself put the backend API/WebSocket behind
-  Keycloak. Verify manually post-deploy: confirm what `VITE_API_URL` the
-  deployed frontend was actually built with, and whether that backend
-  port is reachable unauthenticated from outside the LAN.
-
-### EA: token verification, no gateway
-
-`keycloak/realm-import/ea-realm.json` seeds a dedicated realm (`ea`),
-separate from `jarvis`/`nurse`, for the EA application in the `EA` repo.
-It holds three clients — `ea-spa` (public, PKCE, the SPA's browser
-sessions), `ea-mcp` (public, PKCE, an agent talking to `/mcp` via the same
-authorization-code flow but with a loopback redirect since there is no
-browser origin to restrict it to) and `ea-pipelines` (confidential, service
-account only — no human ever logs in as it) — plus one realm role,
-`ea-editor`, that gates writes (reading the catalogue needs no role). All
-three clients carry an `oidc-audience-mapper` stamping `ea-api` into the
-access token, because the EA API validates that audience rather than
-trusting whichever client requested the token.
-
-Every `redirectUris` entry is an **exact** callback, never a trailing
-`*`: Keycloak's match for a trailing `*` is a plain string prefix, so
-`http://localhost:*` also matches
-`http://localhost:1234@evil.example/callback` (a browser reads `1234` as
-userinfo and goes to `evil.example`) — a wildcard redirect is an open
-redirect. `ea-spa` lists `https://ea.infra.famillelallier.net/auth/callback`
-plus the two Vite-dev loopback forms, all at the SPA's one callback path;
-its `post.logout.redirect.uris` attribute holds the matching bare origins,
-`##`-joined (Keycloak's multi-value separator for that attribute, not a
-JSON array); `webOrigins` stays `["+"]`, which derives allowed CORS origins
-from those exact redirect URIs rather than naming its own wildcard. A LAN
-origin for the Vite dev server is **not** a missing redirect URI: on plain
-http (`http://192.168.x.y:5173`) the SPA cannot even start the login,
-because PKCE needs `crypto.subtle` and browsers only expose it in a secure
-context — so reach Vite as `http://localhost:5173` (from another machine,
-`ssh -L 5173:127.0.0.1:5173 -L 8000:127.0.0.1:8000 <host>`) or through the
-https vhost, never by adding the LAN origin in the console (EA
-`docs/adr/0032`). `ea-mcp` lists exactly one redirect URI,
-`http://localhost:33418/callback` — Claude Code (2.1.270) opens a loopback
-callback on the port its own `.mcp.json` pins as `callbackPort` for
-`clientId: ea-mcp`; the two numbers must always agree, so changing EA's
-`.mcp.json` means changing this realm file (and the live realm) to match,
-never the other way only.
-
-Unlike Jarvis, there is **no oauth2-proxy and no `auth_request`** on the
-EA vhost itself: the EA API and its `/mcp` transport verify the JWT
-themselves (EA `docs/adr/0032`), so `nginx/conf.d/ea.conf` needs no change
-and this realm adds no NGINX location *there*. Keycloak is still reached
-the normal way, at `https://keycloak.famillelallier.net`.
-
-The realm does have a fourth client that *is* an oauth2-proxy gate,
-`ea-obsidian` — but it fronts Obsidian, not EA (see the `obsidian` service
-above). It is the one client here with no `ea-api` audience mapper, because
-nothing behind that gate calls the EA API; the token is only ever proof
-that the person is an `ea` realm user. It carries its own
-`ea-obsidian-audience` mapper instead, as `jarvis` does: oauth2-proxy's
-keycloak-oidc provider rejects a token whose `aud` lacks its client id,
-and without the mapper Keycloak stamps only `account` there (a bare 500
-on `/oauth2/callback`, logged as `audience ... [account] does not match`). Its single redirect URI is
-`https://obsidian.infra.famillelallier.net/oauth2/callback` — the same
-exact-callback rule as every other client in this file, no trailing `*`.
-
-`ea-realm.json` carries a **`users` array**, deliberately, where
-`jarvis-realm.json` deliberately has none: `ea-pipelines`'s service
-account is not a human who logs in with a password, it is how the worker
-itself authenticates, so the only way to hand it the `ea-editor` role at
-import time is a `users` entry named `service-account-<clientId>` with
-`serviceAccountClientId` set and no `credentials` — Keycloak creates that
-user automatically for any client with `serviceAccountsEnabled: true`, and
-the import is just attaching a role to the user it will create anyway.
-Nothing sensitive lands in the file: no password, and the confidential
-client's secret is still Keycloak-generated on import, copied out of the
-console afterwards exactly like `jarvis`'s.
-
-`--import-realm` only seeds a realm that does not exist yet — editing this
-file after the first `make up` does not touch the live `ea` realm; repeat
-the change in the admin console too.
+oauth2-proxy gates (Jarvis, Obsidian) and the EA token-verification realm are documented in `keycloak/CLAUDE.md`.
 
 ### Airflow: nightly PR validation
 
@@ -1248,15 +850,9 @@ regenerating certs. Trusting the local CA in the system keychain is a
 `sudo`-gated step the script prints but does not run — that's for the
 human running it, not automated here.
 
-pgAdmin, Keycloak, Jarvis, LibreChat, MinIO API, and MinIO console are all
-deliberate exceptions to the `.infra.` subdomain convention: they're served at
-`pgadmin.famillelallier.net`, `keycloak.famillelallier.net`,
-`jarvis.famillelallier.net`, `chat.famillelallier.net`,
-`minio.famillelallier.net`, and
-`minio-console.famillelallier.net` (no `.infra.`), so those exact hostnames
-are added as extra SANs (the `EXTRA_SANS` array) alongside the wildcard in
-`gen-certs.sh` rather than being covered by `*.infra.famillelallier.net`.
-Regenerating certs (`./scripts/gen-certs.sh --force`) re-issues the leaf
+Hostnames outside `.infra.` (the exceptions listed under "Architecture")
+are extra SANs in `EXTRA_SANS` (`gen-certs.sh`), and each also needs an
+apex zone in `dns-provision.sh`. Regenerating certs (`./scripts/gen-certs.sh --force`) re-issues the leaf
 and **keeps the local CA** when `certs/infra-ca.key` and `infra-ca.crt`
 exist, so adding a SAN needs no re-trust on any device. To mint a new CA,
 delete `certs/infra-ca.*` first — then re-run the `sudo security
@@ -1275,7 +871,8 @@ bootstrap server-level settings, not zone data.
 Under Docker Desktop every query reaches the container from the port
 forwarder's gateway address rather than from the device that asked, so
 Technitium's per-client views (ACLs, stats, query logs) all collapse onto
-that one address — see "`LAN_IP` is the Mac's address now" above.
+that one address — see "`LAN_IP` is the Mac's address now" in
+`scripts/CLAUDE.md`.
 
 `DNS_SERVER_RECURSION` is set explicitly to `AllowOnlyForPrivateNetworks`
 rather than left at its default. This is what makes "forward everything
@@ -1297,24 +894,10 @@ Zone/record data (which hostnames resolve to `LAN_IP`) is managed through
 Technitium's HTTP API by `scripts/dns-provision.sh`, not through env vars
 or a mounted config file — safe to re-run any time zones/records need to
 be recreated (e.g. after a `dns-config` volume wipe). It creates scoped
-zones, **never** a `Primary` zone for `famillelallier.net` itself:
-
-- `infra.famillelallier.net` — apex + `*.infra.famillelallier.net`
-  wildcard A records, both → `LAN_IP`. Covers every current/future app
-  hostname automatically; no DNS config needed per new app. Jarvis is
-  also reachable this way, at `jarvis.infra.famillelallier.net`, with no
-  extra DNS/cert config.
-- `pgadmin.famillelallier.net` — apex A record → `LAN_IP`, mirroring its
-  exception status in `gen-certs.sh` above.
-- `keycloak.famillelallier.net` — apex A record → `LAN_IP`, same
-  exception pattern as pgAdmin's zone.
-- `jarvis.famillelallier.net` — apex A record → `LAN_IP`, same exception
-  pattern, requested in addition to the `.infra.` hostname above so
-  Jarvis is reachable at both.
-- `minio.famillelallier.net` / `minio-console.famillelallier.net` — apex
-  A records → `LAN_IP`, same exception pattern (API + browser console).
-- `chat.famillelallier.net` — apex A record → `LAN_IP`, same exception
-  pattern (LibreChat; its admin panel rides the `.infra.` wildcard).
+zones, **never** a `Primary` zone for `famillelallier.net` itself — an
+`infra.famillelallier.net` apex + wildcard (covers every `.infra.` app, no
+per-app DNS config), plus one apex zone per non-`.infra.` hostname. The
+list lives in `scripts/dns-provision.sh`.
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every
