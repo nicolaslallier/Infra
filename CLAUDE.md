@@ -484,6 +484,35 @@ default is 10 minutes, which silently drops idle Postgres connections
 (pooled connections, an idle `psql` session) and shows up as confusing
 "connection reset" errors far from the actual cause.
 
+### DarkAngel: NGINX serves the SPA itself
+
+DarkAngel (github.com/nicolaslallier/DarkAngel) is the one app this NGINX
+serves files for rather than proxies to. Every other app ships its own web
+server and registers a `proxy_pass` upstream; DarkAngel deliberately ships
+none, so `nginx/conf.d/darkangel.conf` carries a `root` and a `try_files` for
+the SPA and proxies only `/api/`, to `darkangel-api:8000` on infra-net.
+
+The files arrive through a volume, not an image. DarkAngel's stack runs a
+one-shot `web-assets` container that copies its built SPA into `darkangel-web`
+and exits -- `Exited (0)` is that container's healthy state -- and `nginx`
+mounts the volume read-only at `/srv/darkangel`. The publisher renames a
+finished directory into `current/`, so this `root` never points at a
+half-written copy, and a DarkAngel redeploy needs no `make up` here: new files
+simply appear under the path nginx already serves.
+
+Three things to know before changing any of it:
+
+- `darkangel-web` is `external: true` on both sides, exactly as `infra-net`
+  is, so compose will not create it. A missing external volume fails the
+  deploy of *this whole stack*, not just that one vhost -- `make app-volumes`,
+  a prerequisite of `make up`, `make pull` and `make init`, is what guarantees
+  it exists.
+- `/api/` has no `rewrite`, unlike `ea.conf` and `jarvis.conf`: DarkAngel's
+  FastAPI router is mounted at `/api` itself, so the prefix is passed through.
+  Stripping it here would 404 every API call.
+- The vhost is versioned in DarkAngel's repo too, as
+  `deploy/nginx/darkangel.conf`. Changes here belong there as well.
+
 ### Jarvis / EA Keycloak gates
 
 oauth2-proxy gates (Jarvis, Obsidian) and the EA token-verification realm are documented in `keycloak/CLAUDE.md`.

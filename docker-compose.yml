@@ -305,6 +305,10 @@ services:
       - ${INFRA_DIR:-.}/nginx/stream.d:/etc/nginx/stream.d:ro
       - ${INFRA_DIR:-.}/nginx/snippets:/etc/nginx/snippets:ro
       - ${INFRA_DIR:-.}/certs:/etc/nginx/certs:ro
+      # DarkAngel's SPA, which this NGINX serves itself rather than proxying
+      # to a second nginx (nginx/conf.d/darkangel.conf). The DarkAngel stack
+      # fills the volume; read-only here.
+      - darkangel-web:/srv/darkangel:ro
     networks:
       infra-net:
         # oauth2-proxy's server-to-server calls (token exchange, jwks) hit
@@ -741,3 +745,10 @@ volumes:
   obsidian-config:
   airflow-logs:
   openbao-data:
+  # Written by the DarkAngel stack (github.com/nicolaslallier/DarkAngel), read
+  # by nginx above -- external so both stacks name the same volume, the way
+  # they both use infra-net. `make app-volumes` (a prerequisite of `make up`)
+  # creates it; a missing external volume fails the whole deploy, not just the
+  # one vhost.
+  darkangel-web:
+    external: true
