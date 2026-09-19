@@ -918,7 +918,7 @@ What it exports: `portainer_controlplane_up` (1 when the API answered the last
 poll), `portainer_exporter_scrape_total` / `_scrape_errors_total`,
 `portainer_api_last_success_timestamp_seconds`, `portainer_version`,
 `portainer_ram_total_bytes`, `portainer_endpoint_count{type=}`,
-`portainer_stack_count{status=}` (1=stopped 2=running), and per-stack
+`portainer_stack_count{status=}` (`stopped`/`running`/`unknown`), and per-stack
 `portainer_stack_running` / `portainer_stack_status` / `portainer_stack_repository`
 / `portainer_stack_last_deploy_timestamp_seconds` (a git stack's last
 successful snapshot update).
