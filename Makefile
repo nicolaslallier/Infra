@@ -12,7 +12,8 @@ SHELL := bash
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
 	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
-	portainer-up portainer-down portainer-restart portainer-logs
+	portainer-up portainer-down portainer-restart portainer-logs \
+	runner-up runner-down runner-restart runner-logs check-runner-env
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -175,6 +176,38 @@ portainer-restart: ## Restart Portainer
 
 portainer-logs: ## Tail Portainer's logs
 	$(PORTAINER_COMPOSE) logs -f
+
+# --- CI runner (deploy on a push to main) ----------------------------------
+# The self-hosted GitHub Actions runner lives in its own compose project,
+# outside the stack it deploys, for the reason Portainer does: a redeploy
+# force-recreates every container in "infra", and a runner recreated mid-job
+# never reports. See CLAUDE.md "CI: deploying on a push to main".
+#
+# --env-file .runner.env is not a convenience: without it compose would
+# interpolate from this repo's .env, which is the stack's whole secret set.
+# The runner needs one value and has no business seeing the rest.
+RUNNER_COMPOSE := docker compose -f docker-compose.runner.yml --env-file .runner.env
+
+check-runner-env:
+	@test -f .runner.env || { \
+		echo "make: .runner.env not found -- create it with GH_RUNNER_TOKEN (a PAT that may register runners on this repo); see .env.example" >&2; \
+		exit 1; \
+	}
+
+runner-up: check-runner-env ## Start the self-hosted CI runner (its own compose project)
+	$(RUNNER_COMPOSE) up -d
+	@echo
+	@echo "Runner -> https://github.com/nicolaslallier/Infra/settings/actions/runners"
+	@echo "It must show up there with the label 'infra' before a push to main can deploy."
+
+runner-down: check-runner-env ## Stop the CI runner
+	$(RUNNER_COMPOSE) down
+
+runner-restart: check-runner-env ## Restart the CI runner
+	$(RUNNER_COMPOSE) restart
+
+runner-logs: check-runner-env ## Tail the CI runner's logs
+	$(RUNNER_COMPOSE) logs -f
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }

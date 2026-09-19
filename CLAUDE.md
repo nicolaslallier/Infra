@@ -24,6 +24,7 @@ make logs                        # tail logs (optional: s=<service>)
 make ps / make status            # service status
 make pull / make config          # redeploy re-pulling images / validate compose + .env
 make portainer-up / -down        # Portainer itself (its own compose project)
+make runner-up / -down           # the self-hosted CI runner that deploys on a push to main
 make shell s=<service>           # shell into a running service
 make psql                        # psql shell as the superuser (via docker compose exec)
 make provision-app app=<name>    # add a new app DB/role to an already-running cluster
@@ -539,6 +540,89 @@ Things that look odd and are load-bearing:
   before the split, so never clean up by label.
 - **Non-Mac environments** (CI, the cloud VM in `AGENTS.md`) have no
   Portainer stack: run `docker compose up -d` directly there.
+
+### CI: deploying on a push to main
+
+`.github/workflows/deploy.yml` redeploys the stack when main moves, running
+`scripts/ci-deploy.sh` on a self-hosted runner
+(`docker-compose.runner.yml`, `make runner-up`). `workflow_dispatch` runs the
+same thing by hand, with a `pull_images` input that switches `make up` for
+`make pull`.
+
+**A GitHub-hosted runner cannot deploy this stack**, which is the constraint
+the whole design follows from. Portainer publishes its API on
+`${LAN_IP}:9443` and is otherwise only on `infra-net`, and there is no public
+ingress to either — the same reason `airflow/dags/` exists rather than a
+GitHub Actions job. The runner has to be on this LAN.
+
+Five things here are load-bearing.
+
+- **The runner is its own compose project**, like Portainer and for the same
+  reason: every `up` force-recreates every container in `infra`, and a runner
+  recreated mid-job is a job that never reports. `make runner-up` drives it;
+  `--env-file .runner.env` on that target is not cosmetic, since without it
+  compose would interpolate the runner's one setting out of the stack's
+  entire secret set.
+- **The deploy acts on the *host* checkout, not the runner's.** Portainer
+  takes `docker-compose.yml` from GitHub main but every bind mount from the
+  checkout at `INFRA_CHECKOUT` (see "Portainer-managed stack"), so that
+  directory is what `ci-deploy.sh` brings to `origin/main`. The tree
+  `actions/checkout` writes under the runner's `_work` only supplies the
+  script. Confusing the two deploys main's compose against yesterday's
+  configs — exactly what `portainer-stack.sh`'s drift guard exists to refuse.
+- **The deploy runs in a throwaway `docker:*-cli` container**, the way
+  `portainer-stack.sh` runs curl in one, and it is mounted at *the same path*
+  inside as outside. Two things fall out of that. The runner image carries no
+  part of the deploy, so updating or replacing it cannot change what gets
+  deployed (`bash`, `make`, `jq`, `git` and the compose plugin are installed
+  into the throwaway container, never assumed). And `$PWD` is a path the
+  daemon can resolve too, so `portainer-stack.sh`'s
+  `${PORTAINER_INFRA_DIR:-$PWD}` is already the right bind-mount source with
+  nothing to translate — the identical-paths idiom, for the usual reason: a
+  nested bind mount is resolved by the daemon, not by the container asking
+  for it.
+- **`INFRA_CHECKOUT` must end in `/Infra`,** and `ci-deploy.sh` refuses
+  otherwise. The compose project name is the working directory's basename,
+  and `make up` reaches the vault with `docker compose exec openbao`
+  (`scripts/vault-env.sh`), which finds nothing under any other project name.
+  This is the same "the main checkout must not be renamed" rule as above,
+  arrived at from the other side.
+- **`DOCKER_HOST` is set to the socket rather than left unset.**
+  `check-env.sh` verifies `LAN_IP` against the addresses of the machine it
+  runs on *unless* a `DOCKER_HOST` says the daemon is elsewhere — and the
+  addresses of a throwaway container are not the deploy host's, so the check
+  would reject a perfectly good `LAN_IP`. With it set, the comparison is
+  against `INFRA_HOST` instead, which is the question actually worth asking.
+  `SKIP_DOCKER_CHECK=1` is set for the reason `AGENTS.md` already documents:
+  `check-docker.sh` asserts macOS/Docker-Desktop facts that mean nothing in
+  here.
+
+`INFRA_CHECKOUT` and `INFRA_HOST` come from repository variables
+(Settings → Secrets and variables → Actions → Variables) and fall back to the
+two values the Makefile already hard-codes for the Mac. `GH_RUNNER_TOKEN` —
+a PAT allowed to register runners — lives in `.runner.env`, gitignored, for
+the reason `PORTAINER_API_KEY` lives in `.portainer.env`.
+
+Docs-only pushes do not deploy (`paths-ignore` covers `**/*.md`, `docs/**`
+and `.github/**`): a deploy force-recreates `dns` among everything else, so
+it costs a brief LAN DNS outage, and a change that cannot reach a container
+is not worth one. Deploys are serialised by a `concurrency` group and never
+cancelled in flight, since a cancelled job leaves Portainer mid-redeploy.
+
+**The security note, which is the part to read before changing any of this.**
+This repo is public and the runner holds `/var/run/docker.sock` — root on the
+Docker daemon, the same power Portainer's UI has. Two consequences:
+
+- **Never add a `pull_request` or `pull_request_target` trigger to a workflow
+  that runs on the `infra` label.** A fork's PR brings its own workflow file,
+  so that combination is arbitrary code execution as root on the deploy host.
+  The deploy workflow triggers on `push` to main and `workflow_dispatch`
+  only. Set Settings → Actions → General → "Fork pull request workflows from
+  outside collaborators" to **Require approval for all outside
+  collaborators**; the default only gates first-time contributors.
+- **Merging to main is now enough to run code on the host.** That was already
+  true for whoever ran `make up`; it is now true for whoever can push to
+  main. Branch protection on main is what keeps those two sets the same size.
 
 ### Single-ingress rule
 

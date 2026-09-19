@@ -513,6 +513,8 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
+| `make runner-up` / `make runner-down` | Start / stop the self-hosted CI runner that deploys on a push to `main` (its own compose project, `docker-compose.runner.yml`) |
+| `make runner-restart` / `make runner-logs` | Restart the runner / tail its logs |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -837,6 +839,57 @@ sleeping Mac: either `sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00`, or
 move the schedule to an hour the machine is awake. `CLAUDE.md` ("Airflow:
 nightly PR validation") has the rest, including why the workspace is mounted
 at the same path on both sides.
+
+## CD: deploying on a push to main
+
+A push to `main` that touches anything a container reads redeploys the stack
+through Portainer, via `.github/workflows/deploy.yml`. `workflow_dispatch`
+runs it by hand, with a `pull_images` toggle that switches `make up` for
+`make pull`. Docs-only pushes are skipped — a deploy force-recreates every
+container, `dns` included, so it costs a brief LAN DNS outage.
+
+It runs on a **self-hosted runner**, and has to: Portainer's API is on
+`${LAN_IP}:9443` and otherwise only on `infra-net`, with no public ingress,
+so a GitHub-hosted runner cannot reach it. The runner is its own compose
+project — outside the stack it deploys, for the same reason Portainer is.
+
+Setup is a token, a `make`, and one settings change:
+
+```bash
+# 1. a PAT that may register runners on this repo:
+#    GitHub -> Settings -> Developer settings -> Personal access tokens
+#    (classic, 'repo' scope; or fine-grained with Administration: RW here)
+printf 'GH_RUNNER_TOKEN=%s\n' '<the token>' > .runner.env
+
+# 2. start it; it registers itself with the label 'infra'
+make runner-up
+make runner-logs        # until "Listening for Jobs"
+```
+
+Then check it is listed at **Settings → Actions → Runners**, and set
+**Settings → Actions → General → "Fork pull request workflows from outside
+collaborators"** to *Require approval for all outside collaborators*.
+
+If the host checkout is not at `/run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra`
+or the Docker host is not `192.168.2.10`, override them as repository
+variables `INFRA_CHECKOUT` / `INFRA_HOST` (Settings → Secrets and variables →
+Actions → Variables) rather than editing the workflow.
+
+What the job actually does, in one throwaway container with the host checkout
+mounted: bring that checkout to `origin/main`, then `make up` — so the vault
+renders `.env`, `check-env` validates it, and `portainer-stack.sh` redeploys.
+The runner's own `actions/checkout` tree only supplies the script; the
+deployed bind mounts come from the host checkout, and confusing the two is
+the failure mode the drift guard catches.
+
+Two things worth knowing before relying on it. The runner holds
+`/var/run/docker.sock` — root on this daemon, the same power Portainer's UI
+has — so **merging to main is now enough to run code on the host**; branch
+protection is what keeps that set small. And **no workflow on the `infra`
+label may ever trigger on `pull_request`**: this repo is public, and a fork's
+PR brings its own workflow file. `CLAUDE.md` ("CI: deploying on a push to
+main") has the rest, including why the checkout is mounted at the same path
+on both sides and why `DOCKER_HOST` is set to the socket.
 
 ## Portainer
 
