@@ -140,6 +140,18 @@ on `/oauth2/callback`, logged as `audience ... [account] does not match`). Its s
 `https://obsidian.infra.famillelallier.net/oauth2/callback` — the same
 exact-callback rule as every other client in this file, no trailing `*`.
 
+The realm also serves a second application, DarkAngel (the `DarkAngel`
+repo, vhost `nginx/conf.d/darkangel.conf`), through `darkangel-spa`: a
+public PKCE client built exactly like `ea-spa` — the same three exact
+`/auth/callback` redirect URIs on its own host, `webOrigins ["+"]` — whose
+mapper stamps `darkangel-api` instead of `ea-api`, so a token minted for one
+app is rejected by the other's API. Its `post.logout.redirect.uris` keep a
+trailing `/` (the SPA sends `origin + BASE_URL`, matched exactly). Like EA,
+the DarkAngel API verifies the JWT itself; its vhost has no `auth_request`.
+The live realm predates this client, so DarkAngel's
+`make keycloak-client` (`scripts/provision-keycloak-client.sh` there)
+creates or updates it through the admin API.
+
 `ea-realm.json` carries a **`users` array**, deliberately, where
 `jarvis-realm.json` deliberately has none: `ea-pipelines`'s service
 account is not a human who logs in with a password, it is how the worker
