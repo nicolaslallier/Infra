@@ -1029,6 +1029,12 @@ successful snapshot update).
    you've set up the `dns` service (see "DNS" above), the hostname resolves
    automatically — the wildcard covers every `*.infra.famillelallier.net`
    name. Otherwise, add it manually (see `make hosts`).
+
+   An app that ships no web server of its own can hand NGINX its static files
+   instead of an upstream: publish them into a volume both stacks declare
+   `external`, mount it read-only on `nginx`, and give the server block a
+   `root`. `nginx/conf.d/darkangel.conf` is the worked example, and
+   `make app-volumes` is where such a volume gets created.
 4. Optional: send OpenTelemetry traces to Alloy on `infra-net`
    (`OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318`). Container logs are
    collected automatically via the Docker socket — no app changes needed

@@ -36,7 +36,7 @@ endif
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-init: net certs seal-key ## Create network, certs, OpenBao's seal key, and .env
+init: net app-volumes certs seal-key ## Create network, volumes, certs, OpenBao's seal key, and .env
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "Created .env — edit passwords, LAN_IP, and DNS_ADMIN_PASSWORD before 'make up'."; \
@@ -48,6 +48,16 @@ net: ## Ensure the external infra-net Docker network exists
 	@docker network create infra-net >/dev/null 2>&1 \
 		&& echo "created network infra-net" \
 		|| echo "network infra-net already exists"
+
+# Volumes an app stack writes and this stack reads, declared external in both
+# so the name is the same on each side (the way infra-net is). Compose does not
+# create an external volume: a missing one fails `make up` for the whole stack,
+# not just the vhost that wants it -- hence a prerequisite, not a note.
+app-volumes: ## Ensure the external volumes shared with app stacks exist
+	@docker volume inspect darkangel-web >/dev/null 2>&1 \
+		&& echo "volume darkangel-web already exists" \
+		|| { docker volume create darkangel-web >/dev/null \
+			&& echo "created volume darkangel-web"; }
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
@@ -126,7 +136,7 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
-up: check-docker vault-render check-env net ## Deploy/redeploy the stack via Portainer (Git main)
+up: check-docker vault-render check-env net app-volumes ## Deploy/redeploy the stack via Portainer (Git main)
 	./scripts/portainer-stack.sh up
 
 down: ## Stop the stack via Portainer (keeps volumes)
@@ -143,7 +153,7 @@ ps: status
 status: ## Show service status (alias: ps)
 	docker compose ps
 
-pull: check-docker vault-render check-env net ## Redeploy via Portainer, re-pulling images
+pull: check-docker vault-render check-env net app-volumes ## Redeploy via Portainer, re-pulling images
 	./scripts/portainer-stack.sh pull
 
 config: check-env check-docker ## Validate docker-compose.yml + .env
