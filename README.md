@@ -795,6 +795,51 @@ reads a node_exporter running on the Mac itself. Container metrics and logs
 still work. cAdvisor is the service most likely to need attention after the
 move off Colima; see the note on its mounts in `docker-compose.yml`.
 
+## CI: nightly PR validation
+
+`airflow/dags/infra_pr_validation.py` runs at 03:00, walks the open non-draft
+PRs on GitHub, and for each one clones the head into `/tmp/infra-ci`, renders
+a throwaway `.env` into it (`scripts/ci-fake-env.sh`), and runs these checks:
+
+| check | what it catches |
+|---|---|
+| `prepare workspace` | a PR that breaks `ci-fake-env.sh` itself |
+| `check-env` | a new `.env.example` key that nothing else would notice until a container died on its own config |
+| `json/yaml` | a broken Grafana dashboard or Keycloak realm — Grafana boots fine and is just missing it |
+| `shellcheck` | `scripts/*.sh`, `postgres/initdb/*.sh` |
+| `compose config` | an unsatisfied `${VAR:?}`, a malformed service — both kill a deploy before any container starts |
+| `nginx -t` | a typo in a new vhost. Every `make up` force-recreates nginx, so this one takes down *all* ingress at deploy time |
+| `promtool` | `prometheus.yml` plus its `file_sd` target files |
+
+It posts one comment per PR and updates it on the next run rather than
+stacking a new one. A failing check fails that PR's mapped task, so the
+Airflow UI shows which PR is red without opening GitHub.
+
+Setup is two Airflow Variables and one unpause:
+
+```bash
+make shell s=airflow-scheduler
+airflow variables set infra_ci_github_token <PAT with pull_requests:write>
+airflow variables set infra_ci_repo nicolaslallier/Infra   # optional
+```
+
+then unpause `infra_pr_validation` at
+`https://airflow.infra.famillelallier.net` — DAGs arrive paused.
+
+The token is an Airflow Variable rather than a `.env` key for the same reason
+`PORTAINER_API_KEY` lives in `.portainer.env`: `.env` goes to containers
+wholesale and to Portainer as the stack env, and this token can write to
+GitHub.
+
+Two caveats worth knowing before relying on it. The checks run as *sibling*
+containers through the Docker socket, which is mounted on `airflow-scheduler`
+only — that socket is root on the daemon, and the Airflow UI is behind
+Airflow's own login and nothing else. And a 03:00 schedule does not fire on a
+sleeping Mac: either `sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00`, or
+move the schedule to an hour the machine is awake. `CLAUDE.md` ("Airflow:
+nightly PR validation") has the rest, including why the workspace is mounted
+at the same path on both sides.
+
 ## CD: deploying on a push to main
 
 A push to `main` that touches anything a container reads redeploys the stack
@@ -926,7 +971,7 @@ What it exports: `portainer_controlplane_up` (1 when the API answered the last
 poll), `portainer_exporter_scrape_total` / `_scrape_errors_total`,
 `portainer_api_last_success_timestamp_seconds`, `portainer_version`,
 `portainer_ram_total_bytes`, `portainer_endpoint_count{type=}`,
-`portainer_stack_count{status=}` (1=stopped 2=running), and per-stack
+`portainer_stack_count{status=}` (`stopped`/`running`/`unknown`), and per-stack
 `portainer_stack_running` / `portainer_stack_status` / `portainer_stack_repository`
 / `portainer_stack_last_deploy_timestamp_seconds` (a git stack's last
 successful snapshot update).
