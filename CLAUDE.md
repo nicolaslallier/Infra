@@ -368,7 +368,18 @@ GitHub never surfaces the gap (a job matching no labels queues silently
 instead of failing). It reads the same PAT from `.runner.env`, so there is
 nothing extra to provision, and it degrades to a warning — not an error —
 when jq, the token or the network is missing, since an operator who cannot
-reach GitHub must still be able to stop the runner. **`runner-down`,
+reach GitHub must still be able to stop the runner. It does, however,
+**separate a PAT GitHub refuses from a GitHub it cannot reach**, and reports
+the first by name rather than as "unknown": that is the same credential the
+runner's entrypoint exchanges for a registration token on every start, so a
+401 here is the `Obtaining the token of the runner` → `curl: (22) ... 401` →
+`Invalid configuration provided for token` loop in `make runner-logs`, seen
+from the side that can explain it. Nothing else in the repo does — the
+container restarts forever, `make runner-up` reported success, and the next
+push to main queues its deploy silently. The fix is a new PAT
+(`make runner-env FORCE=1 && make runner-restart`); `gen-runner-env.sh`
+validates tokens when it writes them, but PATs expire afterwards.
+**`runner-down`,
 `-restart` and `-pull` refuse while a job is running** (`--busy`, exit 3;
 `FORCE=1` overrides), scoped to the `infra` label because that label is the
 contract with `deploy.yml`: recreating the container mid-job kills it and
