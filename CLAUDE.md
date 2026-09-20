@@ -201,9 +201,14 @@ admin panel at `chat-admin.infra.famillelallier.net`) do. LibreChat is a
 Portainer stack of its own (compose in `~/OpenCode/LibreChat`), not a service
 of this repo: its `api` and `admin-panel` join `infra-net` under the aliases
 `librechat` / `librechat-admin` (`nginx/conf.d/librechat.conf`), and nothing
-else of it publishes a port. When registering the Postgres server
-inside pgAdmin's own UI, the host is the Compose service name `postgres`
-(pgAdmin and `postgres` share `infra-net` directly), port `5432` — never a
+else of it publishes a port. Heaven, the backup appliance
+(`heaven.infra.famillelallier.net`), is another such outside stack
+(github.com/nicolaslallier/Heaven): its `heaven-web` container serves the
+interface and relays `/api/` to `heaven:8000` on its own, so
+`nginx/conf.d/heaven.conf` is a plain pass-through to one upstream.
+When registering the Postgres server inside pgAdmin's own UI, the host is
+the Compose service name `postgres` (pgAdmin and `postgres` share
+`infra-net` directly), port `5432` — never a
 `*.famillelallier.net` hostname. A hostname like
 `postgresql.famillelallier.net` doesn't exist anywhere in this stack and
 produces connection-refused, not a DNS or reachability problem.

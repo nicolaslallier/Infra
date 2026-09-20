@@ -154,6 +154,9 @@ volume)
 OpenBao (the vault): `https://vault.infra.famillelallier.net` (log in with
 the root token from `.openbao.env` after `make vault-init` — see "Secrets"
 below; apps on `infra-net` use `http://openbao:8200`)
+Heaven (backups): `https://heaven.infra.famillelallier.net` (read-only
+snapshot list and health, no login — its own Portainer stack, see
+github.com/nicolaslallier/Heaven)
 
 ### Keeping an existing `.env` in step with `.env.example`
 
