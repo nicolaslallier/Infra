@@ -10,7 +10,7 @@ SHELL := bash
 .PHONY: help init net certs seal-key up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
-	migrate-volumes keycloak-seed-users obsidian-minio ea-minio \
+	migrate-volumes keycloak-seed-users s3-provision \
 	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
@@ -265,11 +265,9 @@ dns-check: check-env ## Query the dns service to verify answers
 keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
 
-obsidian-minio: check-env ## Create/update the MinIO bucket + user Obsidian syncs into
-	@./scripts/provision-obsidian-minio.sh
-
-ea-minio: check-env ## Create/update the MinIO bucket + user the EA API stores files in
-	@./scripts/provision-ea-minio.sh
+s3-provision: check-env ## Create/update an app's S3 bucket + identity (app=<name> [bucket=] [versioned=1])
+	@test -n "$(app)" || { echo "usage: make s3-provision app=<name> [bucket=<bucket>] [versioned=1]" >&2; exit 1; }
+	@./scripts/provision-s3.sh "$(app)" "$(or $(bucket),$(app))" "$(or $(versioned),0)"
 
 # --- OpenBao (the secret store) --------------------------------------------
 # vault-init runs once per vault; seed/env are the two directions of the .env
