@@ -37,15 +37,11 @@ scrape_configs:
     static_configs:
       - targets: ["jarvis-api:8000"]
 
-  - job_name: minio
-    metrics_path: /minio/v2/metrics/cluster
+  - job_name: seaweedfs
+    # weed server -metricsPort serves every component (master, volume,
+    # filer, s3) on this one port; default /metrics path.
     static_configs:
-      - targets: ["minio:9000"]
-
-  - job_name: minio-bucket
-    metrics_path: /minio/v2/metrics/bucket
-    static_configs:
-      - targets: ["minio:9000"]
+      - targets: ["s3:9324"]
 
   - job_name: rabbitmq
     static_configs:
@@ -54,8 +50,8 @@ scrape_configs:
   # OpenBao. /v1/sys/metrics is an authenticated endpoint by default, which
   # would make this scrape a 403 with no obvious cause; the listener in
   # openbao/config.hcl opens it with unauthenticated_metrics_access, the same
-  # posture as minio's public metrics. `format=prometheus` matters too --
-  # without it the endpoint answers in Telemetry's own JSON.
+  # posture as the seaweedfs job's unauthenticated /metrics. `format=prometheus`
+  # matters too -- without it the endpoint answers in Telemetry's own JSON.
   - job_name: openbao
     metrics_path: /v1/sys/metrics
     params:

@@ -20,7 +20,7 @@ listener "tcp" {
   tls_disable = true
 
   # Lets Prometheus scrape /v1/sys/metrics without carrying a token, the
-  # same posture as minio's MINIO_PROMETHEUS_AUTH_TYPE=public: read-only
+  # same posture as the seaweedfs /metrics endpoint: read-only
   # numbers, on a network nothing outside the stack can reach. Without it
   # the metrics endpoint is an authenticated one and the scrape is a 403.
   telemetry {

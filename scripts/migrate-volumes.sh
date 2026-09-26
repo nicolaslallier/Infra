@@ -4,7 +4,7 @@
 # Desktop. Named volumes live inside the daemon's own VM, so switching
 # contexts does NOT bring them along: without this, Docker Desktop starts
 # the stack on empty volumes and you get a brand-new Postgres cluster (no
-# app databases, no Keycloak realms, no Grafana state), an empty MinIO, and
+# app databases, no Keycloak realms, no Grafana state), an empty object store, and
 # a fresh RabbitMQ.
 #
 # Nothing is deleted or modified on the source daemon; each volume is
@@ -75,7 +75,7 @@ for ctx in "$FROM_CTX" "$TO_CTX"; do
 		--filter "label=com.docker.compose.project=$PROJECT" | wc -l | tr -d ' ')"
 	[ "$running" = "0" ] ||
 		die "migrate-volumes: $running '$PROJECT' container(s) still running on '$ctx'." \
-		    "  Copying a volume out from under a running Postgres/MinIO/RabbitMQ" \
+		    "  Copying a volume out from under a running Postgres/SeaweedFS/RabbitMQ" \
 		    "  corrupts it. Stop the stack there first:" \
 		    "    docker --context $ctx compose down"
 done

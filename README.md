@@ -2,7 +2,7 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18 with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, OpenBao,
+PostgreSQL 18 with pgvector, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao,
 Portainer, Technitium DNS, and an LGTM monitoring stack (Grafana, Prometheus,
 Loki, Tempo, Alloy).
 Application repos stay independent: they don't run their own database or
@@ -12,7 +12,7 @@ proxy, they just join this stack's Docker network.
 container fronting backend services — 80/443 for HTTP(S), 5432 (TCP
 passthrough) for Postgres, 5672 (TCP passthrough) for RabbitMQ AMQP, and
 7687 (TCP passthrough) for Neo4j Bolt.
-Postgres, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, OpenBao, Grafana, and
+Postgres, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao, Grafana, and
 the rest of the monitoring backends publish nothing themselves; they're
 reachable only on the shared `infra-net` Docker network or through NGINX.
 A separate `dns` container publishes its own ports too — it's a top-level
@@ -47,7 +47,7 @@ instead of refusing, which loses every volume until you point it back.
 
 This stack previously ran on a bridged Colima VM. Named volumes live inside
 the daemon's VM, so switching to Docker Desktop does not bring Postgres,
-Keycloak, MinIO, Grafana or RabbitMQ data with it. With the stack stopped on
+Keycloak, object-store, Grafana or RabbitMQ data with it. With the stack stopped on
 both daemons:
 
 ```bash
@@ -73,7 +73,7 @@ make init      # creates infra-net, local dev certs, OpenBao's seal key, copies 
 ```
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
-`KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `MINIO_ROOT_PASSWORD`,
+`KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `S3_ADMIN_SECRET_KEY`,
 `RABBITMQ_DEFAULT_PASS`, `MONITORING_DB_PASSWORD`, and one
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the two
@@ -136,9 +136,10 @@ pgAdmin: `https://pgadmin.famillelallier.net`
 Keycloak: `https://keycloak.famillelallier.net` (admin console at
 `/admin/master/console/`)
 Grafana: `https://grafana.infra.famillelallier.net`
-MinIO console: `https://minio-console.famillelallier.net` (API at
-`https://minio.famillelallier.net`; apps on `infra-net` can also use
-`http://minio:9000`)
+S3 (SeaweedFS): API `https://s3.infra.famillelallier.net` (apps on
+`infra-net`: `http://s3:8333`), admin UI
+`https://s3-admin.infra.famillelallier.net` (Keycloak realm `infra`, group
+`s3-admin`)
 Airflow: `https://airflow.infra.famillelallier.net` (admin / `AIRFLOW_ADMIN_PASSWORD`;
 DAGs go in `airflow/dags/`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
@@ -284,30 +285,53 @@ The desktop inside that container has no login of its own, which is the
 whole reason for the gate — never give the `obsidian` service a `ports:`
 entry.
 
-### Obsidian vaults in MinIO
+### Obsidian vaults in S3
 
 The browser Obsidian keeps its working copy on the `obsidian-config`
-volume and syncs it into the MinIO bucket `obsidian` with the Remotely Save
+volume and syncs it into the S3 bucket `obsidian` with the Remotely Save
 plugin. One-time setup, after `make up`:
 
-1. Set `OBSIDIAN_MINIO_SECRET_KEY` in `.env`, then `make obsidian-minio`
-   (creates the versioned bucket, a policy limited to it, and the MinIO
-   user `obsidian`; safe to re-run).
+1. Set `OBSIDIAN_S3_SECRET_KEY` in `.env` (`openssl rand -hex 24`),
+   `make vault-seed`, then `make s3-provision app=obsidian versioned=1`
+   (creates the versioned bucket and the identity `obsidian`, scoped to it;
+   safe to re-run).
 2. In `https://obsidian.infra.famillelallier.net`, create or open a vault,
    then **Settings → Community plugins → Browse → Remotely Save → Install →
    Enable**.
 3. Remotely Save settings → **S3 or compatible**:
-   - Endpoint: `http://minio:9000`
+   - Endpoint: `http://s3:8333`
    - Region: `us-east-1`
    - Access Key ID: `obsidian`
-   - Secret Access Key: your `OBSIDIAN_MINIO_SECRET_KEY`
+   - Secret Access Key: your `OBSIDIAN_S3_SECRET_KEY`
    - Bucket: `obsidian`
    - S3 URL style: **Path Style**
    - Bypass CORS: on
    - Then **Check** the connection, and set a schedule (e.g. every 5 min).
 
 Other devices (phone, laptop) can sync the same vault with the same
-settings, using `https://minio.famillelallier.net` as the endpoint.
+settings, using `https://s3.infra.famillelallier.net` as the endpoint.
+
+### S3 credentials for humans (STS)
+
+Members of the `infra` realm groups `s3-readonly` / `s3-readwrite` /
+`s3-admin` get temporary keys (1 h) instead of a static one:
+
+```bash
+KC=https://keycloak.famillelallier.net/realms/infra/protocol/openid-connect
+curl -s -d client_id=s3-sts "$KC/auth/device"          # open verification_uri_complete, log in
+curl -s -d client_id=s3-sts -d grant_type=urn:ietf:params:oauth:grant-type:device_code \
+  -d device_code=<device_code> "$KC/token"              # -> access_token
+aws sts assume-role-with-web-identity --endpoint-url https://s3.infra.famillelallier.net \
+  --role-arn arn:aws:iam::role/S3ReadOnlyRole --role-session-name "$USER" \
+  --web-identity-token <access_token>                   # -> export the three keys it returns
+```
+
+Use `S3WriteRole` / `S3AdminRole` for the other groups; each role's trust
+policy in `seaweedfs/iam.json.tmpl` requires both the `infra` issuer and a
+matching `groups` claim (`s3-admin` → `S3AdminRole` and below,
+`s3-readwrite` → `S3WriteRole` and `S3ReadOnlyRole`, `s3-readonly` →
+`S3ReadOnlyRole` only), so a user in no group, or asking for a role above
+their group, is refused.
 
 ### EA login
 
@@ -370,7 +394,7 @@ the CLI without pasting it anywhere:
 make vault-status                            # seal/init state
 make vault-cli args="kv list infra/"
 make vault-cli args="kv get -mount=infra env"
-make vault-cli args="kv patch -mount=infra env MINIO_ROOT_PASSWORD=new-value"
+make vault-cli args="kv patch -mount=infra env S3_ADMIN_SECRET_KEY=new-value"
 ```
 
 ### Two files, and why they aren't in `.env`
@@ -551,7 +575,7 @@ What you get:
 
 - **Metrics** — host (node-exporter), containers (cAdvisor), Postgres,
   NGINX (`stub_status` on an internal `:8080`), Keycloak (`:9000/metrics`),
-  MinIO, RabbitMQ (`:15692/metrics`), Alloy, Windows machines
+  SeaweedFS (`s3:9324/metrics`), RabbitMQ (`:15692/metrics`), Alloy, Windows machines
   (windows_exporter, job `windows` — see below), Macs (node_exporter's darwin
   build plus a GPU sampler, job `macos` — see below), and sibling apps that
   expose `/metrics`
@@ -1046,7 +1070,7 @@ successful snapshot update).
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, minio, rabbitmq, neo4j, openbao, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, s3, s3-admin, rabbitmq, neo4j, openbao, nginx, dns, LGTM + exporters
 docker-compose.portainer.yml  portainer (deploys the stack above)
 nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP + Bolt TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks

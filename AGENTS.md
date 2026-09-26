@@ -1,7 +1,7 @@
 # AGENTS.md
 
 This repo is a Docker Compose infrastructure stack (NGINX, PostgreSQL 18
-with pgvector, pgAdmin, Keycloak, MinIO, RabbitMQ, Neo4j, OpenBao, Portainer,
+with pgvector, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao, Portainer,
 Technitium DNS, and the LGTM monitoring stack). There is no application code, build,
 lint, or unit-test step — the "test" is bringing the stack up and exercising
 it.
@@ -79,7 +79,7 @@ startup caveats that the update script deliberately does NOT handle.
   `postgres:5432`. AMQP is the same pattern at `127.0.0.1:5672` →
   `rabbitmq:5672`, and Bolt at `127.0.0.1:7687` → `neo4j:7687`. `make psql` opens a superuser shell inside the container.
   Do not add a `ports:` entry to `postgres`/`pgadmin`/`keycloak`/`grafana`
-  /`minio`/`rabbitmq`/`neo4j`/`airflow-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  /`s3`/`s3-admin`/`rabbitmq`/`neo4j`/`airflow-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
 
 - **The vault needs two files this snapshot may not have.** `openbao` reads
   `openbao/seal.key` as a bind-mounted file, and Docker turns a *missing*

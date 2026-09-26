@@ -393,7 +393,7 @@
       "collapsed": false,
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
       "id": 105,
-      "title": "MinIO (bucket jarvis)",
+      "title": "S3 (bucket jarvis)",
       "type": "row"
     },
     {
@@ -424,11 +424,11 @@
         "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
         "textMode": "auto"
       },
-      "title": "MinIO scrape",
+      "title": "S3 scrape",
       "type": "stat",
       "targets": [
         {
-          "expr": "up{job=\"minio\"}",
+          "expr": "up{job=\"seaweedfs\"}",
           "legendFormat": "up",
           "refId": "A"
         }
@@ -457,7 +457,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "minio_bucket_usage_object_total{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "expr": "SeaweedFS_s3_bucket_object_count{bucket=\"jarvis\"}",
           "refId": "A"
         }
       ]
@@ -485,7 +485,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "minio_bucket_usage_total_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "expr": "SeaweedFS_s3_bucket_size_bytes{bucket=\"jarvis\"}",
           "refId": "A"
         }
       ]
@@ -513,7 +513,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(rate(minio_bucket_requests_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_request_total{bucket=\"jarvis\"}[5m]))",
           "refId": "A"
         }
       ]
@@ -545,7 +545,7 @@
       "type": "stat",
       "targets": [
         {
-          "expr": "sum(rate(minio_bucket_requests_4xx_errors_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m])) + sum(rate(minio_bucket_requests_5xx_errors_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_request_total{bucket=\"jarvis\", code=~\"[45]..\"}[5m]))",
           "refId": "A"
         }
       ]
@@ -565,8 +565,8 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (api) (rate(minio_bucket_requests_total{job=\"minio-bucket\", bucket=\"jarvis\"}[5m]))",
-          "legendFormat": "{{api}}",
+          "expr": "sum by (type) (rate(SeaweedFS_s3_request_total{bucket=\"jarvis\"}[5m]))",
+          "legendFormat": "{{type}}",
           "refId": "A"
         }
       ]
@@ -586,12 +586,12 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(minio_bucket_traffic_received_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}[5m])",
+          "expr": "rate(SeaweedFS_s3_bucket_traffic_received_bytes_total{bucket=\"jarvis\"}[5m])",
           "legendFormat": "rx",
           "refId": "A"
         },
         {
-          "expr": "rate(minio_bucket_traffic_sent_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}[5m])",
+          "expr": "rate(SeaweedFS_s3_bucket_traffic_sent_bytes_total{bucket=\"jarvis\"}[5m])",
           "legendFormat": "tx",
           "refId": "B"
         }
@@ -612,7 +612,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "minio_bucket_usage_total_bytes{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "expr": "SeaweedFS_s3_bucket_size_bytes{bucket=\"jarvis\"}",
           "legendFormat": "size",
           "refId": "A"
         }
@@ -633,7 +633,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "minio_bucket_usage_object_total{job=\"minio-bucket\", bucket=\"jarvis\"}",
+          "expr": "SeaweedFS_s3_bucket_object_count{bucket=\"jarvis\"}",
           "legendFormat": "objects",
           "refId": "A"
         }
@@ -654,17 +654,17 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "minio_cluster_capacity_usable_total_bytes{job=\"minio\"}",
+          "expr": "sum(SeaweedFS_volumeServer_resource{type=\"all\"})",
           "legendFormat": "total",
           "refId": "A"
         },
         {
-          "expr": "minio_cluster_capacity_usable_free_bytes{job=\"minio\"}",
+          "expr": "sum(SeaweedFS_volumeServer_resource{type=\"free\"})",
           "legendFormat": "free",
           "refId": "B"
         },
         {
-          "expr": "minio_cluster_usage_total_bytes{job=\"minio\"}",
+          "expr": "sum(SeaweedFS_volumeServer_resource{type=\"used\"})",
           "legendFormat": "used",
           "refId": "C"
         }
@@ -681,11 +681,11 @@
       },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 60 },
       "id": 27,
-      "title": "MinIO container CPU",
+      "title": "S3 container CPU",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\".*minio.*\"}[5m]))",
+          "expr": "sum by (name) (rate(container_cpu_usage_seconds_total{name=~\".*-s3-[0-9]+\"}[5m]))",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
@@ -702,11 +702,11 @@
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 60 },
       "id": 28,
-      "title": "MinIO container memory",
+      "title": "S3 container memory",
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\".*minio.*\", image!=\"\"})",
+          "expr": "sum by (name) (container_memory_working_set_bytes{name=~\".*-s3-[0-9]+\", image!=\"\"})",
           "legendFormat": "{{name}}",
           "refId": "A"
         }
@@ -756,11 +756,11 @@
         "sortOrder": "Descending",
         "wrapLogMessage": true
       },
-      "title": "MinIO logs",
+      "title": "S3 logs",
       "type": "logs",
       "targets": [
         {
-          "expr": "{compose_service=\"minio\"} |~ `$log_filter`",
+          "expr": "{compose_service=\"s3\"} |~ `$log_filter`",
           "refId": "A"
         }
       ]
@@ -790,7 +790,7 @@
     }
   ],
   "schemaVersion": 39,
-  "tags": ["jarvis", "app", "minio"],
+  "tags": ["jarvis", "app", "s3"],
   "templating": {
     "list": [
       {

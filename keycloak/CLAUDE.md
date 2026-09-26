@@ -34,7 +34,7 @@ anyone who can resolve its hostname. The gate is the standard
   `/oauth2/*` (sign-in, callback, logout). Points at Keycloak via the
   internal `http://keycloak:8080/realms/jarvis` issuer URL, not the
   external `https://keycloak.famillelallier.net` one, for the same
-  same-network reason the `minio` service avoids `MINIO_SERVER_URL`
+  same-network reason every infra-net client uses service names
   (hairpinning back out through NGINX from inside `infra-net`). This
   internal-URL/external-issuer split hits a real Keycloak hostname-v2
   quirk — `KC_HOSTNAME` is set to the full external URL
@@ -167,3 +167,33 @@ console afterwards exactly like `jarvis`'s.
 `--import-realm` only seeds a realm that does not exist yet — editing this
 file after the first `make up` does not touch the live `ea` realm; repeat
 the change in the admin console too.
+
+## Infra: SeaweedFS admin gate and STS (realm `infra`)
+
+`keycloak/realm-import/infra-realm.json` — the home for infra tooling SSO.
+No client secrets and no `users` array in git; create humans in the console
+with a **verified email** (oauth2-proxy rejects an unverified one with a
+bare 500 on `/oauth2/callback`) and add them to a group.
+
+- Groups `s3-admin`, `s3-readwrite`, `s3-readonly`, emitted as the `groups`
+  claim by a group-membership mapper with **Full group path off** — both
+  oauth2-proxy (`OAUTH2_PROXY_ALLOWED_GROUPS`) and SeaweedFS's STS
+  `roleMapping` match the bare name, and `/s3-admin` would match neither.
+- `s3-admin`: confidential, PKCE S256, one exact redirect URI
+  `https://s3-admin.infra.famillelallier.net/oauth2/callback`. Its secret
+  goes into `S3_ADMIN_OAUTH_CLIENT_SECRET` after the first deploy
+  (`check-env` warns until then; `oauth2-proxy-infra` crash-loops).
+- `s3-sts`: public, device authorization grant only. Its tokens are
+  exchanged at `https://s3.infra.famillelallier.net` for temporary keys
+  (`AssumeRoleWithWebIdentity`; roles in `seaweedfs/iam.json.tmpl`). The
+  STS side trusts only `iss == https://keycloak.famillelallier.net/realms/infra`
+  and fetches JWKS from the internal `http://keycloak:8080/...` URL, so `s3`
+  needs no CA trust. `roleMapping` only picks which role a request names by
+  default — it does not gate which role may be assumed; that gate is each
+  role's trust policy in `seaweedfs/iam.json.tmpl`, which requires both that
+  issuer and a matching `groups` claim (`s3-admin` for `S3AdminRole`,
+  `s3-readwrite` or above for `S3WriteRole`, `s3-readonly` or above for
+  `S3ReadOnlyRole`). A user in no group gets no credentials for any role.
+
+`--import-realm` only seeds a realm that does not exist yet — edit the live
+realm in the console too after changing this file.

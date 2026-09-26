@@ -6,7 +6,7 @@ name: portainer
 services:
   portainer:
     # 'lts' is Portainer's own long-term-support channel tag -- same
-    # moving-tag tradeoff as minio/dns in docker-compose.yml, and the tag
+    # moving-tag tradeoff as dns in docker-compose.yml, and the tag
     # Portainer documents for anything that isn't a throwaway test.
     image: portainer/portainer-ce:lts
     restart: unless-stopped

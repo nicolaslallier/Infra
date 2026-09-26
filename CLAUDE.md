@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this is
 
 `Infra` is the shared "common group" backing stack for sibling application
-repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak, MinIO,
-RabbitMQ, Neo4j, OpenBao, Portainer, a Technitium DNS server, and an LGTM
+repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak,
+SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao, Portainer, a Technitium DNS server, and an LGTM
 monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via
 Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
@@ -21,7 +21,7 @@ is how a `.env` that `check-env` rejects gets repaired, so requiring it first
 would deadlock.
 
 `up`, `pull`, `config`, `provision-app`, `dns-provision`, `dns-check`,
-`keycloak-seed-users` and `obsidian-minio` run `check-env`
+`keycloak-seed-users` and `s3-provision` run `check-env`
 (`scripts/check-env.sh`) first — see "Preflight: `make check-env`" below for
 what it asserts and why each check exists. `up`, `pull`, `config`,
 and `portainer-up` also run `check-docker` (see "Runtime: Docker Desktop"
@@ -57,10 +57,26 @@ never orphans another app that's still attached to it):
   same generic per-app provisioning as any other app — see "Per-app
   database provisioning" below), not a bundled DB of its own. Metrics
   enabled on the management interface (`:9000/metrics`).
-- **`minio`** — `quay.io/minio/minio` (pinned; gone from Docker Hub). Publishes no host port. S3 API on `:9000`
-  and browser console on `:9001`, both fronted by NGINX
-  (`minio.famillelallier.net` / `minio-console.famillelallier.net`).
-  Apps on `infra-net` reach the API at `http://minio:9000`.
+- **`s3`** — `chrislusf/seaweedfs:4.47`, pinned by tag *and* digest like
+  `neo4j`. One `weed server -s3` container; publishes no host
+  port. S3 (and STS) on `:8333`, fronted by NGINX at
+  `s3.infra.famillelallier.net`; apps on `infra-net` use `http://s3:8333`.
+  Auth is on from first boot via the `S3_ADMIN_*` env identity — SeaweedFS
+  serves **anonymously** when no identity exists, so never remove it.
+  Per-app bucket-scoped identities come from `make s3-provision
+  app=<name> [bucket=] [versioned=1]` (`scripts/provision-s3.sh`); the IAM
+  config (Keycloak OIDC provider, STS roles) is `seaweedfs/iam.json.tmpl`,
+  rendered into the container's `/tmp` at start. The filer (`:8888`) and
+  master (`:9333`) UIs are unauthenticated and must never get a host path.
+  Metrics on `:9324`. Break glass: `docker compose exec s3 weed shell
+  -master=s3:9333`.
+- **`s3-admin`** — `weed admin` (same image), at
+  `s3-admin.infra.famillelallier.net`. It has no login of its own (OSS
+  SeaweedFS's OIDC is Enterprise-only) and runs `-allowInsecureBind` on
+  `infra-net`; `nginx/conf.d/s3-admin.conf` gates it through a **third**
+  oauth2-proxy, `oauth2-proxy-infra` (realm `infra`, client `s3-admin`,
+  `OAUTH2_PROXY_ALLOWED_GROUPS: s3-admin`). Only `s3-admin` members get in,
+  as full admins; there is no read-only UI role.
 - **`rabbitmq`** — `rabbitmq:4-management`. Publishes no host port. AMQP
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
@@ -142,14 +158,14 @@ never orphans another app that's still attached to it):
   `email` claim, so an `ea` user without an email address cannot log in,
   and one whose **Email verified** is off gets a bare 500 on
   `/oauth2/callback` (logged as `email in id_token (...) isn't verified`).
-  Vault data is synced into MinIO (bucket `obsidian`, versioned) by the
-  in-app **Remotely Save** plugin against `http://minio:9000`, using a
-  MinIO user `obsidian` scoped to that bucket
-  (`make obsidian-minio` / `scripts/provision-obsidian-minio.sh`). The
-  working copy stays on the `obsidian-config` volume: Obsidian watches the
-  filesystem, so a FUSE/s3fs mount of the bucket as `/config` is not an
-  option (it also needs `SYS_ADMIN`). MinIO is the durable copy and the one
-  other devices sync from.
+  Vault data is synced into the S3 store (bucket `obsidian`, versioned) by
+  the in-app **Remotely Save** plugin against `http://s3:8333`, using the
+  identity `obsidian` scoped to that bucket
+  (`make s3-provision app=obsidian versioned=1`). The working copy stays on
+  the `obsidian-config` volume: Obsidian watches the filesystem, so a
+  FUSE/s3fs mount of the bucket as `/config` is not an option (it also
+  needs `SYS_ADMIN`). The bucket is the durable copy and the one other
+  devices sync from.
 - **`airflow-*`** — `apache/airflow:3.3.1`, at
   `airflow.infra.famillelallier.net` (NGINX → `airflow-apiserver:8080`).
   Publishes no host port. `LocalExecutor`, so tasks run inside
@@ -192,8 +208,8 @@ never orphans another app that's still attached to it):
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`
 (`keycloak.famillelallier.net`), Grafana
-(`grafana.infra.famillelallier.net`), MinIO
-(`minio.famillelallier.net` / `minio-console.famillelallier.net`),
+(`grafana.infra.famillelallier.net`), SeaweedFS
+(`s3.infra.famillelallier.net`, admin UI `s3-admin.infra.famillelallier.net`),
 RabbitMQ management (`rabbitmq.infra.famillelallier.net`),
 the Jarvis frontend (`jarvis.famillelallier.net`, also reachable at
 `jarvis.infra.famillelallier.net`), and LibreChat (`chat.famillelallier.net`,
@@ -432,16 +448,17 @@ Docker daemon, the same power Portainer's UI has. Two consequences:
 ### Single-ingress rule
 
 This rule governs *backend application services* — anything NGINX fronts
-(`postgres`, `pgadmin`, `keycloak`, `minio`, `rabbitmq`, `openbao`,
+(`postgres`, `pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `openbao`,
 `portainer`, `grafana`, monitoring backends, and future apps) — not top-level infra
 processes that own a protocol NGINX can't meaningfully front. `postgres`,
-`pgadmin`, `keycloak`, `minio`, `rabbitmq`, `grafana`, and the
+`pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `grafana`, and the
 rest of LGTM/exporters deliberately have no `ports:` key. All host access
 to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
-  proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `minio:9000`
-  / `minio:9001`, `rabbitmq:15672`, `openbao:8200`, `portainer:9443` (https
+  proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `s3:8333`,
+  `s3-admin:23646` (behind `oauth2-proxy-infra`), `rabbitmq:15672`,
+  `openbao:8200`, `portainer:9443` (https
   upstream), and, per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
   a raw TCP passthrough proxy to `postgres:5432`, bound to
@@ -464,7 +481,9 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`minio`, `rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `openbao`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
+`rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `openbao`, `grafana`, or other
+monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
@@ -879,7 +898,7 @@ method, no per-app policy, and no app in this stack or any sibling repo reads
 its secrets from the vault yet — they all still get them from `.env` via
 Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
 the listener sets `unauthenticated_metrics_access`, the same posture as
-MinIO's public metrics), but there is no Grafana dashboard for it.
+SeaweedFS's /metrics), but there is no Grafana dashboard for it.
 
 `vault.infra.famillelallier.net` needs no cert or DNS work: it rides the
 `*.infra.famillelallier.net` wildcard in both `gen-certs.sh` and the

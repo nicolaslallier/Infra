@@ -76,12 +76,6 @@ add_a_record "keycloak.famillelallier.net" "keycloak.famillelallier.net"
 create_zone "jarvis.famillelallier.net"
 add_a_record "jarvis.famillelallier.net" "jarvis.famillelallier.net"
 
-create_zone "minio.famillelallier.net"
-add_a_record "minio.famillelallier.net" "minio.famillelallier.net"
-
-create_zone "minio-console.famillelallier.net"
-add_a_record "minio-console.famillelallier.net" "minio-console.famillelallier.net"
-
 create_zone "chat.famillelallier.net"
 add_a_record "chat.famillelallier.net" "chat.famillelallier.net"
 

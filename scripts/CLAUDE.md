@@ -6,7 +6,7 @@ Moved out of the root CLAUDE.md so it loads only when working on scripts.
 
 The stack runs on **Docker Desktop for Mac**, sized **6 CPU / 12 GB / 100 GB**
 under Settings → Resources — the defaults cannot hold Keycloak's JVM,
-Postgres, the whole LGTM stack, MinIO and RabbitMQ at once. Sibling app repos
+Postgres, the whole LGTM stack, SeaweedFS and RabbitMQ at once. Sibling app repos
 (Jarvis and others) share this same daemon and context automatically; there is
 no per-repo VM.
 
@@ -35,7 +35,7 @@ supported way and `check-docker.sh` accepts either.)
 **Do not start Docker Desktop while that volume is unmounted.** Unlike
 Colima, which refused, Docker Desktop builds a *fresh empty VM* in the
 default location and comes up looking fine — a new Postgres cluster, no app
-databases, no Keycloak realms, an empty MinIO. `scripts/check-docker.sh`
+databases, no Keycloak realms, an empty object store. `scripts/check-docker.sh`
 therefore checks the disk image location *first*, before it even asks
 whether a daemon is reachable, so `make docker-start` can refuse to launch
 the app rather than discovering the problem afterwards.

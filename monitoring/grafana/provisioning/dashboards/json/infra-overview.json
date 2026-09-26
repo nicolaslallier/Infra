@@ -1140,7 +1140,7 @@
     },
     {
       "type": "row",
-      "title": "MinIO",
+      "title": "Object storage (SeaweedFS)",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -1153,7 +1153,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Usable capacity used",
+      "title": "Volume disk used",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1193,12 +1193,12 @@
       },
       "targets": [
         {
-          "expr": "minio_cluster_capacity_usable_total_bytes - minio_cluster_capacity_usable_free_bytes",
+          "expr": "sum(SeaweedFS_volumeServer_resource{type=\"used\"})",
           "legendFormat": "used",
           "refId": "A"
         },
         {
-          "expr": "minio_cluster_capacity_usable_total_bytes",
+          "expr": "sum(SeaweedFS_volumeServer_resource{type=\"all\"})",
           "legendFormat": "total",
           "refId": "B"
         }
@@ -1247,12 +1247,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(minio_s3_requests_incoming_total[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_request_total[5m]))",
           "legendFormat": "incoming",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(minio_s3_requests_rejected_auth_total[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_request_total{code=\"403\"}[5m]))",
           "legendFormat": "rejected (auth)",
           "refId": "B"
         }
@@ -1301,12 +1301,12 @@
       },
       "targets": [
         {
-          "expr": "sum(rate(minio_s3_traffic_received_bytes[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_bucket_traffic_received_bytes_total[5m]))",
           "legendFormat": "received",
           "refId": "A"
         },
         {
-          "expr": "sum(rate(minio_s3_traffic_sent_bytes[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_bucket_traffic_sent_bytes_total[5m]))",
           "legendFormat": "sent",
           "refId": "B"
         }

@@ -8,8 +8,8 @@ DOMAIN="infra.famillelallier.net"
 GRAFANA_HOST="grafana.infra.famillelallier.net"
 RABBITMQ_HOST="rabbitmq.infra.famillelallier.net"
 PORTAINER_HOST="portainer.infra.famillelallier.net"
-MINIO_HOST="minio.famillelallier.net"
-MINIO_CONSOLE_HOST="minio-console.famillelallier.net"
+S3_HOST="s3.infra.famillelallier.net"
+S3_ADMIN_HOST="s3-admin.infra.famillelallier.net"
 PGADMIN_HOST="pgadmin.famillelallier.net"
 KEYCLOAK_HOST="keycloak.famillelallier.net"
 JARVIS_HOST="jarvis.famillelallier.net"
@@ -33,8 +33,8 @@ $IP $DOMAIN
 $IP $GRAFANA_HOST
 $IP $RABBITMQ_HOST
 $IP $PORTAINER_HOST
-$IP $MINIO_HOST
-$IP $MINIO_CONSOLE_HOST
+$IP $S3_HOST
+$IP $S3_ADMIN_HOST
 $IP $PGADMIN_HOST
 $IP $KEYCLOAK_HOST
 $IP $JARVIS_HOST
@@ -52,8 +52,8 @@ $IP $DOMAIN
 $IP $GRAFANA_HOST
 $IP $RABBITMQ_HOST
 $IP $PORTAINER_HOST
-$IP $MINIO_HOST
-$IP $MINIO_CONSOLE_HOST
+$IP $S3_HOST
+$IP $S3_ADMIN_HOST
 $IP $PGADMIN_HOST
 $IP $KEYCLOAK_HOST
 $IP $JARVIS_HOST
