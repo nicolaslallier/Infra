@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Asserts that .env can actually bring the stack up, before anything deploys
 # or provisions against it. Run by `make up`, `config`, `provision-app`,
-# `dns-provision`, `dns-check`, `keycloak-seed-users` and `obsidian-minio`.
+# `dns-provision`, `dns-check`, `keycloak-seed-users` and `s3-provision`.
 #
 # Three classes of problem, all of which used to surface far from .env:
 #
@@ -56,9 +56,13 @@ REQUIRED=(
 	DNS_ADMIN_PASSWORD
 	GRAFANA_ADMIN_PASSWORD
 	MONITORING_DB_PASSWORD
-	MINIO_ROOT_PASSWORD
-	OBSIDIAN_MINIO_SECRET_KEY
-	EA_MINIO_SECRET_KEY
+	S3_ADMIN_ACCESS_KEY
+	S3_ADMIN_SECRET_KEY
+	S3_STS_SIGNING_KEY
+	JARVIS_S3_SECRET_KEY
+	OBSIDIAN_S3_SECRET_KEY
+	EA_S3_SECRET_KEY
+	DARKANGEL_S3_SECRET_KEY
 	RABBITMQ_DEFAULT_PASS
 	NEO4J_PASSWORD
 	AIRFLOW_DB_PASSWORD
@@ -67,6 +71,7 @@ REQUIRED=(
 	AIRFLOW_JWT_SECRET
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
+	S3_ADMIN_OAUTH_COOKIE_SECRET
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start
@@ -76,6 +81,7 @@ REQUIRED=(
 COOKIE_SECRETS=(
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
+	S3_ADMIN_OAUTH_COOKIE_SECRET
 )
 
 # <var>:<service>:<realm>:<client>, for the secrets Keycloak itself generates
@@ -84,6 +90,7 @@ COOKIE_SECRETS=(
 POST_BOOT=(
 	JARVIS_OAUTH_CLIENT_SECRET:oauth2-proxy:jarvis:jarvis
 	EA_OBSIDIAN_OAUTH_CLIENT_SECRET:oauth2-proxy-ea:ea:ea-obsidian
+	S3_ADMIN_OAUTH_CLIENT_SECRET:oauth2-proxy-infra:infra:s3-admin
 )
 
 in_list() {
@@ -241,6 +248,22 @@ for var in "${COOKIE_SECRETS[@]}"; do
 		;;
 	esac
 done
+
+# SeaweedFS decodes the STS signing key as *standard* base64 (a Go []byte in
+# its IAM JSON) and needs at least 16 bytes. A bad key is not fatal to it: it
+# logs "Failed to load IAM configuration" and serves S3 with STS switched
+# off, which nobody notices until a human's credential request fails.
+sts="${S3_STS_SIGNING_KEY:-}"
+if [ -n "$sts" ] && [ "$sts" != "$PLACEHOLDER" ]; then
+	sts_len=""
+	case "$sts" in
+	*[!A-Za-z0-9+/=]*) ;;
+	*) [ $(( ${#sts} % 4 )) -eq 0 ] && sts_len=$(b64url_len "$(printf '%s' "$sts" | tr -- '+/' '-_')") ;;
+	esac
+	if [ -z "$sts_len" ] || [ "$sts_len" -lt 16 ]; then
+		errors+=("S3_STS_SIGNING_KEY is not padded standard base64 of at least 16 bytes -- SeaweedFS would start with STS silently off; generate one with \"openssl rand -base64 32\"")
+	fi
+fi
 
 if [ -z "${LAN_IP:-}" ]; then
 	errors+=("LAN_IP is not set in $ENV_FILE")
