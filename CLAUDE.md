@@ -481,7 +481,9 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`s3`, `s3-admin`, `oauth2-proxy-infra`, `rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `openbao`, `grafana`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
+`rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `openbao`, `grafana`, or other
+monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app

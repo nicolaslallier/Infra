@@ -50,8 +50,8 @@ scrape_configs:
   # OpenBao. /v1/sys/metrics is an authenticated endpoint by default, which
   # would make this scrape a 403 with no obvious cause; the listener in
   # openbao/config.hcl opens it with unauthenticated_metrics_access, the same
-  # posture as the seaweedfs job's unauthenticated /metrics. `format=prometheus` matters too --
-  # without it the endpoint answers in Telemetry's own JSON.
+  # posture as the seaweedfs job's unauthenticated /metrics. `format=prometheus`
+  # matters too -- without it the endpoint answers in Telemetry's own JSON.
   - job_name: openbao
     metrics_path: /v1/sys/metrics
     params:

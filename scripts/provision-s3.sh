@@ -47,8 +47,11 @@ docker compose exec -T -e S3P_APP -e S3P_BUCKET -e S3P_SECRET -e S3P_VERSIONED \
 ws() { printf '%s\n' "$1" | weed shell -master=s3:9333; }
 
 # s3.bucket.create on an existing bucket silently replaces its entry --
-# versioning flag included -- so only create what is not there yet.
-if ! ws "s3.bucket.list" | awk '{print $1}' | grep -qxF "$S3P_BUCKET"; then
+# versioning flag included -- so only create what is not there yet. Capture
+# the list first so `-e` aborts if it fails, instead of the pipeline's exit
+# status being masked by grep -q and falling through to a reset-ing create.
+list=$(ws "s3.bucket.list")
+if ! printf '%s\n' "$list" | awk '{print $1}' | grep -qxF "$S3P_BUCKET"; then
   ws "s3.bucket.create -name $S3P_BUCKET"
 fi
 

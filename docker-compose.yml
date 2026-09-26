@@ -373,6 +373,8 @@ services:
         condition: service_started
       oauth2-proxy-ea:
         condition: service_started
+      oauth2-proxy-infra:
+        condition: service_started
 
   dns:
     image: technitium/dns-server:latest
