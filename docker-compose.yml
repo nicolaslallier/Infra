@@ -317,6 +317,11 @@ services:
       # Only members of this realm group get in; s3-readonly and group-less
       # users get a 403. Read from the `groups` claim (full path off).
       OAUTH2_PROXY_ALLOWED_GROUPS: s3-admin
+      # Pinned because ALLOWED_GROUPS makes oauth2-proxy append a `groups`
+      # scope to its default, and Keycloak has no such client scope: the
+      # login dies with invalid_scope. The claim needs no scope -- the
+      # s3-admin client's own group-membership mapper always emits it.
+      OAUTH2_PROXY_SCOPE: "openid email profile"
       OAUTH2_PROXY_UPSTREAMS: static://202
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
       OAUTH2_PROXY_REVERSE_PROXY: "true"
