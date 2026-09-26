@@ -1,6 +1,6 @@
 # Replace MinIO with SeaweedFS
 
-Status: draft 2026-09-26
+Status: draft 2026-09-26 (revised same day: admin UI via oauth2-proxy; 4.47 facts)
 
 ## Goal
 
@@ -29,11 +29,18 @@ UI logs in through it, and people get temporary S3 credentials from it
 - **One generic provisioning target** replaces the per-app scripts, mirroring
   Postgres's `provision-app`. Every app, Jarvis included, gets its own
   bucket-scoped identity; nobody uses the admin credentials.
-- **Keycloak, both ways, in a new `infra` realm.** Native admin-UI OIDC
-  (no oauth2-proxy, no local UI password) and STS
-  `AssumeRoleWithWebIdentity` for humans. The realm is the home for future
-  infra tooling SSO. Rejected: reusing the `ea` realm (ties storage admin to
-  one app's realm) and a `seaweedfs`-only realm.
+- **Keycloak, both ways, in a new `infra` realm.** The admin UI sits behind
+  a third oauth2-proxy (`oauth2-proxy-infra`, allowed group `s3-admin`),
+  and humans get S3 credentials through STS `AssumeRoleWithWebIdentity`.
+  The realm is the home for future infra tooling SSO. Rejected: reusing the
+  `ea` realm (ties storage admin to one app's realm) and a `seaweedfs`-only
+  realm.
+- **Admin UI gate: oauth2-proxy, not native OIDC** (revised 2026-09-26).
+  `weed admin`'s OIDC login is Enterprise-only: the OSS PR (#8490) was
+  closed unmerged. Rejected: the `chrislusf/seaweedfs-enterprise` image
+  (proprietary image, license terms unverified) and dropping the UI. Cost:
+  there is no read-only UI role. Only `s3-admin` members get in, and they
+  get full admin.
 
 ## Constraints found
 
@@ -60,9 +67,26 @@ UI logs in through it, and people get temporary S3 credentials from it
   network alias and presents the local CA. STS only compares the `iss`
   string and can fetch JWKS from the internal
   `http://keycloak:8080/realms/infra/...` URL, so `s3` needs no CA trust.
-  The admin UI does full discovery against the issuer, so `s3-admin` does.
+  `oauth2-proxy-infra` uses the internal issuer plus the skip-issuer-verification
+  escape hatch, and the local CA bundle, exactly like `oauth2-proxy-ea`.
 - `--import-realm` seeds `keycloak/realm-import/*.json` only for realms that
   don't exist yet; later edits to the file must be repeated in the console.
+- Facts verified against SeaweedFS 4.47 source (`chrislusf/seaweedfs:4.47`):
+  - `weed server` binds to the detected container IP unless given
+    `-ip.bind=0.0.0.0`. Without it, both loopback healthchecks and
+    `weed shell -master=localhost` fail.
+  - `weed admin` binds loopback and refuses a non-loopback `-ip` without a
+    password, mTLS, or `-allowInsecureBind`.
+  - The image's `/entrypoint.sh` drops root to the `seaweed` user via
+    su-exec. Overriding the entrypoint would skip that.
+  - `s3.bucket.create` on an existing bucket silently replaces the bucket
+    entry, versioning flag included. It never errors, so provisioning
+    checks `s3.bucket.list` first.
+  - `s3.configure` with an existing access key updates its secret in place.
+  - The STS `signingKey` is standard base64 and must decode to at least
+    16 bytes. A bad IAM config is only logged: S3 starts without STS.
+  - Per-bucket size/object gauges exist
+    (`SeaweedFS_s3_bucket_size_bytes`, `SeaweedFS_s3_bucket_object_count`).
 - EA and DarkAngel each run a throwaway MinIO in their own repos for
   integration tests. Those never touch Infra and stay as they are.
 
@@ -74,15 +98,18 @@ UI logs in through it, and people get temporary S3 credentials from it
 
 ```yaml
 s3:
-  image: chrislusf/seaweedfs:<version>@sha256:<digest>
+  image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
   restart: unless-stopped
-  # Renders the IAM template (section 5) to /tmp, then execs weed.
-  entrypoint: ["/bin/sh", "-c"]
-  command:
+  # Renders the IAM template (section 5) to /tmp, then hands over to the
+  # image's own entrypoint, which drops root to the `seaweed` user.
+  entrypoint:
+    - /bin/sh
+    - -c
     - >-
       sed "s|__S3_STS_SIGNING_KEY__|$$S3_STS_SIGNING_KEY|"
       /etc/seaweedfs/iam.json.tmpl > /tmp/iam.json &&
-      exec weed server -dir=/data -s3 -s3.iam.config=/tmp/iam.json
+      exec /entrypoint.sh server -ip=s3 -ip.bind=0.0.0.0 -s3
+      -s3.iam.config=/tmp/iam.json -s3.port.iceberg=0 -s3.port.lance=0
       -metricsPort=9324
   environment:
     AWS_ACCESS_KEY_ID: ${S3_ADMIN_ACCESS_KEY:?Set S3_ADMIN_ACCESS_KEY in .env}
@@ -92,50 +119,51 @@ s3:
     - s3-data:/data
     - ${INFRA_DIR:-.}/seaweedfs/iam.json.tmpl:/etc/seaweedfs/iam.json.tmpl:ro
   networks: [infra-net]
-  healthcheck: # HTTP probe of the S3 listener on :8333
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8333/healthz"]
 
 s3-admin:
   image: <same pin>
   restart: unless-stopped
-  command: ["admin", "-masters=s3:9333"]
-  environment:
-    WEED_ADMIN_OIDC_ENABLED: "true"
-    WEED_ADMIN_OIDC_ISSUER: https://keycloak.famillelallier.net/realms/infra
-    WEED_ADMIN_OIDC_CLIENT_ID: s3-admin
-    WEED_ADMIN_OIDC_CLIENT_SECRET: ${S3_ADMIN_OIDC_CLIENT_SECRET}   # no :? guard
-    WEED_ADMIN_OIDC_REDIRECT_URL: https://s3-admin.infra.famillelallier.net/login/oidc/callback
-    WEED_ADMIN_OIDC_SCOPES: openid,profile,email
-    WEED_ADMIN_OIDC_ADMIN_GROUPS: s3-admin
-    WEED_ADMIN_OIDC_READONLY_GROUPS: s3-readonly
-  volumes:
-    # Same bundle the oauth2-proxy containers use: public roots + our CA.
-    - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
+  command: ["admin", "-master=s3:9333", "-ip=0.0.0.0", "-allowInsecureBind",
+            "-dataDir=/data", "-iceberg.port=0", "-lance.port=0"]
   networks: [infra-net]
   depends_on:
-    s3: { condition: service_started }
-    keycloak: { condition: service_healthy }
+    s3: { condition: service_healthy }
+
+oauth2-proxy-infra:   # same shape as oauth2-proxy-ea
+  OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/infra
+  OAUTH2_PROXY_CLIENT_ID: s3-admin
+  OAUTH2_PROXY_CLIENT_SECRET: ${S3_ADMIN_OAUTH_CLIENT_SECRET}      # no :? guard
+  OAUTH2_PROXY_COOKIE_SECRET: ${S3_ADMIN_OAUTH_COOKIE_SECRET:?...}
+  OAUTH2_PROXY_COOKIE_NAME: _oauth2_proxy_infra
+  OAUTH2_PROXY_REDIRECT_URL: https://s3-admin.infra.famillelallier.net/oauth2/callback
+  OAUTH2_PROXY_ALLOWED_GROUPS: s3-admin
 ```
 
 - `$$` keeps Compose from interpolating the signing key into the command
   line; the shell reads it from the environment. The rendered file lives in
   the container's `/tmp`, never on the host.
-- No `-adminUser` / `-adminPassword`: Keycloak is the only UI login. Break
-  glass when Keycloak is down: `docker compose exec s3 weed shell`.
-- No `WEED_ADMIN_OIDC_ROLE_MAPPING_DEFAULT_ROLE`: a realm user in neither
-  group gets no UI access. Verify at implementation that the pinned version
-  denies (not defaults to readonly) when the variable is unset; set it
-  explicitly to a deny value if one exists.
-- `S3_ADMIN_OIDC_CLIENT_SECRET` has no `:?` guard: Keycloak generates it on
-  realm import, after the first deploy (same rule as the oauth2-proxy client
-  secrets in `CLAUDE.md`).
+- `-ip=s3 -ip.bind=0.0.0.0`: the advertised address is the service name,
+  so `s3-admin` and `weed shell` can reach the master as `s3:9333`, and the
+  loopback healthcheck works. `/healthz` answers 200 without auth.
+- `-s3.port.iceberg=0 -s3.port.lance=0`: the extra catalog listeners are
+  out of scope.
+- `s3-admin` runs unauthenticated (`-allowInsecureBind`) on `infra-net`.
+  That is the same posture the filer UI (`:8888`) already has there. The
+  only host path to it is `oauth2-proxy-infra`. `-dataDir=/data` is the
+  image's anonymous volume: maintenance-task state is not worth a named
+  volume. Break glass when Keycloak is down:
+  `docker compose exec s3 weed shell -master=s3:9333`.
+- `S3_ADMIN_OAUTH_CLIENT_SECRET` has no `:?` guard: Keycloak generates it on
+  realm import, after the first deploy (same rule as the other oauth2-proxy
+  client secrets in `CLAUDE.md`).
 
 - Pinned by tag **and** digest, like `neo4j`: a storage-format change must
   not ride along with a redeploy.
 - Neither service has a `ports:` key (single-ingress rule). `s3` and
   `s3-admin` join the "do not add `ports:`" list in `CLAUDE.md`.
 - `:8333` is SeaweedFS's default S3 port; kept to avoid a flag.
-- The exact healthcheck command depends on what the pinned image ships
-  (`wget`/`curl`); pick it when pinning.
 
 ### 2. NGINX, DNS, certificates
 
@@ -154,8 +182,8 @@ s3-admin:
   lines in `scripts/print-hosts-entries.sh`.
 - `dns-provision.sh` never deletes zones, so the two existing zones are
   removed once by hand in Technitium (cutover step 4).
-- The admin UI is protected by its native Keycloak login (section 5). No
-  oauth2-proxy and no `auth_request` on `s3-admin.conf`.
+- `s3-admin.conf` is the `obsidian.conf` `auth_request` recipe pointed at
+  `oauth2-proxy-infra:4180`.
 - STS (`AssumeRoleWithWebIdentity`) is served on the S3 port, so it rides
   `s3.conf` — no extra vhost.
 
@@ -173,16 +201,14 @@ make s3-provision app=<name> [bucket=<bucket>] [versioned=1]
   uppercased `app`). The script dies if that variable is unset.
 - Executes in the `s3` container via `docker compose exec -T` + stdin
   heredoc, same shape as the current MinIO scripts:
-  1. `s3.bucket.create -name <bucket>`, tolerating "already exists".
+  1. `s3.bucket.create -name <bucket>`, only when `s3.bucket.list` does
+     not already list it: re-creating an existing bucket resets its
+     versioning.
   2. `s3.configure -user <app> -access_key <app> -secret_key <secret>
      -buckets <bucket> -actions Read,Write,List,Tagging -apply` — scoped to
-     the one bucket, never `Admin`.
-  3. With `versioned=1`: enable versioning on the bucket. First
-     implementation step checks whether the pinned version's `weed shell`
-     has a bucket-versioning command. If not, send a signed
-     `PutBucketVersioning` from a throwaway `amazon/aws-cli` container on
-     `infra-net` with the admin credentials, passed on stdin, not argv
-     (same reasoning as `portainer-stack.sh`'s `curlimages/curl`).
+     the one bucket, never `Admin`. Same access key, so a new secret
+     replaces the old one in place.
+  3. With `versioned=1`: `s3.bucket.versioning -name <bucket> -enable`.
 - Idempotent; re-running rotates the secret (acceptance check below).
 
 The four invocations:
@@ -207,8 +233,13 @@ Deleted: `scripts/provision-obsidian-minio.sh`,
   `S3_ADMIN_SECRET_KEY`, `S3_STS_SIGNING_KEY` (recipe
   `openssl rand -base64 32`), `JARVIS_S3_SECRET_KEY`,
   `OBSIDIAN_S3_SECRET_KEY`, `EA_S3_SECRET_KEY`, `DARKANGEL_S3_SECRET_KEY`.
-- Added, **not** on the change-me/empty check (empty until copied from
-  Keycloak after the first deploy): `S3_ADMIN_OIDC_CLIENT_SECRET`.
+- `S3_STS_SIGNING_KEY` is also checked to be standard base64 that decodes
+  to at least 16 bytes, because SeaweedFS only logs a bad key and starts
+  without STS.
+- Added: `S3_ADMIN_OAUTH_COOKIE_SECRET` (cookie-secret check,
+  `openssl rand -base64 32 | tr -- '+/' '-_'`).
+- Added to `POST_BOOT` (warned, never fatal; empty until copied from
+  Keycloak after the first deploy): `S3_ADMIN_OAUTH_CLIENT_SECRET`.
 
 ### 4. Metrics and dashboards
 
@@ -226,7 +257,7 @@ Deleted: `scripts/provision-obsidian-minio.sh`,
 | Traffic in / out (`infra-overview`) | S3 bucket traffic counters, summed |
 | Per-bucket requests / 4xx / 5xx / by API (`jarvis`, `darkangel`) | S3 request counter filtered on `bucket`, split by `code` / `type` |
 | Per-bucket traffic (`jarvis`) | S3 bucket traffic counters by `bucket` |
-| Per-bucket size and object count (`jarvis`, `darkangel`) | a gauge if the pinned version exports one; otherwise the panel is **deleted** |
+| Per-bucket size and object count (`jarvis`, `darkangel`) | `SeaweedFS_s3_bucket_size_bytes` / `SeaweedFS_s3_bucket_object_count` by `bucket` |
 
 - Panels with no metric are deleted, not approximated. If per-bucket size is
   missed later, the upgrade path is a small job exporting
@@ -240,12 +271,13 @@ Deleted: `scripts/provision-obsidian-minio.sh`,
 secrets and no `users` array in git, per `keycloak/CLAUDE.md`.
 
 - Groups: `s3-admin`, `s3-readwrite`, `s3-readonly`.
-- Client **`s3-admin`** (admin UI): confidential, standard flow only, one
-  exact redirect URI
-  `https://s3-admin.infra.famillelallier.net/login/oidc/callback` (no
-  trailing `*`), `post.logout.redirect.uris` the bare origin. Mappers: group
+- Client **`s3-admin`** (the `oauth2-proxy-infra` gate): confidential,
+  standard flow only, PKCE `S256`, one exact redirect URI
+  `https://s3-admin.infra.famillelallier.net/oauth2/callback` (no trailing
+  `*`), `post.logout.redirect.uris` the bare origin. Mappers: group
   membership → claim `groups`, full group path **off**, in ID and access
-  token; audience `s3-admin`.
+  token; audience `s3-admin` (`included.client.audience`, as
+  `ea-obsidian` has).
 - Client **`s3-sts`** (humans getting S3 credentials): public, device
   authorization grant only (a CLI has no redirect origin to register).
   Mappers: the same `groups` mapper; audience `s3-sts`.
@@ -291,7 +323,7 @@ S3-backed features in each app are down from step 1 until that app's step 5.
 1. Merge the Infra PR, `git pull --ff-only`, add the new `.env` keys,
    `make up` (Keycloak imports the new `infra` realm on this boot).
    Then in the Keycloak console: copy the `s3-admin` client secret into
-   `S3_ADMIN_OIDC_CLIENT_SECRET`, create your user in the `infra` realm with
+   `S3_ADMIN_OAUTH_CLIENT_SECRET`, create your user in the `infra` realm with
    a verified email, add it to `s3-admin`, and `make up` again.
 2. Orphans (manual, destructive, confirm first): `docker rm -f` the old
    minio container; `docker volume rm infra_minio-data`.
@@ -321,9 +353,9 @@ S3-backed features in each app are down from step 1 until that app's step 5.
 - `obsidian` bucket versioning reports `Enabled`.
 - A >1 GB upload through `https://s3.infra.famillelallier.net` succeeds.
 - `https://s3-admin.infra.famillelallier.net` redirects to Keycloak; an
-  `s3-admin` member lands as admin, an `s3-readonly` member as readonly, and
-  an `infra` user in no group is refused. No host path reaches `:8888`,
-  `:9333` or `:9324`.
+  `s3-admin` member lands in the UI; an `s3-readonly` member and an `infra`
+  user in no group are refused (403 from oauth2-proxy). No host path reaches
+  `:8888`, `:9333`, `:9324` or `:23646`.
 - STS: an `s3-readonly` session can get/list but gets `AccessDenied` on put;
   an `s3-readwrite` session can put; a user in no group gets no credentials;
   a token from another realm (e.g. `ea`) is rejected.
@@ -335,7 +367,7 @@ S3-backed features in each app are down from step 1 until that app's step 5.
 
 ## Out of scope
 
-Data migration; filer mounts, tiering, S3 Tables; oauth2-proxy (native OIDC
-is used instead); per-bucket STS roles; an STS login helper script; moving
+Data migration; filer mounts, tiering, S3 Tables; the Enterprise image and
+its native admin OIDC; a read-only admin-UI role; per-bucket STS roles; an STS login helper script; moving
 apps from static keys to STS; a per-bucket size exporter; the EA /
 DarkAngel test MinIOs.
