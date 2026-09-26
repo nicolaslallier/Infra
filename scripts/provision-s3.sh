@@ -16,8 +16,9 @@ versioned="${3:-0}"
 
 # Every value below ends up inside a `weed shell` command line, which splits
 # on whitespace and runs `;`-separated commands -- so validate, don't quote.
+app_re='^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$'
 name_re='^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
-[[ "$app" =~ $name_re ]] || { echo "provision-s3.sh: app '$app' must be 3-63 chars of a-z, 0-9, '-'" >&2; exit 1; }
+[[ "$app" =~ $app_re ]] || { echo "provision-s3.sh: app '$app' must be 2-63 chars of a-z, 0-9, '-'" >&2; exit 1; }
 [[ "$bucket" =~ $name_re ]] || { echo "provision-s3.sh: bucket '$bucket' must be 3-63 chars of a-z, 0-9, '-'" >&2; exit 1; }
 case "$versioned" in 0 | 1) ;; *) echo "provision-s3.sh: versioned must be 0 or 1" >&2; exit 1 ;; esac
 
