@@ -525,7 +525,7 @@
     },
     {
       "type": "row",
-      "title": "MinIO (bucket darkangel-files)",
+      "title": "S3 (bucket darkangel-files)",
       "collapsed": false,
       "panels": [],
       "id": 11,
@@ -549,7 +549,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "minio_bucket_usage_total_bytes{job=\"minio-bucket\", bucket=\"darkangel-files\"}",
+          "expr": "SeaweedFS_s3_bucket_size_bytes{bucket=\"darkangel-files\"}",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -604,7 +604,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "minio_bucket_usage_object_total{job=\"minio-bucket\", bucket=\"darkangel-files\"}",
+          "expr": "SeaweedFS_s3_bucket_object_count{bucket=\"darkangel-files\"}",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -659,8 +659,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum by (api) (rate(minio_bucket_requests_total{job=\"minio-bucket\", bucket=\"darkangel-files\"}[5m]))",
-          "legendFormat": "{{api}}",
+          "expr": "sum by (type) (rate(SeaweedFS_s3_request_total{bucket=\"darkangel-files\"}[5m]))",
+          "legendFormat": "{{type}}",
           "refId": "A"
         }
       ],
@@ -708,7 +708,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(minio_bucket_requests_4xx_errors_total{job=\"minio-bucket\", bucket=\"darkangel-files\"}[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_request_total{bucket=\"darkangel-files\", code=~\"4..\"}[5m]))",
           "legendFormat": "4xx",
           "refId": "A"
         },
@@ -717,7 +717,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(minio_bucket_requests_5xx_errors_total{job=\"minio-bucket\", bucket=\"darkangel-files\"}[5m]))",
+          "expr": "sum(rate(SeaweedFS_s3_request_total{bucket=\"darkangel-files\", code=~\"5..\"}[5m]))",
           "legendFormat": "5xx",
           "refId": "B"
         }
