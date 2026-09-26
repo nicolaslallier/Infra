@@ -293,13 +293,20 @@ secrets and no `users` array in git, per `keycloak/CLAUDE.md`.
   `http://keycloak:8080/realms/infra/protocol/openid-connect/certs`, no
   client secret (public client).
 - `roleMapping` on claim `groups`: `s3-admin` → `S3AdminRole`,
-  `s3-readwrite` → `S3WriteRole`, `s3-readonly` → `S3ReadOnlyRole`.
-  **No `defaultRole`**: a realm user in no group gets no credentials.
+  `s3-readwrite` → `S3WriteRole`, `s3-readonly` → `S3ReadOnlyRole`. This only
+  picks the default role a bare `AssumeRoleWithWebIdentity` (no `RoleArn`)
+  resolves to — in 4.47 it does not gate which role a request *naming* a
+  `RoleArn` may assume; that gate is each role's trust policy (below).
 - Policies, all on every bucket (`arn:aws:s3:::*` and `arn:aws:s3:::*/*`):
   `S3AdminPolicy` `s3:*`; `S3WritePolicy` get/put/delete/list;
   `S3ReadOnlyPolicy` get/list.
 - Each role's trust policy allows `sts:AssumeRoleWithWebIdentity` only when
-  `oidc:iss` equals the `infra` realm issuer.
+  `oidc:iss` equals the `infra` realm issuer **and** the `groups` claim
+  (context key `oidc:groups`, ANDed with `oidc:iss` in one `StringEquals`)
+  contains a group at or above that role: `S3AdminRole` requires
+  `s3-admin`; `S3WriteRole` requires `s3-readwrite` or `s3-admin`;
+  `S3ReadOnlyRole` requires `s3-readonly`, `s3-readwrite`, or `s3-admin`. A
+  user in no group, or asking for a role above their group, is refused.
 
 Human flow, documented in `README.md` (no helper script until it's used
 often): device login against the `infra` realm with `client_id=s3-sts` →

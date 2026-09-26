@@ -326,8 +326,12 @@ aws sts assume-role-with-web-identity --endpoint-url https://s3.infra.famillelal
   --web-identity-token <access_token>                   # -> export the three keys it returns
 ```
 
-Use `S3WriteRole` / `S3AdminRole` for the other groups; asking for a role
-your group does not map to is refused.
+Use `S3WriteRole` / `S3AdminRole` for the other groups; each role's trust
+policy in `seaweedfs/iam.json.tmpl` requires both the `infra` issuer and a
+matching `groups` claim (`s3-admin` → `S3AdminRole` and below,
+`s3-readwrite` → `S3WriteRole` and `S3ReadOnlyRole`, `s3-readonly` →
+`S3ReadOnlyRole` only), so a user in no group, or asking for a role above
+their group, is refused.
 
 ### EA login
 

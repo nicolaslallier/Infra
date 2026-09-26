@@ -188,8 +188,12 @@ bare 500 on `/oauth2/callback`) and add them to a group.
   (`AssumeRoleWithWebIdentity`; roles in `seaweedfs/iam.json.tmpl`). The
   STS side trusts only `iss == https://keycloak.famillelallier.net/realms/infra`
   and fetches JWKS from the internal `http://keycloak:8080/...` URL, so `s3`
-  needs no CA trust. A user in no group gets no credentials (no
-  `defaultRole`).
+  needs no CA trust. `roleMapping` only picks which role a request names by
+  default — it does not gate which role may be assumed; that gate is each
+  role's trust policy in `seaweedfs/iam.json.tmpl`, which requires both that
+  issuer and a matching `groups` claim (`s3-admin` for `S3AdminRole`,
+  `s3-readwrite` or above for `S3WriteRole`, `s3-readonly` or above for
+  `S3ReadOnlyRole`). A user in no group gets no credentials for any role.
 
 `--import-realm` only seeds a realm that does not exist yet — edit the live
 realm in the console too after changing this file.

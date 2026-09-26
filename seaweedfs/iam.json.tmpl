@@ -69,7 +69,12 @@
             "Effect": "Allow",
             "Principal": { "Federated": "*" },
             "Action": ["sts:AssumeRoleWithWebIdentity"],
-            "Condition": { "StringEquals": { "oidc:iss": "https://keycloak.famillelallier.net/realms/infra" } }
+            "Condition": {
+              "StringEquals": {
+                "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                "oidc:groups": ["s3-admin"]
+              }
+            }
           }
         ]
       }
@@ -85,7 +90,12 @@
             "Effect": "Allow",
             "Principal": { "Federated": "*" },
             "Action": ["sts:AssumeRoleWithWebIdentity"],
-            "Condition": { "StringEquals": { "oidc:iss": "https://keycloak.famillelallier.net/realms/infra" } }
+            "Condition": {
+              "StringEquals": {
+                "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                "oidc:groups": ["s3-readwrite", "s3-admin"]
+              }
+            }
           }
         ]
       }
@@ -101,7 +111,12 @@
             "Effect": "Allow",
             "Principal": { "Federated": "*" },
             "Action": ["sts:AssumeRoleWithWebIdentity"],
-            "Condition": { "StringEquals": { "oidc:iss": "https://keycloak.famillelallier.net/realms/infra" } }
+            "Condition": {
+              "StringEquals": {
+                "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                "oidc:groups": ["s3-readonly", "s3-readwrite", "s3-admin"]
+              }
+            }
           }
         ]
       }

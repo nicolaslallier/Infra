@@ -313,7 +313,12 @@ Expected: a non-zero exit with `no such service: s3`.
             "Effect": "Allow",
             "Principal": { "Federated": "*" },
             "Action": ["sts:AssumeRoleWithWebIdentity"],
-            "Condition": { "StringEquals": { "oidc:iss": "https://keycloak.famillelallier.net/realms/infra" } }
+            "Condition": {
+              "StringEquals": {
+                "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                "oidc:groups": ["s3-admin"]
+              }
+            }
           }
         ]
       }
@@ -329,7 +334,12 @@ Expected: a non-zero exit with `no such service: s3`.
             "Effect": "Allow",
             "Principal": { "Federated": "*" },
             "Action": ["sts:AssumeRoleWithWebIdentity"],
-            "Condition": { "StringEquals": { "oidc:iss": "https://keycloak.famillelallier.net/realms/infra" } }
+            "Condition": {
+              "StringEquals": {
+                "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                "oidc:groups": ["s3-readwrite", "s3-admin"]
+              }
+            }
           }
         ]
       }
@@ -345,7 +355,12 @@ Expected: a non-zero exit with `no such service: s3`.
             "Effect": "Allow",
             "Principal": { "Federated": "*" },
             "Action": ["sts:AssumeRoleWithWebIdentity"],
-            "Condition": { "StringEquals": { "oidc:iss": "https://keycloak.famillelallier.net/realms/infra" } }
+            "Condition": {
+              "StringEquals": {
+                "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                "oidc:groups": ["s3-readonly", "s3-readwrite", "s3-admin"]
+              }
+            }
           }
         ]
       }
@@ -353,7 +368,11 @@ Expected: a non-zero exit with `no such service: s3`.
   ]
 }
 ```
-This has no `defaultRole`, on purpose: a realm user in no group gets no credentials.
+`roleMapping` only picks the default role a bare `AssumeRoleWithWebIdentity`
+resolves to — it does not gate which role a request naming a `RoleArn` may
+assume; that gate is each role's trust policy above, which ANDs `oidc:iss`
+with a matching `oidc:groups` value. A realm user in no group, or asking
+for a role above their group, gets no credentials for it.
 
 - [ ] **Step 3: Replace the `minio` service in `docker-compose.yml`.** Delete lines 511–538 (from `# --- Object storage (API + console via NGINX; no host ports) ---` through the minio healthcheck's `start_period: 20s`) and put this in their place:
 
@@ -1182,8 +1201,12 @@ bare 500 on `/oauth2/callback`) and add them to a group.
   (`AssumeRoleWithWebIdentity`; roles in `seaweedfs/iam.json.tmpl`). The
   STS side trusts only `iss == https://keycloak.famillelallier.net/realms/infra`
   and fetches JWKS from the internal `http://keycloak:8080/...` URL, so `s3`
-  needs no CA trust. A user in no group gets no credentials (no
-  `defaultRole`).
+  needs no CA trust. `roleMapping` only picks which role a request names by
+  default — it does not gate which role may be assumed; that gate is each
+  role's trust policy in `seaweedfs/iam.json.tmpl`, which requires both that
+  issuer and a matching `groups` claim (`s3-admin` for `S3AdminRole`,
+  `s3-readwrite` or above for `S3WriteRole`, `s3-readonly` or above for
+  `S3ReadOnlyRole`). A user in no group gets no credentials for any role.
 
 `--import-realm` only seeds a realm that does not exist yet — edit the live
 realm in the console too after changing this file.
@@ -1242,8 +1265,11 @@ aws sts assume-role-with-web-identity --endpoint-url https://s3.infra.famillelal
   --web-identity-token <access_token>                   # -> export the three keys it returns
 ```
 
-Use `S3WriteRole` / `S3AdminRole` for the other groups; asking for a role
-your group does not map to is refused.
+Use `S3WriteRole` / `S3AdminRole` for the other groups; each role's trust
+policy requires both the `infra` issuer and a matching `groups` claim
+(`s3-admin` → `S3AdminRole` and below, `s3-readwrite` → `S3WriteRole` and
+`S3ReadOnlyRole`, `s3-readonly` → `S3ReadOnlyRole` only), so a user in no
+group, or asking for a role above their group, is refused.
 ~~~
 
 - [ ] **Step 6: Verify.**
