@@ -204,7 +204,7 @@ esac
 # smaller, and a reinstall or a "Reset to factory defaults" puts them back.
 if [ "${dd_mem:-0}" -lt $((11 * 1024 * 1024 * 1024)) ] 2>/dev/null; then
 	say "docker: the VM has only $((dd_mem / 1024 / 1024 / 1024)) GB of memory." \
-	    "  Keycloak's JVM, Postgres, the LGTM stack, MinIO and RabbitMQ together" \
+	    "  Keycloak's JVM, Postgres, the LGTM stack, SeaweedFS and RabbitMQ together" \
 	    "  need ~12 GB. Raise it in Settings -> Resources."
 	warned=1
 fi
