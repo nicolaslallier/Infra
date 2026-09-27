@@ -4,15 +4,13 @@
 # `nginx -t` that needs certs -- can run against a fresh clone that has
 # neither. Nothing it writes is a real credential and nothing it writes is
 # ever deployed: values are random, LAN_IP is loopback, and the intended
-# caller is CI on a disposable workspace (see airflow/dags/infra_pr_validation.py).
+# caller is CI on a disposable workspace (see prefect/flows/pr_validation.py).
 #
 # Every value has to be shaped the way the container that reads it expects,
 # not merely non-empty, because check-env.sh asserts exactly that:
 #   - the four oauth2-proxy cookie keys decode as 32 bytes under Go's
 #     base64.RawURLEncoding -- hence `tr -- '+/' '-_'` and stripping '='
 #     (see "Preflight: make check-env" in CLAUDE.md)
-#   - AIRFLOW_FERNET_KEY is url-safe base64 of 32 bytes, padding kept
-#   - AIRFLOW_DB_PASSWORD sits inside a URL, so it stays url-safe
 #   - PREFECT_DB_PASSWORD sits inside a URL, so it stays url-safe
 #   - PREFECT_AUTH_STRING is user:password (check-env asserts the colon)
 #   - S3_STS_SIGNING_KEY is padded standard base64 of 32 bytes
@@ -37,15 +35,14 @@ fi
 
 rand_hex() { od -An -tx1 -N"${1:-16}" /dev/urandom | tr -d ' \n'; }
 
-# 32 random bytes, url-safe base64. Padding stripped for the cookie keys
-# (oauth2-proxy decodes with RawURLEncoding), kept for the Fernet key.
+# 32 random bytes, url-safe base64; padding stripped below for the cookie
+# keys (oauth2-proxy decodes with RawURLEncoding).
 b64_32() { head -c 32 /dev/urandom | base64 | tr -d '\n' | tr -- '+/' '-_'; }
 
 cookie_a="$(b64_32 | tr -d '=')"
 cookie_b="$(b64_32 | tr -d '=')"
 cookie_c="$(b64_32 | tr -d '=')"
 cookie_d="$(b64_32 | tr -d '=')"
-fernet="$(b64_32)"
 
 # Start from the template so every key check-env diffs for is present, then
 # fill in the placeholders it rejects.
@@ -74,9 +71,6 @@ set_key PREFECT_AUTH_STRING "admin:$(rand_hex 16)"
 set_key PREFECT_DB_PASSWORD "$(rand_hex 16)"
 # Standard base64, padding kept: SeaweedFS's STS key is a Go []byte in JSON.
 set_key S3_STS_SIGNING_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
-set_key AIRFLOW_FERNET_KEY "$fernet"
-set_key AIRFLOW_JWT_SECRET "$(rand_hex 32)"
-set_key AIRFLOW_DB_PASSWORD "$(rand_hex 16)"
 
 # openbao's static seal is AES-256: 32 bytes, nothing else. Docker turns a
 # missing bind-mount source into a directory, which is why check-env.sh
