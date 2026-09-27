@@ -634,22 +634,29 @@ Save's `obsidian` identity.
 
 - **The move is the only state.** A note that has left `Inbox/` is never
   seen again; there is no table of processed notes.
-- **It never overwrites.** A destination that exists fails the note and
-  leaves both objects alone. The inbox object is deleted only after the
+- **It never overwrites.** A note whose file name already exists in *any*
+  top-level folder fails before the model is called, and leaves both objects
+  alone (two notes with one basename would make `[[links]]` ambiguous). The inbox object is deleted only after the
   destination `PUT` succeeded; if that `DELETE` fails, the next run fails
   loudly on "already exists" instead of losing anything. The bucket is
   versioned, so every write is undoable.
 - **The quiet window is the Remotely Save race mitigation**, not a lock: a
   conflict copy needs both sides to edit one object between two syncs. Raise
   `ORGANIZER_QUIET_MINUTES` if one ever appears.
-- **Notes are processed one at a time** — parallel calls to one 27B model
-  only queue inside Ollama until they hit the request timeout.
+- **Notes are processed one at a time, and runs never overlap** — parallel
+  calls to one 27B model only queue inside Ollama until they hit the request
+  timeout. Both deployments carry a concurrency limit of 1 with
+  `CANCEL_NEW`, since a slow run can outlast the 15-minute interval.
+- **Only its three keys are rewritten.** The rest of the frontmatter stays
+  byte-for-byte: a YAML load/dump round trip would turn `12:30` into `750`
+  and `NO` into `false`. A failure that can only repeat (bad frontmatter, a
+  bad reply, a taken name) is not retried; an unreachable Ollama or S3 is.
 - `ORGANIZER_VAULT_PREFIX` is the remote prefix Remotely Save syncs under,
   if it was given one; empty means the bucket root.
 
-Its pure helpers and write path have a plain-assert test, the one test in
-this repo:
-`uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`.
+The flows have plain-assert tests, the only tests in this repo:
+`uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`
+and the same for `prefect/flows/test_serve.py`.
 
 ### Windows machines (`windows_exporter`)
 

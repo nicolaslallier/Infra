@@ -74,18 +74,41 @@ def split_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return meta, text[match.end():]
 
 
+# The keys this flow writes. Everything else in the frontmatter is left as
+# the text it was: a YAML load/dump round trip would rewrite values (1.1
+# reads `12:30` as 750, `0123` as 83, `NO` as false) and drop comments.
+OWN_KEYS = ("tags", "summary", "organized_at")
+
+
+def _drop_keys(block: str, keys: tuple[str, ...]) -> str:
+    """The frontmatter text minus the top-level entries for `keys`, with their
+    continuation lines (indented lines, or `- item` lines at column 0)."""
+    kept, skipping = [], False
+    for line in block.splitlines(keepends=True):
+        if line[:1] not in (" ", "\t", "-", "\r", "\n", ""):
+            skipping = line.split(":", 1)[0].strip() in keys
+        if not skipping:
+            kept.append(line)
+    out = "".join(kept)
+    return out if not out or out.endswith("\n") else out + "\n"
+
+
 def merge_frontmatter(text: str, tags: list[str], summary: str, now_iso: str) -> str:
     """Add tags (union, existing first), summary and organized_at. Every
-    other existing key is kept as it was."""
+    other line of the existing frontmatter is kept verbatim."""
     meta, body = split_frontmatter(text)
+    match = _FRONTMATTER.match(text)
+    kept = _drop_keys(match.group(1), OWN_KEYS) if match else ""
     existing = meta.get("tags") or []
     if isinstance(existing, str):
         existing = [existing]
-    meta["tags"] = list(dict.fromkeys([*existing, *tags]))
-    meta["summary"] = summary
-    meta["organized_at"] = now_iso
-    dumped = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True)
-    return f"---\n{dumped}---\n{body}"
+    own = {
+        "tags": list(dict.fromkeys([*existing, *tags])),
+        "summary": summary,
+        "organized_at": now_iso,
+    }
+    dumped = yaml.safe_dump(own, sort_keys=False, allow_unicode=True)
+    return f"---\n{kept}{dumped}---\n{body}"
 
 
 def top_level_folders(prefixes: list[str]) -> list[str]:
@@ -207,14 +230,35 @@ def discover() -> tuple[list[str], list[str]]:
     return folders, notes
 
 
-@task(retries=2, retry_delay_seconds=30)
+def retry_transient(task, task_run, state) -> bool:
+    """Retry an unreachable Ollama or S3, not a note that cannot be filed:
+    a bad reply (the model runs at temperature 0), bad frontmatter or a taken
+    name fails the same way every time."""
+    try:
+        state.result()
+    except (ValueError, FileExistsError):
+        return False
+    except Exception:  # noqa: BLE001 - anything else may be transient
+        return True
+    return True
+
+
+@task(retries=2, retry_delay_seconds=30, retry_condition_fn=retry_transient)
 def organize_note(key: str, folders: list[str]) -> str:
     s3 = _s3()
     text = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode("utf-8")
+    # The cheap checks first, so a note that can never be filed costs no
+    # model call: unreadable frontmatter, and a name already in the vault
+    # (in any folder -- two notes with one basename make [[links]] ambiguous).
+    # ponytail: such notes still take a MAX_NOTES slot on every run; if the
+    # inbox ever fills with them, nothing newer gets filed until they are fixed.
+    split_frontmatter(text)
+    for folder in folders:
+        taken = destination_key(folder, key)
+        if _exists(s3, taken):
+            raise FileExistsError(f"{taken} already exists; {key} stays in the inbox -- rename one of them")
     reply = classify(text, folders)
     dest = destination_key(reply["folder"], key)
-    if _exists(s3, dest):
-        raise FileExistsError(f"{dest} already exists; {key} stays in the inbox -- rename one of them")
     now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
     body = merge_frontmatter(text, reply["tags"], reply["summary"], now_iso)
     s3.put_object(Bucket=BUCKET, Key=dest, Body=body.encode("utf-8"), ContentType="text/markdown; charset=utf-8")

@@ -1807,6 +1807,11 @@ docker compose logs prefect-flows | grep -E "nightly|every-15m"         # both d
 make psql    # then:
 #   DROP DATABASE airflow;
 #   DROP ROLE airflow;
-make vault-cli   # then remove the AIRFLOW_* fields from infra/env
-                 # (vault-env would otherwise keep appending them to .env)
+make vault-cli   # then, in infra/env: remove every AIRFLOW_* field, and
+                 # drop `airflow` from APP_DATABASES in the same write --
+                 # check-env requires <APP>_DB_PASSWORD for each app listed,
+                 # so removing only the password fails the next deploy
 ```
+
+Remove `airflow` from `APP_DATABASES` in the host `.env` too (or run
+`make vault-render` after the vault write).

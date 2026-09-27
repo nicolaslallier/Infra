@@ -15,10 +15,17 @@ from __future__ import annotations
 from datetime import timedelta
 
 from prefect import serve
+from prefect.client.schemas.objects import ConcurrencyLimitConfig
 from prefect.schedules import Cron, Interval
 
 from organize_inbox import organize_inbox
 from pr_validation import pr_validation
+
+
+# One run of each deployment at a time: an organize-inbox run can outlast its
+# 15-minute interval (20 notes against one Ollama), and a second run would
+# race the first for the same notes.
+ONE_AT_A_TIME = ConcurrencyLimitConfig(limit=1, collision_strategy="CANCEL_NEW")
 
 
 def deployments() -> list:
@@ -26,10 +33,12 @@ def deployments() -> list:
         pr_validation.to_deployment(
             name="nightly",
             schedule=Cron("0 3 * * *", timezone="America/Toronto"),
+            concurrency_limit=ONE_AT_A_TIME,
         ),
         organize_inbox.to_deployment(
             name="every-15m",
             schedule=Interval(timedelta(minutes=15)),
+            concurrency_limit=ONE_AT_A_TIME,
         ),
     ]
 

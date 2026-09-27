@@ -146,6 +146,52 @@ def test_organize_note_never_overwrites():
     raise AssertionError("an existing destination must not be overwritten")
 
 
+def test_merge_preserves_other_values_verbatim():
+    # YAML 1.1 would read 12:30 as 750 (sexagesimal), 0123 as 83 (octal) and
+    # NO as false; the organizer must not touch keys it does not own.
+    text = "---\ntime: 12:30\nzip: 0123\ncountry: NO\n# kept comment\ntags:\n  - a\nsummary: |\n  old\n---\nB\n"
+    out = oi.merge_frontmatter(text, ["x"], "S", "T")
+    assert out.startswith("---\ntime: 12:30\nzip: 0123\ncountry: NO\n# kept comment\n"), out
+    meta, body = oi.split_frontmatter(out)
+    assert meta["tags"] == ["a", "x"] and meta["summary"] == "S" and body == "B\n"
+
+
+def _never_classify(text, folders):
+    raise AssertionError("the model must not be called for a note that cannot be filed")
+
+
+def test_bad_frontmatter_fails_before_the_model():
+    s3 = FakeS3({"Inbox/n.md": b"---\n- a\n---\nbody\n"})
+    _wire(s3, {})
+    oi.classify = _never_classify
+    try:
+        oi.organize_note.fn("Inbox/n.md", ["Projects/"])
+    except ValueError:
+        assert s3.objects == {"Inbox/n.md": b"---\n- a\n---\nbody\n"}
+        return
+    raise AssertionError("non-mapping frontmatter must fail the note")
+
+
+def test_name_taken_in_any_folder_fails_before_the_model():
+    s3 = FakeS3({"Inbox/n.md": b"new\n", "Areas/n.md": b"old\n"})
+    _wire(s3, {})
+    oi.classify = _never_classify
+    try:
+        oi.organize_note.fn("Inbox/n.md", ["Areas/", "Projects/"])
+    except FileExistsError:
+        assert s3.objects == {"Inbox/n.md": b"new\n", "Areas/n.md": b"old\n"}
+        return
+    raise AssertionError("a basename already in the vault must fail the note")
+
+
+def test_permanent_failures_are_not_retried():
+    from prefect.states import Failed
+
+    assert not oi.retry_transient(None, None, Failed(data=ValueError("bad reply")))
+    assert not oi.retry_transient(None, None, Failed(data=FileExistsError("taken")))
+    assert oi.retry_transient(None, None, Failed(data=TimeoutError("ollama slow")))
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_") and callable(fn):
