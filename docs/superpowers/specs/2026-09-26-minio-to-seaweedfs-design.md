@@ -218,7 +218,7 @@ The four invocations:
 | `app=jarvis` | `jarvis` (was: MinIO root) | `jarvis` | `JARVIS_S3_SECRET_KEY` |
 | `app=obsidian versioned=1` | `obsidian` | `obsidian` | `OBSIDIAN_S3_SECRET_KEY` |
 | `app=ea bucket=ea-catalogue` | `ea` (was `ea-api`) | `ea-catalogue` | `EA_S3_SECRET_KEY` |
-| `app=darkangel bucket=darkangel-files` | `darkangel` (was `darkangel-api`) | `darkangel-files` | `DARKANGEL_S3_SECRET_KEY` |
+| `app=darkangel bucket=darkangel-files versioned=1` | `darkangel` (was `darkangel-api`) | `darkangel-files` | `DARKANGEL_S3_SECRET_KEY` |
 
 Bucket names are unchanged, so consumer bucket defaults stay valid.
 
