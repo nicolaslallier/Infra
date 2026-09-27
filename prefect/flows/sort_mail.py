@@ -292,10 +292,12 @@ def discover(dry_run: bool) -> tuple[dict[str, str], str | None, list[str]]:
     label that exists."""
     gmail = _gmail()
     labels = gmail.labels()
+    cats = categories(labels)
     marker = next((lb["id"] for lb in labels if lb["name"] == marker_label()), None)
-    if marker is None and not dry_run:
+    # No category means the flow refuses to run: leave the mailbox untouched.
+    if marker is None and cats and not dry_run:
         marker = gmail.create_label(marker_label())
-    return categories(labels), marker, gmail.inbox_threads(inbox_query(), MAX_THREADS)
+    return cats, marker, gmail.inbox_threads(inbox_query(), MAX_THREADS)
 
 
 def retry_transient(task, task_run, state) -> bool:
@@ -312,7 +314,16 @@ def sort_thread(thread_id: str, cats: dict[str, str], marker_id: str | None, dry
     # temperature 0) stays at the top of the inbox and takes a MAX_THREADS
     # slot each run; tag such threads with the marker if that ever matters.
     gmail = _gmail()
-    message = latest_message(gmail.thread(thread_id))
+    thread = gmail.thread(thread_id)
+    message = latest_message(thread)
+    # Labels belong to messages: a reply to a kept thread arrives without the
+    # marker, and the inbox query matches the thread again. Re-mark it rather
+    # than let its newest message ("Merci !") get the whole thread archived.
+    if marker_id and any(marker_id in m.get("labelIds", []) for m in thread["messages"]):
+        print(f'"{header(message, "subject")}" -> {KEEP} (kept earlier)')
+        if not dry_run:
+            gmail.modify(thread_id, add=[marker_id])
+        return KEEP
     reply = classify(message_text(message), sorted(cats))
     print(f'"{header(message, "subject")}" -> {reply["category"]} ({reply["reason"]})')
     if dry_run:

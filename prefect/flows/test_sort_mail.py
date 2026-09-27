@@ -176,9 +176,10 @@ def test_access_token_revoked():
 
 
 class FakeGmail:
-    def __init__(self, labels=LABELS, threads=("t1",)):
+    def __init__(self, labels=LABELS, threads=("t1",), messages=None):
         self._labels = [dict(lb) for lb in labels]
         self._threads = list(threads)
+        self._messages = messages or [_message(_part("text/plain", "body"))]
         self.modified: list[tuple] = []
         self.created: list[str] = []
         self.queries: list[str] = []
@@ -196,7 +197,7 @@ class FakeGmail:
         return self._threads[:limit]
 
     def thread(self, thread_id):
-        return {"id": thread_id, "messages": [_message(_part("text/plain", "body"))]}
+        return {"id": thread_id, "messages": self._messages}
 
     def modify(self, thread_id, add, remove=()):
         self.modified.append((thread_id, list(add), list(remove)))
@@ -240,6 +241,30 @@ def test_discover_creates_marker_unless_dry_run():
     assert (marker, gmail.created, threads) == ("NEW", ["Tri/_garder"], ["t1"])
     assert cats == CATS
     assert gmail.queries[-1] == "in:inbox -label:tri-_garder"
+
+
+def test_reply_to_kept_thread_stays_kept():
+    # Labels belong to messages: a reply to a kept thread arrives without the
+    # marker, so the inbox query matches the thread again. It must be re-marked,
+    # never re-classified (a "Merci !" would otherwise get it archived).
+    kept = _message(_part("text/plain", "please call me"), label_ids=["INBOX", "L3"])
+    reply = _message(_part("text/plain", "Merci !"), label_ids=["INBOX"])
+    gmail = FakeGmail(messages=[kept, reply])
+    _wire(gmail)
+    sm.classify = lambda text, names: (_ for _ in ()).throw(AssertionError("classified a kept thread"))
+    assert sm.sort_thread.fn("t1", CATS, "L3", False) == "garder"
+    assert gmail.modified == [("t1", ["L3"], [])]
+    gmail.modified.clear()
+    assert sm.sort_thread.fn("t1", CATS, "L3", True) == "garder"
+    assert gmail.modified == []
+
+
+def test_discover_without_categories_creates_nothing():
+    only_other = [lb for lb in LABELS if not lb["name"].startswith("Tri/")]
+    gmail = FakeGmail(labels=only_other)
+    _wire(gmail)
+    cats, marker, _ = sm.discover.fn(False)
+    assert (cats, marker, gmail.created) == ({}, None, [])
 
 
 def test_flow_refuses_without_categories():
