@@ -1324,7 +1324,7 @@ docker volume rm infra_minio-data
 make s3-provision app=jarvis
 make s3-provision app=obsidian versioned=1
 make s3-provision app=ea bucket=ea-catalogue
-make s3-provision app=darkangel bucket=darkangel-files
+make s3-provision app=darkangel bucket=darkangel-files versioned=1
 ```
 - [ ] **Step 5: Certificates and DNS.** Run `./scripts/gen-certs.sh --force`: it keeps the local CA and drops the minio SANs. Then `docker compose restart nginx oauth2-proxy oauth2-proxy-ea oauth2-proxy-infra`. In Technitium (`http://<LAN_IP>:5380`), delete zones `minio.famillelallier.net` and `minio-console.famillelallier.net`.
 - [ ] **Step 6: Acceptance.** Use `aws_as`/`icurl` from the Test Harness, which work from the main checkout too; do **not** use `wt_guard` here.
