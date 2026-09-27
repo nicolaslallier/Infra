@@ -805,6 +805,10 @@ services:
       ORGANIZER_S3_ACCESS_KEY: prefect
       ORGANIZER_S3_SECRET_KEY: ${PREFECT_S3_SECRET_KEY:?Set PREFECT_S3_SECRET_KEY in .env (openssl rand -hex 24), then make s3-provision app=prefect bucket=obsidian}
       ORGANIZER_VAULT_PREFIX: ${ORGANIZER_VAULT_PREFIX:-}
+      # sort-mail. Its OAuth credentials are the gmail-sorter-oauth Secret
+      # block, never an env var: .env reaches every container wholesale.
+      SORTER_MAX_THREADS: "20"
+      SORTER_LABEL_PREFIX: Tri/
     # This is the one Prefect container that gets the Docker socket, for
     # pr-validation's sibling-container checks. Understand the trade before
     # extending it: the socket is root on the daemon, so any flow can do

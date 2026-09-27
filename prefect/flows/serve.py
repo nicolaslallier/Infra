@@ -20,6 +20,7 @@ from prefect.schedules import Cron, Interval
 
 from organize_inbox import organize_inbox
 from pr_validation import pr_validation
+from sort_mail import sort_mail
 
 
 # One run of each deployment at a time: an organize-inbox run can outlast its
@@ -39,6 +40,15 @@ def deployments() -> list:
             name="every-15m",
             schedule=Interval(timedelta(minutes=15)),
             concurrency_limit=ONE_AT_A_TIME,
+        ),
+        sort_mail.to_deployment(
+            name="every-15m",
+            schedule=Interval(timedelta(minutes=15)),
+            concurrency_limit=ONE_AT_A_TIME,
+            # Dry until the user has read what it would do: every push to main
+            # deploys, and a registered deployment runs at once. Removed by a
+            # separate commit once the dry-run log reads right.
+            parameters={"dry_run": True},
         ),
     ]
 
