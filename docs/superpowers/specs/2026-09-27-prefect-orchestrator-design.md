@@ -1,6 +1,6 @@
 # Replace Airflow with Prefect; first AI pipeline
 
-Status: draft 2026-09-27
+Status: draft 2026-09-27 (revised same day: S3 key names, pre-merge cutover, no healthcheck, sequential notes, vault prefix)
 
 ## Goal
 
@@ -93,14 +93,20 @@ list in `CLAUDE.md`).
   - `PREFECT_API_URL: http://prefect-server:4200/api`,
     `PREFECT_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?...}`.
   - `OLLAMA_URL` (default `http://192.168.2.40:11434`), `OLLAMA_MODEL`
-    (default `qwen3.8:27b-mlx`), `OBSIDIAN_S3_ACCESS_KEY`,
-    `OBSIDIAN_S3_SECRET_KEY`, `S3_ENDPOINT: http://s3:8333`.
+    (default `qwen3.8:27b-mlx`), and `ORGANIZER_S3_*` (endpoint
+    `http://s3:8333`, bucket `obsidian`, access key `prefect`, secret
+    `${PREFECT_S3_SECRET_KEY}`, vault prefix `${ORGANIZER_VAULT_PREFIX:-}`).
+    Not `PREFECT_*` inside the container: Prefect reads that namespace as its
+    own settings.
   - Volumes, moved verbatim from `airflow-scheduler` with their comments:
     `${INFRA_DIR:-.}/prefect/flows:/opt/prefect/flows:ro`,
     `/var/run/docker.sock:/var/run/docker.sock`,
     `/tmp/infra-ci:/tmp/infra-ci` (identical on both sides — sibling
     containers' `-v` is resolved by the daemon). `group_add: ["0"]`.
-  - `depends_on: prefect-server` (healthy: `/api/health`).
+  - `depends_on: prefect-server` (started, not healthy: with the auth string
+    on, a healthcheck would need the secret in its command line).
+    `serve()` exits if the API is not up yet, and `restart: unless-stopped`
+    brings it back — the retry is the restart.
 - **`oauth2-proxy-prefect`** — a copy of `oauth2-proxy-infra`: realm
   `infra`, `CLIENT_ID: prefect`, `ALLOWED_GROUPS: prefect`,
   `COOKIE_NAME: _oauth2_proxy_prefect`,
@@ -133,11 +139,15 @@ Loki through Alloy already). Add when a dashboard is wanted.
 
 ```python
 serve(
-    pr_validation.to_deployment(name="nightly", cron="0 3 * * *",
-                                timezone="America/Toronto"),
-    organize_inbox.to_deployment(name="every-15m", interval=900),
+    pr_validation.to_deployment(
+        name="nightly", schedule=Cron("0 3 * * *", timezone="America/Toronto")),
+    organize_inbox.to_deployment(
+        name="every-15m", schedule=Interval(timedelta(minutes=15))),
 )
 ```
+
+(`to_deployment` has no `timezone` argument; it rides on the `Cron`
+schedule object.)
 
 **`pr_validation.py`** — port of `airflow/dags/infra_pr_validation.py`:
 
@@ -155,7 +165,9 @@ serve(
    (default 10) old, at most `MAX_NOTES` (default 20) per run. List
    top-level folders (`Delimiter="/"`), excluding `Inbox/` and dot-folders
    (`.obsidian/`, `.trash/`).
-2. **Classify** — one task per note, `retries=2`. `POST
+2. **Classify** — one task per note, `retries=2`, run **sequentially**
+   (one 27B model on one Mac: parallel calls only queue inside Ollama and
+   trip the request timeout). `POST
    {OLLAMA_URL}/api/chat`, `stream: false`, `format`:
    `{tags: string[] (maxItems 5), summary: string, folder: enum[<folders>]}`.
    The enum is built at run time: the model can only pick an existing
@@ -168,9 +180,15 @@ serve(
 4. **Result.** Notes succeed or fail independently; the run is `Failed` if
    any note failed.
 
+All keys are relative to `ORGANIZER_VAULT_PREFIX` (default empty: vault at
+the bucket root). Remotely Save can be configured with a remote prefix;
+Cutover step 1 checks which one this bucket uses.
+
 S3 identity: a new `prefect` identity scoped to the `obsidian` bucket
 (`make s3-provision app=prefect bucket=obsidian`), separate from Remotely
 Save's `obsidian` identity so either can be revoked alone.
+`provision-s3.sh` makes the access key the app name (`prefect`) and reads
+the secret from `PREFECT_S3_SECRET_KEY`.
 
 ### 4. Secrets and preflight
 
@@ -181,10 +199,10 @@ New `.env.example` keys, validated by `check-env.sh`, rendered by
 | Key | Shape / guard |
 |---|---|
 | `PREFECT_DB_PASSWORD` | url-safe (embedded in the asyncpg URL); added to `APP_DATABASES` as `prefect` |
-| `PREFECT_AUTH_STRING` | `admin:<secret>`; `:?` guard |
+| `PREFECT_AUTH_STRING` | `admin:<secret>`; `:?` guard; `check-env` asserts the `user:password` shape |
 | `PREFECT_OAUTH_CLIENT_SECRET` | no guard; `check-env.sh` entry `PREFECT_OAUTH_CLIENT_SECRET:oauth2-proxy-prefect:infra:prefect` beside the `S3_ADMIN_…` one |
 | `PREFECT_OAUTH_COOKIE_SECRET` | `:?` guard; `openssl rand -base64 32 \| tr -- '+/' '-_'` |
-| `OBSIDIAN_S3_ACCESS_KEY` / `OBSIDIAN_S3_SECRET_KEY` | from `make s3-provision app=prefect bucket=obsidian` |
+| `PREFECT_S3_SECRET_KEY` | `:?` guard; read by `make s3-provision app=prefect bucket=obsidian` (access key is `prefect`) |
 
 All `AIRFLOW_*` keys and their checks are removed.
 
@@ -233,21 +251,31 @@ Everything else is verified by running the stack (Acceptance).
 
 ## Cutover
 
-One PR. After merge:
+**The secrets go in before the merge.** A push to main runs `deploy.yml`,
+which renders `.env` from the vault and runs `check-env` — with the new
+`:?` guards, a vault without the Prefect keys fails that deploy. On the
+host checkout, still on the old main:
 
-1. `git pull --ff-only` on the host checkout.
-2. `make provision-app app=prefect`.
-3. `make s3-provision app=prefect bucket=obsidian` → keys into `.env`.
+1. Check the bucket layout: `aws s3 ls s3://obsidian/` (or the s3-admin UI).
+   If notes sit under a prefix, set `ORGANIZER_VAULT_PREFIX=<prefix>/`.
+2. Add to `.env`: `PREFECT_DB_PASSWORD` (`openssl rand -hex 16`),
+   `PREFECT_AUTH_STRING` (`admin:$(openssl rand -hex 16)`),
+   `PREFECT_S3_SECRET_KEY` (`openssl rand -hex 24`),
+   `PREFECT_OAUTH_COOKIE_SECRET` (`openssl rand -base64 32 | tr -- '+/' '-_'`);
+   append `prefect` to `APP_DATABASES`.
+3. `make provision-app app=prefect` and
+   `make s3-provision app=prefect bucket=obsidian`.
 4. `kcadm`: create group `prefect` and client `prefect` in realm `infra`
    (as in `infra-realm.json`), add yourself to the group, copy the client
-   secret into `PREFECT_OAUTH_CLIENT_SECRET`. Generate
-   `PREFECT_AUTH_STRING` and `PREFECT_OAUTH_COOKIE_SECRET`.
-5. `make vault-seed`, then `make up`.
-6. In the Prefect UI: create `Secret` block `infra-ci-github-token`.
-7. Acceptance checks below.
-8. After one green nightly `pr-validation` run: `DROP DATABASE airflow;
-   DROP ROLE airflow;` by hand (irreversible, so not in the PR), and remove
-   `airflow` from `APP_DATABASES` if present.
+   secret into `PREFECT_OAUTH_CLIENT_SECRET`.
+5. `make vault-seed`.
+6. Merge the PR. CI deploys; or `git pull --ff-only && make up` by hand.
+7. In the Prefect UI: create `Secret` block `infra-ci-github-token`.
+8. Acceptance checks below.
+9. After one green nightly `pr-validation` run: `DROP DATABASE airflow;
+   DROP ROLE airflow;` by hand (irreversible, so not in the PR); remove the
+   `AIRFLOW_*` fields from `infra/env` in the vault (`vault-env` would
+   otherwise keep appending them to `.env`).
 
 ## Acceptance
 
