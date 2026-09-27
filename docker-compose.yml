@@ -768,6 +768,12 @@ services:
       PREFECT_SERVER_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?Set PREFECT_AUTH_STRING in .env (user:password)}
       # Where the browser finds the API; the default would be 0.0.0.0:4200.
       PREFECT_UI_API_URL: https://prefect.infra.famillelallier.net/api
+      # Prefect 3.8.7 resolves SQLAlchemy 2.1, whose bulk insert rejects the
+      # hybrid property the scheduler service writes: it logs "Can't evaluate
+      # bulk DML statement" every minute and never creates a scheduled run
+      # (manual runs still work). Installed by the image's entrypoint at start.
+      # ponytail: drop once a Prefect release pins sqlalchemy itself.
+      EXTRA_PIP_PACKAGES: "sqlalchemy<2.1"
     networks:
       - infra-net
     depends_on:
