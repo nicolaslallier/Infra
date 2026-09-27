@@ -114,10 +114,15 @@ classified.
 ### `dry_run: bool = False`
 
 A flow parameter. When true, step 4 logs the decision and skips every
-`modify` and the marker `labels.create`. Run once by hand from the Prefect UI
-before relying on the schedule. A parameter rather than an env var: it
-changes per run from the UI, without a `make up` (which would briefly drop
+`modify` and the marker `labels.create`. A parameter rather than an env var:
+it changes per run from the UI, without a `make up` (which would briefly drop
 LAN DNS along with everything else).
+
+**Rollout: the deployment starts dry.** `serve()` registers deployments live
+and every push to main deploys through CI, so "run a dry run by hand first"
+would race the schedule. The first release registers `sort-mail/every-15m`
+with `parameters={"dry_run": True}` (pinned by a test in `test_serve.py`);
+a second commit removes it once the user has read a scheduled dry-run log.
 
 ## Error handling
 
@@ -171,8 +176,9 @@ The keep marker is `<prefix>_garder`; not configurable.
   a category sends exactly one `modify` with add + remove `INBOX`; `garder`
   adds only the marker; `dry_run` sends none.
 
-`test_serve.py` needs no change: it asserts every deployment `serve.py`
-returns has a limit of 1 with `CANCEL_NEW`, so it covers the new one.
+`test_serve.py` already asserts every deployment has a limit of 1 with
+`CANCEL_NEW`, so it covers the new one; it gains a temporary
+`test_sort_mail_starts_dry`, deleted with the dry-run parameter.
 
 Acceptance on the live stack: a `dry_run` run over the real inbox whose log
 reads sensibly, then one real run of 20 threads checked in Gmail.
