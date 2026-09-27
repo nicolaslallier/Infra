@@ -8,11 +8,13 @@
 #
 # Every value has to be shaped the way the container that reads it expects,
 # not merely non-empty, because check-env.sh asserts exactly that:
-#   - the three oauth2-proxy cookie keys decode as 32 bytes under Go's
+#   - the four oauth2-proxy cookie keys decode as 32 bytes under Go's
 #     base64.RawURLEncoding -- hence `tr -- '+/' '-_'` and stripping '='
 #     (see "Preflight: make check-env" in CLAUDE.md)
 #   - AIRFLOW_FERNET_KEY is url-safe base64 of 32 bytes, padding kept
 #   - AIRFLOW_DB_PASSWORD sits inside a URL, so it stays url-safe
+#   - PREFECT_DB_PASSWORD sits inside a URL, so it stays url-safe
+#   - PREFECT_AUTH_STRING is user:password (check-env asserts the colon)
 #   - S3_STS_SIGNING_KEY is padded standard base64 of 32 bytes
 #   - LAN_IP must be an address the host owns; 127.0.0.1 always is
 #
@@ -42,6 +44,7 @@ b64_32() { head -c 32 /dev/urandom | base64 | tr -d '\n' | tr -- '+/' '-_'; }
 cookie_a="$(b64_32 | tr -d '=')"
 cookie_b="$(b64_32 | tr -d '=')"
 cookie_c="$(b64_32 | tr -d '=')"
+cookie_d="$(b64_32 | tr -d '=')"
 fernet="$(b64_32)"
 
 # Start from the template so every key check-env diffs for is present, then
@@ -66,6 +69,9 @@ set_key LAN_IP 127.0.0.1
 set_key JARVIS_OAUTH_COOKIE_SECRET "$cookie_a"
 set_key EA_OBSIDIAN_OAUTH_COOKIE_SECRET "$cookie_b"
 set_key S3_ADMIN_OAUTH_COOKIE_SECRET "$cookie_c"
+set_key PREFECT_OAUTH_COOKIE_SECRET "$cookie_d"
+set_key PREFECT_AUTH_STRING "admin:$(rand_hex 16)"
+set_key PREFECT_DB_PASSWORD "$(rand_hex 16)"
 # Standard base64, padding kept: SeaweedFS's STS key is a Go []byte in JSON.
 set_key S3_STS_SIGNING_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
 set_key AIRFLOW_FERNET_KEY "$fernet"
