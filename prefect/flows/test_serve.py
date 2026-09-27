@@ -17,6 +17,16 @@ def test_one_run_at_a_time():
         assert strategy.value == "CANCEL_NEW", deployment.name
 
 
+def test_sort_mail_starts_dry():
+    # Until the user has read a dry-run log (plan Task 4): CI deploys every
+    # push to main and serve() registers deployments live, so the scheduled
+    # runs must only log. Delete this test with the parameter.
+    sort_mail = next(d for d in serve.deployments() if d.flow_name == "sort-mail")
+    assert sort_mail.parameters == {"dry_run": True}
+
+
 if __name__ == "__main__":
     test_one_run_at_a_time()
     print("ok test_one_run_at_a_time")
+    test_sort_mail_starts_dry()
+    print("ok test_sort_mail_starts_dry")
