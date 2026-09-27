@@ -1,17 +1,17 @@
 """Nightly validation of this repo's open pull requests.
 
-Why this lives in Airflow and not in GitHub Actions: a GitHub-hosted runner
+Why this lives in Prefect and not in GitHub Actions: a GitHub-hosted runner
 cannot reach `infra-net`, the Docker daemon this stack runs on, or anything on
-the LAN. Airflow is already on that machine, so it is the only scheduler that
-can eventually bring the stack up for real. This first DAG does not do that
-yet -- it runs the file-level checks -- but it establishes the plumbing that
-the smoke test will reuse: a workspace the nested containers can see, a clone
-step, and a single upserted comment per PR.
+the LAN. Prefect is already on that machine, so it is the only scheduler that
+can eventually bring the stack up for real. This flow does not do that yet --
+it runs the file-level checks -- but it establishes the plumbing the smoke
+test will reuse: a workspace the nested containers can see, a clone step, and
+a single upserted comment per PR.
 
 How a run works, per open PR:
 
-  1. clone the PR's head into $WORKSPACE_ROOT/pr-<n>-<run> (in a container --
-     the Airflow image ships no `git`)
+  1. clone the PR's head into $WORKSPACE_ROOT/pr-<n>-<run> (in a container,
+     like every check)
   2. render a throwaway .env, seal key and certs into it
      (scripts/ci-fake-env.sh, from the PR's own checkout, so a PR that breaks
      that script fails here)
@@ -25,15 +25,13 @@ temp dir in here would be invisible to them, and Docker would silently
 auto-create an empty directory in its place (the same trap `${INFRA_DIR}`
 exists for, see "Portainer-managed stack" in CLAUDE.md). Mounting the
 workspace at *the same path* inside and outside makes the two agree with no
-translation. Consequence: this DAG assumes Airflow and the daemon share a
-filesystem. It does not work against a remote DOCKER_HOST.
+translation. Consequence: this flow assumes prefect-flows and the daemon share
+a filesystem. It does not work against a remote DOCKER_HOST.
 
 Setup, once:
-  - docker socket + workspace mount on airflow-scheduler (docker-compose.yml)
-  - Airflow Variables `infra_ci_github_token` (a PAT with pull_requests:write)
-    and, optionally, `infra_ci_repo`
-  - unpause the DAG: it arrives paused
-    (AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION is "true")
+  - docker socket + workspace mount on prefect-flows (docker-compose.yml)
+  - a Secret block `infra-ci-github-token` (a PAT with pull_requests:write),
+    created in the Prefect UI
 """
 
 from __future__ import annotations
@@ -42,13 +40,12 @@ import json
 import os
 import shutil
 import subprocess
-import urllib.error
 import urllib.request
-from datetime import timedelta
 from typing import Any
 
-import pendulum
-from airflow.sdk import Variable, dag, task
+from prefect import flow, task
+from prefect.blocks.system import Secret
+from prefect.runtime import flow_run
 
 # Bind-mounted from the host at this same path (see the module docstring).
 WORKSPACE_ROOT = "/tmp/infra-ci"
@@ -69,14 +66,19 @@ IMG_NGINX = "nginx:alpine-otel"  # must match docker-compose.yml's nginx image
 IMG_PROMETHEUS = "prom/prometheus:latest"
 
 
+def _token() -> str:
+    """The PAT, loaded inside each task that needs it rather than passed
+    between tasks, so it is never recorded as a task parameter."""
+    return Secret.load("infra-ci-github-token").get()
+
+
 # --------------------------------------------------------------------------
 # GitHub
 # --------------------------------------------------------------------------
 
 
 def _gh(path: str, token: str, method: str = "GET", body: dict | None = None) -> Any:
-    """One GitHub REST call. urllib rather than requests: stdlib, no doubt
-    about what the Airflow image ships."""
+    """One GitHub REST call, stdlib only."""
     url = path if path.startswith("http") else f"{GITHUB_API}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method)
@@ -109,7 +111,7 @@ def _docker_run(
     the normal, interesting outcome that has to be reported with its full
     output, not an exception.
     """
-    import docker  # imported here so DAG parsing never depends on the provider
+    import docker  # installed by EXTRA_PIP_PACKAGES; imported late so importing this module never needs it
 
     client = docker.from_env()
     try:
@@ -273,178 +275,166 @@ def _check_env_script(workspace: str) -> tuple[int, str]:
 
 
 # --------------------------------------------------------------------------
-# DAG
+# Flow
 # --------------------------------------------------------------------------
 
 
-@dag(
-    dag_id="infra_pr_validation",
-    schedule="0 3 * * *",
-    start_date=pendulum.datetime(2026, 1, 1, tz="America/Toronto"),
-    catchup=False,
-    max_active_runs=1,
-    tags=["ci", "infra"],
-    doc_md=__doc__,
-)
-def infra_pr_validation() -> None:
-    @task
-    def list_open_prs() -> list[dict[str, Any]]:
-        token = Variable.get("infra_ci_github_token")
-        repo = Variable.get("infra_ci_repo", default="nicolaslallier/Infra")
+@task
+def list_open_prs(repo: str) -> list[dict[str, Any]]:
+    prs = _gh(f"/repos/{repo}/pulls?state=open&per_page=50", _token())
+    selected = [
+        {
+            "repo": repo,
+            "number": pr["number"],
+            "title": pr["title"],
+            "head_sha": pr["head"]["sha"],
+            "head_ref": pr["head"]["ref"],
+            "clone_url": pr["head"]["repo"]["clone_url"] if pr["head"]["repo"] else None,
+        }
+        for pr in prs
+        if not pr.get("draft")
+    ]
+    print(f"{len(selected)} open non-draft PR(s) on {repo}")
+    return selected
 
-        prs = _gh(f"/repos/{repo}/pulls?state=open&per_page=50", token)
-        selected = [
-            {
-                "repo": repo,
-                "number": pr["number"],
-                "title": pr["title"],
-                "head_sha": pr["head"]["sha"],
-                "head_ref": pr["head"]["ref"],
-                "clone_url": pr["head"]["repo"]["clone_url"] if pr["head"]["repo"] else None,
-            }
-            for pr in prs
-            if not pr.get("draft")
-        ]
-        print(f"{len(selected)} open non-draft PR(s) on {repo}")
-        return selected
 
-    @task(
-        retries=1,
-        retry_delay=timedelta(minutes=2),
-        execution_timeout=timedelta(minutes=25),
-    )
-    def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
-        from airflow.sdk import get_current_context
+@task(retries=1, retry_delay_seconds=120, timeout_seconds=1500)
+def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
+    run_id = str(flow_run.id)
+    workspace = os.path.join(WORKSPACE_ROOT, f"pr-{pr['number']}-{run_id}")
 
-        run_id = get_current_context()["run_id"]
-        safe_run = "".join(c if c.isalnum() else "-" for c in run_id)[-40:]
-        workspace = os.path.join(WORKSPACE_ROOT, f"pr-{pr['number']}-{safe_run}")
+    token = _token()
+    results: list[dict[str, Any]] = []
 
-        token = Variable.get("infra_ci_github_token")
-        results: list[dict[str, Any]] = []
+    try:
+        os.makedirs(workspace, exist_ok=True)
 
-        try:
-            os.makedirs(workspace, exist_ok=True)
-
-            # The Airflow image has no git, so the clone runs in a container
-            # too -- as this process's uid, or the checkout lands root-owned
-            # and the steps below cannot write .env into it.
-            clone_url = f"https://x-access-token:{token}@github.com/{pr['repo']}.git"
-            code, out = _docker_run(
-                image=IMG_GIT,
-                command=[
-                    "clone",
-                    "--depth",
-                    "1",
-                    "--branch",
-                    pr["head_ref"],
-                    clone_url,
-                    "/work",
-                ],
-                volumes={workspace: {"bind": "/work", "mode": "rw"}},
-                user=f"{os.getuid()}:{os.getgid()}",
-            )
-            if code != 0:
-                # Never let a token reach a task log or a PR comment.
-                out = out.replace(token, "***")
-                return {
-                    "pr": pr,
-                    "results": [{"name": "clone", "code": code, "output": out}],
-                }
-
-            # Throwaway .env / seal key / certs, from the PR's own copy of the
-            # script -- so a PR that breaks it fails right here.
-            prep = subprocess.run(
-                ["bash", "scripts/ci-fake-env.sh", workspace],
-                cwd=workspace,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                env={**os.environ, "CI_FAKE_ENV_FORCE": "1"},
-            )
-            results.append(
-                {
-                    "name": "prepare workspace",
-                    "code": prep.returncode,
-                    "output": (prep.stdout + prep.stderr).strip(),
-                }
-            )
-            if prep.returncode != 0:
-                return {"pr": pr, "results": results}
-
-            for name, fn in (
-                ("check-env", _check_env_script),
-                ("json/yaml", _check_json_yaml),
-            ):
-                code, out = fn(workspace)
-                results.append({"name": name, "code": code, "output": out})
-
-            for check in _checks(workspace):
-                kwargs = {
-                    "image": check["image"],
-                    "command": check["command"],
-                    "volumes": check["volumes"],
-                    "working_dir": check.get("working_dir"),
-                }
-                if check.get("entrypoint"):
-                    # promtool is a second binary in the prometheus image.
-                    kwargs["command"] = [check["entrypoint"], *check["command"]]
-                code, out = _docker_run(**kwargs)
-                results.append({"name": check["name"], "code": code, "output": out})
-
-            return {"pr": pr, "results": results}
-        finally:
-            shutil.rmtree(workspace, ignore_errors=True)
-
-    @task(retries=2, retry_delay=timedelta(minutes=1))
-    def post_report(outcome: dict[str, Any]) -> None:
-        token = Variable.get("infra_ci_github_token")
-        pr = outcome["pr"]
-        results = outcome["results"]
-        failed = [r for r in results if r["code"] != 0]
-
-        header = (
-            f"{COMMENT_MARKER}\n"
-            f"### {'❌' if failed else '✅'} Validation infra — `{pr['head_sha'][:7]}`\n\n"
-            f"| check | résultat |\n|---|---|\n"
+        # The clone runs in a container like every check -- as this process's
+        # uid, or the checkout lands owned by someone else and the steps below
+        # cannot write .env into it.
+        clone_url = f"https://x-access-token:{token}@github.com/{pr['repo']}.git"
+        code, out = _docker_run(
+            image=IMG_GIT,
+            command=[
+                "clone",
+                "--depth",
+                "1",
+                "--branch",
+                pr["head_ref"],
+                clone_url,
+                "/work",
+            ],
+            volumes={workspace: {"bind": "/work", "mode": "rw"}},
+            user=f"{os.getuid()}:{os.getgid()}",
         )
-        rows = ""
-        for r in results:
-            verdict = "✅" if r["code"] == 0 else f"❌ (exit {r['code']})"
-            rows += f"| `{r['name']}` | {verdict} |\n"
-        details = ""
-        for r in failed:
-            body = r["output"][-3000:] or "(aucune sortie)"
-            details += f"\n<details><summary><code>{r['name']}</code></summary>\n\n```\n{body}\n```\n\n</details>\n"
+        if code != 0:
+            # Never let a token reach a task log or a PR comment.
+            out = out.replace(token, "***")
+            return {
+                "pr": pr,
+                "results": [{"name": "clone", "code": code, "output": out}],
+            }
 
-        footer = "\n<sub>Posté par la DAG Airflow <code>infra_pr_validation</code>.</sub>"
-        comment = header + rows + details + footer
+        # Throwaway .env / seal key / certs, from the PR's own copy of the
+        # script -- so a PR that breaks it fails right here.
+        prep = subprocess.run(
+            ["bash", "scripts/ci-fake-env.sh", workspace],
+            cwd=workspace,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ, "CI_FAKE_ENV_FORCE": "1"},
+        )
+        results.append(
+            {
+                "name": "prepare workspace",
+                "code": prep.returncode,
+                "output": (prep.stdout + prep.stderr).strip(),
+            }
+        )
+        if prep.returncode != 0:
+            return {"pr": pr, "results": results}
 
-        existing = _gh(f"/repos/{pr['repo']}/issues/{pr['number']}/comments?per_page=100", token)
-        mine = next((c for c in existing if COMMENT_MARKER in (c.get("body") or "")), None)
+        for name, fn in (
+            ("check-env", _check_env_script),
+            ("json/yaml", _check_json_yaml),
+        ):
+            code, out = fn(workspace)
+            results.append({"name": name, "code": code, "output": out})
 
-        if mine:
-            _gh(
-                f"/repos/{pr['repo']}/issues/comments/{mine['id']}",
-                token,
-                method="PATCH",
-                body={"body": comment},
-            )
-        else:
-            _gh(
-                f"/repos/{pr['repo']}/issues/{pr['number']}/comments",
-                token,
-                method="POST",
-                body={"body": comment},
-            )
+        for check in _checks(workspace):
+            kwargs = {
+                "image": check["image"],
+                "command": check["command"],
+                "volumes": check["volumes"],
+                "working_dir": check.get("working_dir"),
+            }
+            if check.get("entrypoint"):
+                # promtool is a second binary in the prometheus image.
+                kwargs["command"] = [check["entrypoint"], *check["command"]]
+            code, out = _docker_run(**kwargs)
+            results.append({"name": check["name"], "code": code, "output": out})
 
-        if failed:
-            raise RuntimeError(
-                f"PR #{pr['number']}: {len(failed)} check(s) en échec — "
-                + ", ".join(r["name"] for r in failed)
-            )
-
-    post_report.expand(outcome=run_checks.expand(pr=list_open_prs()))
+        return {"pr": pr, "results": results}
+    finally:
+        shutil.rmtree(workspace, ignore_errors=True)
 
 
-infra_pr_validation()
+@task(retries=2, retry_delay_seconds=60)
+def post_report(outcome: dict[str, Any]) -> None:
+    token = _token()
+    pr = outcome["pr"]
+    results = outcome["results"]
+    failed = [r for r in results if r["code"] != 0]
+
+    header = (
+        f"{COMMENT_MARKER}\n"
+        f"### {'❌' if failed else '✅'} Validation infra — `{pr['head_sha'][:7]}`\n\n"
+        f"| check | résultat |\n|---|---|\n"
+    )
+    rows = ""
+    for r in results:
+        verdict = "✅" if r["code"] == 0 else f"❌ (exit {r['code']})"
+        rows += f"| `{r['name']}` | {verdict} |\n"
+    details = ""
+    for r in failed:
+        body = r["output"][-3000:] or "(aucune sortie)"
+        details += f"\n<details><summary><code>{r['name']}</code></summary>\n\n```\n{body}\n```\n\n</details>\n"
+
+    footer = "\n<sub>Posté par le flow Prefect <code>pr-validation</code>.</sub>"
+    comment = header + rows + details + footer
+
+    existing = _gh(f"/repos/{pr['repo']}/issues/{pr['number']}/comments?per_page=100", token)
+    mine = next((c for c in existing if COMMENT_MARKER in (c.get("body") or "")), None)
+
+    if mine:
+        _gh(
+            f"/repos/{pr['repo']}/issues/comments/{mine['id']}",
+            token,
+            method="PATCH",
+            body={"body": comment},
+        )
+    else:
+        _gh(
+            f"/repos/{pr['repo']}/issues/{pr['number']}/comments",
+            token,
+            method="POST",
+            body={"body": comment},
+        )
+
+    if failed:
+        raise RuntimeError(
+            f"PR #{pr['number']}: {len(failed)} check(s) en échec — "
+            + ", ".join(r["name"] for r in failed)
+        )
+
+
+@flow(name="pr-validation", log_prints=True)
+def pr_validation(repo: str = "nicolaslallier/Infra") -> list[Any]:
+    prs = list_open_prs(repo)
+    outcomes = run_checks.map(prs)
+    reports = post_report.map(outcomes)
+    reports.wait()
+    # Returning every state marks the run Failed if any PR's checks or report
+    # did not complete, while each red PR is still its own failed task run.
+    return [f.state for f in (*outcomes, *reports)]

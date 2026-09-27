@@ -7,7 +7,8 @@
   "groups": [
     { "name": "s3-admin" },
     { "name": "s3-readwrite" },
-    { "name": "s3-readonly" }
+    { "name": "s3-readonly" },
+    { "name": "prefect" }
   ],
   "clients": [
     {
@@ -69,6 +70,39 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": { "included.client.audience": "s3-sts", "id.token.claim": "false", "access.token.claim": "true" }
+        }
+      ]
+    },
+    {
+      "clientId": "prefect",
+      "name": "Prefect UI (oauth2-proxy-prefect gate)",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "https://prefect.infra.famillelallier.net"
+      },
+      "redirectUris": ["https://prefect.infra.famillelallier.net/oauth2/callback"],
+      "webOrigins": [],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "consentRequired": false,
+          "config": { "claim.name": "groups", "full.path": "false", "id.token.claim": "true", "access.token.claim": "true", "userinfo.token.claim": "true" }
+        },
+        {
+          "name": "prefect-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": { "included.client.audience": "prefect", "id.token.claim": "true", "access.token.claim": "true" }
         }
       ]
     }

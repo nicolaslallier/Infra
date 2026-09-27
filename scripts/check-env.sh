@@ -34,7 +34,7 @@
 # Diagnostics go to stderr. Exit 0 = usable, 1 = do not deploy.
 set -uo pipefail
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 ENV_FILE=.env
 EXAMPLE_FILE=.env.example
@@ -65,13 +65,12 @@ REQUIRED=(
 	DARKANGEL_S3_SECRET_KEY
 	RABBITMQ_DEFAULT_PASS
 	NEO4J_PASSWORD
-	AIRFLOW_DB_PASSWORD
-	AIRFLOW_ADMIN_PASSWORD
-	AIRFLOW_FERNET_KEY
-	AIRFLOW_JWT_SECRET
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
 	S3_ADMIN_OAUTH_COOKIE_SECRET
+	PREFECT_AUTH_STRING
+	PREFECT_S3_SECRET_KEY
+	PREFECT_OAUTH_COOKIE_SECRET
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start
@@ -82,6 +81,7 @@ COOKIE_SECRETS=(
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
 	S3_ADMIN_OAUTH_COOKIE_SECRET
+	PREFECT_OAUTH_COOKIE_SECRET
 )
 
 # <var>:<service>:<realm>:<client>, for the secrets Keycloak itself generates
@@ -91,6 +91,7 @@ POST_BOOT=(
 	JARVIS_OAUTH_CLIENT_SECRET:oauth2-proxy:jarvis:jarvis
 	EA_OBSIDIAN_OAUTH_CLIENT_SECRET:oauth2-proxy-ea:ea:ea-obsidian
 	S3_ADMIN_OAUTH_CLIENT_SECRET:oauth2-proxy-infra:infra:s3-admin
+	PREFECT_OAUTH_CLIENT_SECRET:oauth2-proxy-prefect:infra:prefect
 )
 
 in_list() {
@@ -263,6 +264,13 @@ if [ -n "$sts" ] && [ "$sts" != "$PLACEHOLDER" ]; then
 	if [ -z "$sts_len" ] || [ "$sts_len" -lt 16 ]; then
 		errors+=("S3_STS_SIGNING_KEY is not padded standard base64 of at least 16 bytes -- SeaweedFS would start with STS silently off; generate one with \"openssl rand -base64 32\"")
 	fi
+fi
+
+# Prefect's basic auth splits the string on its first ':'. Without one, every
+# API call -- the UI's and prefect-flows' alike -- is refused with a bare 401.
+if [ -n "${PREFECT_AUTH_STRING:-}" ] && [ "$PREFECT_AUTH_STRING" != "$PLACEHOLDER" ] \
+	&& ! [[ "$PREFECT_AUTH_STRING" =~ ^[^:]+:.+$ ]]; then
+	errors+=("PREFECT_AUTH_STRING must be user:password (e.g. \"admin:\$(openssl rand -hex 16)\")")
 fi
 
 if [ -z "${LAN_IP:-}" ]; then

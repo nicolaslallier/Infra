@@ -56,7 +56,7 @@ echo "ci-deploy.sh: make $cmd against $INFRA_CHECKOUT (daemon host $INFRA_HOST)"
 # makes $PWD a path the daemon can also resolve, so portainer-stack.sh's
 # ${PORTAINER_INFRA_DIR:-$PWD} is already the right bind-mount source for
 # Portainer with nothing to translate -- the same identical-paths idiom
-# airflow/dags/infra_pr_validation.py uses for its workspace, and for the
+# prefect/flows/pr_validation.py uses for its workspace, and for the
 # same reason: a nested bind mount is resolved by the daemon, not by the
 # container that asks for it.
 #
@@ -90,7 +90,7 @@ exec docker run --rm \
 
     # Docker auto-creates a bind-mount source that does not exist, so a
     # wrong INFRA_CHECKOUT arrives as an empty directory rather than as an
-    # error -- the trap ${INFRA_DIR} and the airflow workspace mount are both
+    # error -- the trap ${INFRA_DIR} and the prefect-flows workspace mount are both
     # documented against. Name it here instead of letting make fail on a
     # missing target.
     [ -f docker-compose.yml ] || {

@@ -168,14 +168,14 @@ console afterwards exactly like `jarvis`'s.
 file after the first `make up` does not touch the live `ea` realm; repeat
 the change in the admin console too.
 
-## Infra: SeaweedFS admin gate and STS (realm `infra`)
+## Infra: SeaweedFS admin gate, STS and Prefect (realm `infra`)
 
 `keycloak/realm-import/infra-realm.json` — the home for infra tooling SSO.
 No client secrets and no `users` array in git; create humans in the console
 with a **verified email** (oauth2-proxy rejects an unverified one with a
 bare 500 on `/oauth2/callback`) and add them to a group.
 
-- Groups `s3-admin`, `s3-readwrite`, `s3-readonly`, emitted as the `groups`
+- Groups `s3-admin`, `s3-readwrite`, `s3-readonly`, `prefect`, emitted as the `groups`
   claim by a group-membership mapper with **Full group path off** — both
   oauth2-proxy (`OAUTH2_PROXY_ALLOWED_GROUPS`) and SeaweedFS's STS
   `roleMapping` match the bare name, and `/s3-admin` would match neither.
@@ -194,6 +194,12 @@ bare 500 on `/oauth2/callback`) and add them to a group.
   issuer and a matching `groups` claim (`s3-admin` for `S3AdminRole`,
   `s3-readwrite` or above for `S3WriteRole`, `s3-readonly` or above for
   `S3ReadOnlyRole`). A user in no group gets no credentials for any role.
+- `prefect`: confidential, PKCE S256, one exact redirect URI
+  `https://prefect.infra.famillelallier.net/oauth2/callback`, for
+  `oauth2-proxy-prefect` (`OAUTH2_PROXY_ALLOWED_GROUPS: prefect`). Its secret
+  goes into `PREFECT_OAUTH_CLIENT_SECRET`. The realm already exists on the
+  live cluster, so this client and the `prefect` group were created there
+  with `kcadm`, not by import.
 
 `--import-realm` only seeds a realm that does not exist yet — edit the live
 realm in the console too after changing this file.
