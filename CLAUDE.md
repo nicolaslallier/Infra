@@ -552,10 +552,10 @@ oauth2-proxy gates (Jarvis, Obsidian) and the EA token-verification realm are do
 
 ### Prefect: pipelines
 
-`prefect-flows` serves two deployments from `prefect/flows/`:
-`pr-validation/nightly` (03:00 America/Toronto) and
-`organize-inbox/every-15m`. They are live as soon as `serve()` registers
-them — nothing arrives paused.
+`prefect-flows` serves three deployments from `prefect/flows/`:
+`pr-validation/nightly` (03:00 America/Toronto),
+`organize-inbox/every-15m` and `sort-mail/every-15m`. They are live as soon
+as `serve()` registers them — nothing arrives paused.
 
 **Two gates, and neither replaces the other.** `prefect-flows` holds the
 Docker socket, and a deployment's `pull` steps can run shell commands — so
@@ -654,9 +654,58 @@ Save's `obsidian` identity.
 - `ORGANIZER_VAULT_PREFIX` is the remote prefix Remotely Save syncs under,
   if it was given one; empty means the bucket root.
 
+#### `sort-mail`
+
+Every 15 minutes it takes up to `SORTER_MAX_THREADS` (20) Gmail inbox
+threads, newest first; gives the latest non-draft message of each (a few
+headers, attachment names, the text body) to Ollama; and lets it pick one of
+the Gmail labels under `SORTER_LABEL_PREFIX` (`Tri/`) — a JSON-schema `enum`
+built per run — or `garder`. It talks to the Gmail REST API with `urllib`
+only, as the mailbox owner, over OAuth.
+
+- **Threads, not messages.** The inbox is shown by conversation, and a
+  thread stays visible while any of its messages carries `INBOX`, so labels
+  and archiving apply to the whole thread.
+- **One `threads.modify` per decision.** A sorted thread gets its label and
+  loses `INBOX` in the same call; there is no half-applied state. Nothing is
+  deleted: a wrong label is fixed from Gmail (`label:tri-<name>`).
+- **`Tri/_garder` is the only other state.** A kept thread gets that marker
+  and stays in the inbox; the inbox query excludes it, so a kept thread is
+  not re-sorted (not even on a new reply). Remove the marker by hand to have
+  it sorted again. Labels whose name after the prefix starts with `_` never
+  enter the enum.
+- **The label name is the category's only description.** Gmail has no label
+  descriptions: `Tri/Factures et reçus` sorts better than `Tri/Fin`.
+- **The credentials are the Secret block `gmail-sorter-oauth`** — JSON
+  `{client_id, client_secret, refresh_token}` — not `.env`, for the reason
+  `infra-ci-github-token` is not: this one reads all of the owner's mail.
+  Scope `gmail.modify`: read and relabel, no permanent delete.
+- **Subjects land in the logs.** Every decision is printed as
+  `"<subject>" -> <label> (<reason>)`, in Prefect's run logs and in Loki.
+- **Errors:** an unreachable Ollama or Gmail, a 429 or a 5xx is retried; a
+  bad model reply or another 4xx fails that thread only, which stays in the
+  inbox for the next run. A refused refresh token fails the run with
+  `TokenRevoked`, naming the script below.
+- `dry_run=true` (flow parameter, from the UI) logs the decisions and changes
+  nothing.
+
+Setup, once:
+
+1. Google Cloud Console, in the Workspace organisation: a project, the Gmail
+   API enabled, an OAuth consent screen of type **Internal** (an External app
+   in Testing mode has its refresh tokens revoked after 7 days, and the flow
+   then fails every run), and an OAuth client of type **Desktop app**;
+   download its JSON.
+2. `python3 scripts/gmail-oauth.py <client_secret.json>` on the Mac (stdlib;
+   it opens the browser) and paste the JSON line it prints into Prefect UI →
+   **Blocks → Secret** `gmail-sorter-oauth`. Delete the downloaded client
+   JSON afterwards.
+3. Create the `Tri/...` labels in Gmail. The flow creates `Tri/_garder`.
+
 The flows have plain-assert tests, the only tests in this repo:
 `uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`
-and the same for `prefect/flows/test_serve.py`.
+and the same for `prefect/flows/test_serve.py` and
+`prefect/flows/test_sort_mail.py`.
 
 ### Windows machines (`windows_exporter`)
 
