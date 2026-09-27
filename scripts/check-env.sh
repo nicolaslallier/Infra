@@ -34,7 +34,7 @@
 # Diagnostics go to stderr. Exit 0 = usable, 1 = do not deploy.
 set -uo pipefail
 
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+cd "$(dirname "${BASH_SOURCE[0]}")/.." || exit 1
 
 ENV_FILE=.env
 EXAMPLE_FILE=.env.example
