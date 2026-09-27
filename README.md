@@ -140,8 +140,8 @@ S3 (SeaweedFS): API `https://s3.infra.famillelallier.net` (apps on
 `infra-net`: `http://s3:8333`), admin UI
 `https://s3-admin.infra.famillelallier.net` (Keycloak realm `infra`, group
 `s3-admin`)
-Airflow: `https://airflow.infra.famillelallier.net` (admin / `AIRFLOW_ADMIN_PASSWORD`;
-DAGs go in `airflow/dags/`)
+Prefect: `https://prefect.infra.famillelallier.net` (Keycloak realm `infra`,
+group `prefect`, then `PREFECT_AUTH_STRING`; flows go in `prefect/flows/`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
 Portainer: `https://portainer.infra.famillelallier.net` (admin account and
@@ -828,9 +828,10 @@ move off Colima; see the note on its mounts in `docker-compose.yml`.
 
 ## CI: nightly PR validation
 
-`airflow/dags/infra_pr_validation.py` runs at 03:00, walks the open non-draft
-PRs on GitHub, and for each one clones the head into `/tmp/infra-ci`, renders
-a throwaway `.env` into it (`scripts/ci-fake-env.sh`), and runs these checks:
+The Prefect flow `pr-validation` (`prefect/flows/pr_validation.py`) runs at
+03:00, walks the open non-draft PRs on GitHub, and for each one clones the
+head into `/tmp/infra-ci`, renders a throwaway `.env` into it
+(`scripts/ci-fake-env.sh`), and runs these checks:
 
 | check | what it catches |
 |---|---|
@@ -844,32 +845,22 @@ a throwaway `.env` into it (`scripts/ci-fake-env.sh`), and runs these checks:
 
 It posts one comment per PR and updates it on the next run rather than
 stacking a new one. A failing check fails that PR's mapped task, so the
-Airflow UI shows which PR is red without opening GitHub.
+Prefect UI shows which PR is red without opening GitHub.
 
-Setup is two Airflow Variables and one unpause:
-
-```bash
-make shell s=airflow-scheduler
-airflow variables set infra_ci_github_token <PAT with pull_requests:write>
-airflow variables set infra_ci_repo nicolaslallier/Infra   # optional
-```
-
-then unpause `infra_pr_validation` at
-`https://airflow.infra.famillelallier.net` — DAGs arrive paused.
-
-The token is an Airflow Variable rather than a `.env` key for the same reason
-`PORTAINER_API_KEY` lives in `.portainer.env`: `.env` goes to containers
-wholesale and to Portainer as the stack env, and this token can write to
-GitHub.
+Setup is one Secret block: in `https://prefect.infra.famillelallier.net`,
+**Blocks → Secret**, name `infra-ci-github-token`, value a PAT with
+`pull_requests:write`. It is a Secret block rather than a `.env` key for the
+same reason `PORTAINER_API_KEY` lives in `.portainer.env`: `.env` goes to
+containers wholesale and to Portainer as the stack env, and this token can
+write to GitHub.
 
 Two caveats worth knowing before relying on it. The checks run as *sibling*
-containers through the Docker socket, which is mounted on `airflow-scheduler`
-only — that socket is root on the daemon, and the Airflow UI is behind
-Airflow's own login and nothing else. And a 03:00 schedule does not fire on a
+containers through the Docker socket, which is mounted on `prefect-flows`
+only — that socket is root on the daemon, which is why the Prefect API
+requires `PREFECT_AUTH_STRING`. And a 03:00 schedule does not fire on a
 sleeping Mac: either `sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00`, or
-move the schedule to an hour the machine is awake. `CLAUDE.md` ("Airflow:
-nightly PR validation") has the rest, including why the workspace is mounted
-at the same path on both sides.
+move the schedule. `CLAUDE.md` ("Prefect: pipelines") has the rest, including
+the `organize-inbox` flow.
 
 ## CD: deploying on a push to main
 

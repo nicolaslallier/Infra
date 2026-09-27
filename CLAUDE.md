@@ -166,24 +166,22 @@ never orphans another app that's still attached to it):
   FUSE/s3fs mount of the bucket as `/config` is not an option (it also
   needs `SYS_ADMIN`). The bucket is the durable copy and the one other
   devices sync from.
-- **`airflow-*`** — `apache/airflow:3.3.1`, at
-  `airflow.infra.famillelallier.net` (NGINX → `airflow-apiserver:8080`).
-  Publishes no host port. `LocalExecutor`, so tasks run inside
-  `airflow-scheduler` and there is no Celery/Redis; `airflow-dag-processor`
-  is a required component in Airflow 3, not optional. Its metadata DB is the
-  provisioned Postgres database/role `airflow` — on an existing cluster run
-  `make provision-app app=airflow` before the first deploy, or `airflow-init`
-  fails and the rest never start. `airflow-init` is a one-shot (migrate +
-  create admin) that re-runs harmlessly on every `make up`. All components
-  must share `AIRFLOW_JWT_SECRET` (execution-API tokens) and
-  `AIRFLOW_FERNET_KEY` (connection encryption; changing it orphans stored
-  secrets), hence their `:?` guards. DAGs are bind-mounted read-only from
-  `airflow/dags/` — they must be committed, since the drift guard refuses
-  untracked files. No triggerer: add an `airflow-triggerer` service
-  (`command: triggerer`) the day a DAG uses deferrable operators.
-  `airflow-scheduler` alone carries the Docker socket and the
-  `/tmp/infra-ci` workspace — see "Airflow: nightly PR validation" below for
-  what they are for and what the socket costs.
+- **`prefect-*`** — `prefecthq/prefect:3.8.7-python3.12`, at
+  `prefect.infra.famillelallier.net` (NGINX → `prefect-server:4200`, gated
+  by a **fourth** oauth2-proxy, `oauth2-proxy-prefect`: realm `infra`, client
+  and group `prefect`). Publishes no host port. Two containers:
+  `prefect-server` (API + UI; metadata in the provisioned Postgres
+  database/role `prefect` — on an existing cluster run
+  `make provision-app app=prefect` before the first deploy) and
+  `prefect-flows`, which runs `prefect/flows/serve.py`: `serve()` registers
+  every deployment with its schedule and executes runs as subprocesses, so
+  there is no work pool, no worker and no deploy step. Flows are
+  bind-mounted read-only from `prefect/flows/` and must be committed (the
+  drift guard refuses untracked files); a changed flow takes effect on the
+  next `make up`, which recreates `prefect-flows` anyway. `prefect-flows`
+  alone carries the Docker socket and the `/tmp/infra-ci` workspace — see
+  "Prefect: pipelines" below for what they are for, and why
+  `PREFECT_AUTH_STRING` is not optional.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
@@ -334,7 +332,7 @@ same thing by hand, with a `pull_images` input that switches `make up` for
 **A GitHub-hosted runner cannot deploy this stack**, which is the constraint
 the whole design follows from. Portainer publishes its API on
 `${LAN_IP}:9443` and is otherwise only on `infra-net`, and there is no public
-ingress to either — the same reason `airflow/dags/` exists rather than a
+ingress to either — the same reason `prefect/flows/pr_validation.py` exists rather than a
 GitHub Actions job. The runner has to be on this LAN.
 
 Five things here are load-bearing.
@@ -457,7 +455,7 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
 - Port 80/443 → NGINX's `http{}` block (`nginx/conf.d/*.conf`), reverse
   proxying to `pgadmin:80`, `keycloak:8080`, `grafana:3000`, `s3:8333`,
-  `s3-admin:23646` (behind `oauth2-proxy-infra`), `rabbitmq:15672`,
+  `s3-admin:23646` (behind `oauth2-proxy-infra`), `prefect-server:4200` (behind `oauth2-proxy-prefect`), `rabbitmq:15672`,
   `openbao:8200`, `portainer:9443` (https
   upstream), and, per-app, to whatever apps register.
 - Port 5432 → NGINX's `stream{}` block (`nginx/stream.d/postgres.conf`),
@@ -482,7 +480,7 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`rabbitmq`, `neo4j`, `obsidian`, `airflow-*`, `openbao`, `grafana`, or other
+`oauth2-proxy-prefect`, `rabbitmq`, `neo4j`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
 monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
@@ -552,78 +550,106 @@ Three things to know before changing any of it:
 
 oauth2-proxy gates (Jarvis, Obsidian) and the EA token-verification realm are documented in `keycloak/CLAUDE.md`.
 
-### Airflow: nightly PR validation
+### Prefect: pipelines
 
-`airflow/dags/infra_pr_validation.py` is this repo's first DAG. At 03:00 it
-lists the open, non-draft PRs on GitHub, and for each one clones the head,
-renders a throwaway `.env` into it, runs the file-level checks, and posts (or
-updates) a single comment on the PR. A failing check fails the mapped task,
-so the UI shows which PR is red without opening GitHub.
+`prefect-flows` serves two deployments from `prefect/flows/`:
+`pr-validation/nightly` (03:00 America/Toronto) and
+`organize-inbox/every-15m`. They are live as soon as `serve()` registers
+them — nothing arrives paused.
+
+**Two gates, and neither replaces the other.** `prefect-flows` holds the
+Docker socket, and a deployment's `pull` steps can run shell commands — so
+whoever can write to Prefect's API is root on the daemon. Prefect OSS's API
+is open by default, and it is reachable at `prefect-server:4200` from every
+container on `infra-net` (LibreChat, Jarvis, EA, …), a path NGINX is not on.
+`PREFECT_AUTH_STRING` (`PREFECT_SERVER_API_AUTH_STRING` on the server,
+`PREFECT_API_AUTH_STRING` on `prefect-flows`) closes it and has a `:?`
+guard; `check-env` also asserts its `user:password` shape, since without a
+colon every call gets a bare 401. `oauth2-proxy-prefect` gates the browser
+vhost on top: SSO first, then Prefect's own password prompt.
+
+**Models are called directly — the convention for every pipeline.** Flows
+`POST` Ollama's `/api/chat` (`OLLAMA_URL`, default
+`http://192.168.2.40:11434`, the instance LibreChat uses) with a JSON-schema
+`format`, and validate the reply before acting on it. Not LibreChat's Agents
+API, not an MCP agent loop: the flow owns the control flow, the model owns
+only judgement.
+
+Flow settings in `prefect-flows`' environment are `ORGANIZER_*` / `OLLAMA_*`,
+never `PREFECT_*` — Prefect reads that namespace as its own settings.
+
+#### `pr-validation`
+
+At 03:00 it lists the open, non-draft PRs on GitHub, and for each one clones
+the head, renders a throwaway `.env` into it, runs the file-level checks, and
+posts (or updates) a single comment on the PR. A failing check fails that
+PR's mapped task, so the UI shows which PR is red without opening GitHub.
 
 Why here and not in GitHub Actions: a GitHub-hosted runner cannot reach
-`infra-net`, this daemon, or anything on the LAN. The checks below do not
-need any of that — but the smoke test this DAG is scaffolding for (actually
-bringing the stack up and exercising it) can only ever run on this machine,
-and that is what the workspace and socket plumbing is for.
+`infra-net`, this daemon, or anything on the LAN. The checks do not need any
+of that — but the smoke test this flow is scaffolding for can only ever run
+on this machine, and that is what the workspace and socket plumbing is for.
 
 Four things here are load-bearing.
 
 - **`WORKSPACE_ROOT` is mounted at the same path inside and outside the
-  container** (`/tmp/infra-ci:/tmp/infra-ci` on `airflow-scheduler`). The
-  checks run as *sibling* containers, so their `-v <path>:/repo` is resolved
-  by the **daemon**, against the host filesystem — not against the
-  scheduler's. A clone written to an ordinary temp dir inside the scheduler
-  would be invisible to them, and Docker would auto-create an empty directory
-  in its place: the same trap `${INFRA_DIR:-.}` exists for (see
-  "Portainer-managed stack"), with the same silent symptom. Identical paths on
-  both sides is what makes the nested bind mount agree with no translation.
-  The cost is that this DAG assumes Airflow and the daemon share a
-  filesystem — it does not work against a remote `DOCKER_HOST`.
-- **Only `airflow-scheduler` gets the Docker socket.** LocalExecutor runs
-  every task inside it, so the api-server and the dag-processor have no reason
-  to hold it. Understand what it buys: the socket is root on the daemon, so
-  any DAG can do anything to any container on this host, and
-  `airflow.infra.famillelallier.net` sits behind Airflow's own FAB login and
-  nothing else — no oauth2-proxy. That is a weaker gate than Portainer's
-  equivalent power has, and Portainer's is at least not proxied. If the DAG
-  goes away, remove the mount with it.
+  container** (`/tmp/infra-ci:/tmp/infra-ci` on `prefect-flows`). The checks
+  run as *sibling* containers, so their `-v <path>:/repo` is resolved by the
+  **daemon**, against the host filesystem. A clone written anywhere else would
+  be invisible to them, and Docker would auto-create an empty directory in its
+  place: the same trap `${INFRA_DIR:-.}` exists for. The cost is that this
+  flow does not work against a remote `DOCKER_HOST`.
+- **Only `prefect-flows` gets the Docker socket.** `prefect-server` has no
+  reason to hold it. If the flow goes away, remove the mount with it.
 - **Each check runs in the image the real service uses**, mounted the way the
-  real service mounts the repo — `nginx -t` inside `nginx:alpine-otel` with
-  `nginx/` and `certs/` at their deployed paths, `promtool check config` with
-  `monitoring/prometheus/` at `/etc/prometheus` (it resolves the `file_sd`
-  target files by their in-container absolute path, so mounting the repo at
-  `/repo` would make it report them missing). A generic linter image would
-  validate a configuration nothing deploys.
-- **`scripts/ci-fake-env.sh` comes from the PR's own checkout**, not from
-  `main`, so a PR that breaks it fails on its own change. It renders a
-  throwaway `.env`, a 32-byte `openbao/seal.key` and a self-signed `certs/`
-  pair into a clone that has none of them (all three are gitignored). Values
-  are shaped the way `check-env.sh` demands rather than merely non-empty —
-  url-safe cookie keys, a padded Fernet key, a url-safe `AIRFLOW_DB_PASSWORD`,
-  `LAN_IP=127.0.0.1` — which is why running the repo's own preflight against
-  it is a meaningful check and not a tautology. It refuses to overwrite an
-  existing `.env` unless `CI_FAKE_ENV_FORCE=1`: in the real checkout that file
-  is the deployed secret set, gitignored, with no copy to restore from.
+  real service mounts the repo — `nginx -t` inside `nginx:alpine-otel`,
+  `promtool check config` with `monitoring/prometheus/` at `/etc/prometheus`.
+- **`scripts/ci-fake-env.sh` comes from the PR's own checkout**, so a PR that
+  breaks it fails on its own change. It renders values shaped the way
+  `check-env.sh` demands, which is why running the preflight against it is a
+  meaningful check. It refuses to overwrite an existing `.env` unless
+  `CI_FAKE_ENV_FORCE=1`.
 
-Setup, once:
+Setup, once: in the Prefect UI, **Blocks → Secret**, name
+`infra-ci-github-token`, value a PAT with `pull_requests:write`. The repo is
+the flow parameter `repo` (default `nicolaslallier/Infra`). The PAT is a
+Secret block, not a `.env` key, for the reason `PORTAINER_API_KEY` lives in
+`.portainer.env`: `.env` is handed to containers wholesale and shipped to
+Portainer, and this token can write to GitHub. The obvious next move is
+`infra/apps/prefect` in OpenBao — it would be the vault's first real
+consumer. A nightly schedule on a Mac that sleeps does not fire — either
+`sudo pmset repeat wakeorpoweron MTWRFSU 02:55:00`, or move the schedule.
 
-```bash
-# in the airflow-scheduler container, or through the UI (Admin -> Variables)
-airflow variables set infra_ci_github_token <a PAT with pull_requests:write>
-airflow variables set infra_ci_repo nicolaslallier/Infra   # optional
-```
+#### `organize-inbox`
 
-The token is an Airflow Variable, not a `.env` key, for the reason
-`PORTAINER_API_KEY` lives in `.portainer.env`: `.env` is handed to containers
-wholesale and shipped to Portainer as the stack env, and this one can write to
-GitHub. Airflow encrypts Variables with `AIRFLOW__CORE__FERNET_KEY`. The
-obvious next move is `infra/apps/airflow` in OpenBao — it would be the vault's
-first real consumer (see "Secrets (OpenBao)").
+Every 15 minutes it takes the notes under `Inbox/` in the `obsidian` bucket
+that nobody has touched for `ORGANIZER_QUIET_MINUTES` (10), at most
+`ORGANIZER_MAX_NOTES` (20), oldest first; asks Ollama for tags, a summary and
+one of the vault's existing top-level folders (a JSON-schema `enum` built per
+run, so it cannot invent one); merges `tags`/`summary`/`organized_at` into
+the frontmatter; and moves the note there. It talks to S3 only — never to the
+Obsidian app — as identity `prefect` (`make s3-provision app=prefect
+bucket=obsidian`, secret `PREFECT_S3_SECRET_KEY`), separate from Remotely
+Save's `obsidian` identity.
 
-The DAG arrives **paused** (`AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION` is
-`"true"`); unpause it once in the UI. And a nightly schedule on a Mac that
-sleeps does not fire — either `sudo pmset repeat wakeorpoweron MTWRFSU
-02:55:00`, or move the schedule to an hour the machine is awake.
+- **The move is the only state.** A note that has left `Inbox/` is never
+  seen again; there is no table of processed notes.
+- **It never overwrites.** A destination that exists fails the note and
+  leaves both objects alone. The inbox object is deleted only after the
+  destination `PUT` succeeded; if that `DELETE` fails, the next run fails
+  loudly on "already exists" instead of losing anything. The bucket is
+  versioned, so every write is undoable.
+- **The quiet window is the Remotely Save race mitigation**, not a lock: a
+  conflict copy needs both sides to edit one object between two syncs. Raise
+  `ORGANIZER_QUIET_MINUTES` if one ever appears.
+- **Notes are processed one at a time** — parallel calls to one 27B model
+  only queue inside Ollama until they hit the request timeout.
+- `ORGANIZER_VAULT_PREFIX` is the remote prefix Remotely Save syncs under,
+  if it was given one; empty means the bucket root.
+
+Its pure helpers and write path have a plain-assert test, the one test in
+this repo:
+`uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`.
 
 ### Windows machines (`windows_exporter`)
 

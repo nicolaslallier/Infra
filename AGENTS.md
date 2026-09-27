@@ -79,7 +79,7 @@ startup caveats that the update script deliberately does NOT handle.
   `postgres:5432`. AMQP is the same pattern at `127.0.0.1:5672` →
   `rabbitmq:5672`, and Bolt at `127.0.0.1:7687` → `neo4j:7687`. `make psql` opens a superuser shell inside the container.
   Do not add a `ports:` entry to `postgres`/`pgadmin`/`keycloak`/`grafana`
-  /`s3`/`s3-admin`/`rabbitmq`/`neo4j`/`airflow-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  /`s3`/`s3-admin`/`rabbitmq`/`neo4j`/`prefect-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
 
 - **The vault needs two files this snapshot may not have.** `openbao` reads
   `openbao/seal.key` as a bind-mounted file, and Docker turns a *missing*
