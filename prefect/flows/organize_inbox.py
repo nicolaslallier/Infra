@@ -31,7 +31,7 @@ from typing import Any
 import yaml
 from prefect import flow, task
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://192.168.2.40:11434")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama-proxy:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.8:27b-mlx")
 BUCKET = os.environ.get("ORGANIZER_S3_BUCKET", "obsidian")
 # Remotely Save can be set to sync under a remote prefix; empty means the

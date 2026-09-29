@@ -54,7 +54,8 @@ startup caveats that the update script deliberately does NOT handle.
 
 - **Bring the stack up / down here with plain compose:** on the Mac `make up`
   deploys through Portainer's API, which this VM doesn't run — use
-  `docker compose up -d` / `docker compose down` instead (`make ps`,
+  `make app-images && docker compose up -d` / `docker compose down`
+  instead — `ollama-proxy` is built, never pulled (`make ps`,
   `make logs s=<service>` still work). First bringing the stack up
   provisions the per-app databases listed in `APP_DATABASES` (`jarvis`,
   `nurse`, `keycloak`, `grafana`). To add a DB to the already-running

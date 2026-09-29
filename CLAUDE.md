@@ -182,6 +182,24 @@ never orphans another app that's still attached to it):
   alone carries the Docker socket and the `/tmp/infra-ci` workspace — see
   "Prefect: pipelines" below for what they are for, and why
   `PREFECT_AUTH_STRING` is not optional.
+- **`ollama-proxy`** — the only way this stack reaches Ollama, which runs
+  on a Mac outside it (`OLLAMA_UPSTREAM_URL`, default
+  `http://192.168.2.35:11434`). Ollama has no `/metrics` (upstream PRs
+  #16998/#18508 still open), so every client on `infra-net` — LibreChat,
+  `prefect-flows` — calls `http://ollama-proxy:11434` instead, and the proxy
+  counts tokens, latency and loaded models per model (job `ollama`,
+  dashboard `ollama.json`, `uid: ollama`). Traffic that goes to Ollama
+  directly is simply not counted. It is
+  `datahub-local/ollama-metrics`, a fork, because upstream
+  (`NorskHelsenett/ollama-metrics`) counts only `/api/*` and LibreChat speaks
+  `/v1`. The fork publishes no image and Portainer's Git stacks do not build
+  reliably, so `make app-images` builds it from a pinned commit on the
+  daemon before `up`/`pull`, and compose has `pull_policy: never`: bump
+  `OLLAMA_PROXY_REF` in the Makefile and the tag in `docker-compose.yml`
+  together. Its two response rewrites (UTF-8 repair, reasoning→content) are
+  switched off so clients see exactly what Ollama sent. Its `time_per_token`
+  buckets start at 0.01 s, above what the Mac decodes at, which is why the
+  dashboard charts averages (`rate(_sum)/rate(_count)`) and not quantiles.
 - **`dns`** — `technitium/dns-server`. A top-level infra service, not a
   backend app — publishes its own ports (53 and 5380). See "Single-ingress
   rule" and "DNS (LAN resolver)" below for why that's not a violation of
@@ -480,7 +498,7 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `rabbitmq`, `neo4j`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
+`oauth2-proxy-prefect`, `ollama-proxy`, `rabbitmq`, `neo4j`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
 monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
@@ -570,7 +588,7 @@ vhost on top: SSO first, then Prefect's own password prompt.
 
 **Models are called directly — the convention for every pipeline.** Flows
 `POST` Ollama's `/api/chat` (`OLLAMA_URL`, default
-`http://192.168.2.40:11434`, the instance LibreChat uses) with a JSON-schema
+`http://ollama-proxy:11434`, the same Ollama LibreChat uses) with a JSON-schema
 `format`, and validate the reply before acting on it. Not LibreChat's Agents
 API, not an MCP agent loop: the flow owns the control flow, the model owns
 only judgement.
