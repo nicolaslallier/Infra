@@ -192,9 +192,11 @@ never orphans another app that's still attached to it):
   directly is simply not counted. LAN machines that are not containers
   (Claude Code on another Mac) use `https://ollama.infra.famillelallier.net`
   (`nginx/conf.d/ollama.conf`, ungated like Ollama's own `:11434`). It is
-  `datahub-local/ollama-metrics`, a fork, because upstream
-  (`NorskHelsenett/ollama-metrics`) counts only `/api/*` and LibreChat speaks
-  `/v1`. The fork publishes no image and Portainer's Git stacks do not build
+  `nicolaslallier/ollama-metrics`, our fork of `datahub-local/ollama-metrics`
+  (itself a fork of `NorskHelsenett/ollama-metrics`, which counts only
+  `/api/*`): datahub-local added `/v1/chat/completions`, LibreChat's dialect,
+  and ours adds `/v1/messages`, the Anthropic dialect Claude Code speaks.
+  Changes to the proxy go there, as a PR, then a repin here. It publishes no image and Portainer's Git stacks do not build
   reliably, so `make app-images` builds it from a pinned commit on the
   daemon before `up`/`pull`, and compose has `pull_policy: never`: bump
   `OLLAMA_PROXY_REF` in the Makefile and the tag in `docker-compose.yml`

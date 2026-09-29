@@ -60,17 +60,17 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist
 			&& echo "created volume darkangel-web"; }
 
 # Images compose references but cannot pull. ollama-proxy is built from a
-# pinned commit of a fork that publishes no image (the one that counts /v1,
-# LibreChat's dialect), and here rather than via `build:` because Portainer's
+# pinned commit of nicolaslallier/ollama-metrics, which publishes no image,
+# and here rather than via `build:` because Portainer's
 # Git stacks do not reliably build. Change the commit here and the tag in
 # docker-compose.yml together; a tag already on the daemon is not rebuilt.
-OLLAMA_PROXY_REF := 95a02da49236e0e60ae0cc3d4824584360f63ed5
+OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
 app-images: ## Build the images the stack references but cannot pull
 	@tag=infra-ollama-proxy:$$(echo $(OLLAMA_PROXY_REF) | cut -c1-7); \
 	docker image inspect $$tag >/dev/null 2>&1 \
 		&& echo "image $$tag already exists" \
 		|| docker build -q -t $$tag \
-			https://github.com/datahub-local/ollama-metrics.git#$(OLLAMA_PROXY_REF)
+			https://github.com/nicolaslallier/ollama-metrics.git#$(OLLAMA_PROXY_REF)
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
