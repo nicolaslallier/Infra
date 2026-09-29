@@ -189,7 +189,15 @@ never orphans another app that's still attached to it):
   `prefect-flows` — calls `http://ollama-proxy:11434` instead, and the proxy
   counts tokens, latency and loaded models per model (job `ollama`,
   dashboard `ollama.json`, `uid: ollama`). Traffic that goes to Ollama
-  directly is simply not counted. LAN machines that are not containers
+  directly is simply not counted. Ollama runs on three machines, and a
+  proxy watches exactly one, so there are three: `ollama-proxy` (mac-infra,
+  `.35` — the default every client uses), `ollama-proxy-mac-02` (`.41`) and
+  `ollama-proxy-laptop` (`.10`), one YAML anchor. Their scrape targets
+  carry a `host` label spelled like that machine's `instance` in the
+  `macos`/`windows` jobs, which is what lets the dashboard's one **Host**
+  picker filter the Ollama panels and the machine/GPU panels together.
+  Loaded models and their memory are polled, so they show for all three;
+  tokens and latency only for requests sent through that host's proxy. LAN machines that are not containers
   (Claude Code on another Mac) use `https://ollama.infra.famillelallier.net`
   (`nginx/conf.d/ollama.conf`, ungated like Ollama's own `:11434`). It is
   `nicolaslallier/ollama-metrics`, our fork of `datahub-local/ollama-metrics`
@@ -502,7 +510,7 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `ollama-proxy`, `rabbitmq`, `neo4j`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
+`oauth2-proxy-prefect`, `ollama-proxy*`, `rabbitmq`, `neo4j`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
 monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a

@@ -59,11 +59,17 @@ scrape_configs:
     static_configs:
       - targets: ["openbao:8200"]
 
-  # Ollama, as counted by the ollama-proxy every infra-net client goes
-  # through; Ollama itself has no /metrics. The Mac it runs on is job macos.
+  # Ollama, as counted by one ollama-proxy per machine running it; Ollama
+  # itself has no /metrics. `host` matches the machine's `instance` in the
+  # macos/windows jobs, so the dashboard's one Host picker filters both.
   - job_name: ollama
     static_configs:
       - targets: ["ollama-proxy:11434"]
+        labels: {host: mac-infra}
+      - targets: ["ollama-proxy-mac-02:11434"]
+        labels: {host: mac-02}
+      - targets: ["ollama-proxy-laptop:11434"]
+        labels: {host: laptop-dopbpc0j}
 
   # Windows machines, each running windows_exporter on :9182. The only job
   # whose targets are not containers on infra-net, so they live in a file

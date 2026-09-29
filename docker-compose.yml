@@ -575,11 +575,15 @@ services:
   # this proxy, which relays each request as-is and counts tokens, latency
   # and loaded models per model -- traffic that bypasses it is not counted.
   # The image is built by `make app-images`, not pulled (see the Makefile).
-  ollama-proxy:
+  # A proxy watches exactly one Ollama, so each machine running one gets its
+  # own; Prometheus tells them apart by a `host` label (job ollama) named like
+  # that machine's `instance` in the macos/windows jobs. ollama-proxy itself
+  # is mac-infra, the default every client uses.
+  ollama-proxy: &ollama-proxy
     image: infra-ollama-proxy:2762bfb
     pull_policy: never
     restart: unless-stopped
-    environment:
+    environment: &ollama-proxy-env
       OLLAMA_HOST: ${OLLAMA_UPSTREAM_URL:-http://192.168.2.35:11434}
       # Same port as Ollama, so a client switches by changing the host only.
       PORT: "11434"
@@ -589,6 +593,20 @@ services:
       OLLAMA_PROMOTE_REASONING_TO_CONTENT: "false"
     networks:
       - infra-net
+
+  ollama-proxy-mac-02:
+    <<: *ollama-proxy
+    environment:
+      <<: *ollama-proxy-env
+      OLLAMA_HOST: http://192.168.2.41:11434
+
+  # The Windows laptop this stack runs on. By LAN address, which it answers
+  # on; host.docker.internal would also work but only while that stays true.
+  ollama-proxy-laptop:
+    <<: *ollama-proxy
+    environment:
+      <<: *ollama-proxy-env
+      OLLAMA_HOST: http://192.168.2.10:11434
 
   # --- Object storage: SeaweedFS (S3 via NGINX; no host ports) ---
 
