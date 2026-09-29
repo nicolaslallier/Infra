@@ -189,7 +189,9 @@ never orphans another app that's still attached to it):
   `prefect-flows` — calls `http://ollama-proxy:11434` instead, and the proxy
   counts tokens, latency and loaded models per model (job `ollama`,
   dashboard `ollama.json`, `uid: ollama`). Traffic that goes to Ollama
-  directly is simply not counted. It is
+  directly is simply not counted. LAN machines that are not containers
+  (Claude Code on another Mac) use `https://ollama.infra.famillelallier.net`
+  (`nginx/conf.d/ollama.conf`, ungated like Ollama's own `:11434`). It is
   `datahub-local/ollama-metrics`, a fork, because upstream
   (`NorskHelsenett/ollama-metrics`) counts only `/api/*` and LibreChat speaks
   `/v1`. The fork publishes no image and Portainer's Git stacks do not build
