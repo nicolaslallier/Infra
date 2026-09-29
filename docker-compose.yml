@@ -576,7 +576,7 @@ services:
   # and loaded models per model -- traffic that bypasses it is not counted.
   # The image is built by `make app-images`, not pulled (see the Makefile).
   ollama-proxy:
-    image: infra-ollama-proxy:95a02da
+    image: infra-ollama-proxy:2762bfb
     pull_policy: never
     restart: unless-stopped
     environment:
