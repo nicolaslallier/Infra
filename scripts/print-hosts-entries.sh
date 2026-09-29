@@ -19,6 +19,7 @@ OBSIDIAN_HOST="obsidian.infra.famillelallier.net"
 PREFECT_HOST="prefect.infra.famillelallier.net"
 VAULT_HOST="vault.infra.famillelallier.net"
 HEAVEN_HOST="heaven.infra.famillelallier.net"
+OLLAMA_HOST="ollama.infra.famillelallier.net"
 
 # The stack's host (LAN_IP from .env), not this machine: the stack runs on
 # the Windows laptop, and loopback only reaches it when run from there.
@@ -44,6 +45,7 @@ $IP $OBSIDIAN_HOST
 $IP $PREFECT_HOST
 $IP $VAULT_HOST
 $IP $HEAVEN_HOST
+$IP $OLLAMA_HOST
 
 One way to append them:
 
@@ -63,5 +65,6 @@ $IP $OBSIDIAN_HOST
 $IP $PREFECT_HOST
 $IP $VAULT_HOST
 $IP $HEAVEN_HOST
+$IP $OLLAMA_HOST
 HOSTS
 EOF
