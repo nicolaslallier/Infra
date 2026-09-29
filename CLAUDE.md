@@ -190,18 +190,21 @@ never orphans another app that's still attached to it):
   counts tokens, latency and loaded models per model (job `ollama`,
   dashboard `ollama.json`, `uid: ollama`). Traffic that goes to Ollama
   directly is simply not counted. Ollama runs on three machines, and a
-  proxy watches exactly one, so there are three: `ollama-proxy` (mac-infra,
-  `.35` — the default every client uses), `ollama-proxy-mac-02` (`.41`) and
-  `ollama-proxy-laptop` (`.10`), one YAML anchor. Their scrape targets
+  proxy watches exactly one, so there are three: on the two Macs,
+  mac-infra (`.35`) and mac-02 (`.41`), ollama-metrics runs on the Mac
+  itself (below); the laptop (`.10`) has the `ollama-proxy-laptop`
+  container, which shares `ollama-proxy`'s definition by YAML anchor. Their scrape targets
   carry a `host` label spelled like that machine's `instance` in the
   `macos`/`windows` jobs, which is what lets the dashboard's one **Host**
   picker filter the Ollama panels and the machine/GPU panels together.
   Loaded models and their memory are polled, so they show for all three;
   tokens and latency only for requests sent through that host's proxy.
-  mac-infra is the exception: its LAN clients (Claude Code on mac-02) call
-  `192.168.2.35:11434` directly, so `scripts/install-macos-ollama-proxy.sh`
-  runs ollama-metrics *on that Mac*, on `:11434`, with Ollama moved to
-  `127.0.0.1:11435`. Prometheus scrapes that one for `host=mac-infra`, and
+  The Macs are the exception: their clients (Claude Code on mac-02, `ollama
+  run` on the Mac itself) call `<mac>:11434` directly, so
+  `scripts/install-macos-ollama-proxy.sh` runs ollama-metrics *on each
+  Mac*, on `:11434`, with Ollama moved to `127.0.0.1:11435` and the app's
+  "Expose to network" setting off. Prometheus scrapes `<mac>:11434` for
+  `host=mac-infra` / `host=mac-02`, and on mac-infra
   the `ollama-proxy` container becomes an unscraped relay to it (scraping
   both would count container traffic twice). LAN machines that are not containers
   (Claude Code on another Mac) use `https://ollama.infra.famillelallier.net`
