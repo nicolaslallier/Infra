@@ -64,7 +64,12 @@ scrape_configs:
   # macos/windows jobs, so the dashboard's one Host picker filters both.
   - job_name: ollama
     static_configs:
-      - targets: ["ollama-proxy:11434"]
+      # mac-infra runs ollama-metrics itself, in front of its own Ollama
+      # (scripts/install-macos-ollama-proxy.sh), so LAN clients that call
+      # 192.168.2.35:11434 directly are counted too. The ollama-proxy
+      # container still relays to it but is not scraped: that would count
+      # container traffic twice.
+      - targets: ["192.168.2.35:11434"]
         labels: {host: mac-infra}
       - targets: ["ollama-proxy-mac-02:11434"]
         labels: {host: mac-02}

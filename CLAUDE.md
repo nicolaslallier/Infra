@@ -197,7 +197,13 @@ never orphans another app that's still attached to it):
   `macos`/`windows` jobs, which is what lets the dashboard's one **Host**
   picker filter the Ollama panels and the machine/GPU panels together.
   Loaded models and their memory are polled, so they show for all three;
-  tokens and latency only for requests sent through that host's proxy. LAN machines that are not containers
+  tokens and latency only for requests sent through that host's proxy.
+  mac-infra is the exception: its LAN clients (Claude Code on mac-02) call
+  `192.168.2.35:11434` directly, so `scripts/install-macos-ollama-proxy.sh`
+  runs ollama-metrics *on that Mac*, on `:11434`, with Ollama moved to
+  `127.0.0.1:11435`. Prometheus scrapes that one for `host=mac-infra`, and
+  the `ollama-proxy` container becomes an unscraped relay to it (scraping
+  both would count container traffic twice). LAN machines that are not containers
   (Claude Code on another Mac) use `https://ollama.infra.famillelallier.net`
   (`nginx/conf.d/ollama.conf`, ungated like Ollama's own `:11434`). It is
   `nicolaslallier/ollama-metrics`, our fork of `datahub-local/ollama-metrics`
