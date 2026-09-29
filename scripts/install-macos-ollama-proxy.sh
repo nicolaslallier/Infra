@@ -31,16 +31,21 @@ OLLAMA_ADDR=127.0.0.1:11435
 # Same commit the stack's ollama-proxy image is built from.
 REF=$(sed -n 's/^OLLAMA_PROXY_REF := //p' Makefile)
 
-restart_ollama() {
-  osascript -e 'quit app "Ollama"' >/dev/null 2>&1 || true
-  sleep 3
-  open -a Ollama
+# The app runs as the login service com.ollama.ollama and cancels a polite
+# `quit app`; kickstart -k restarts it with launchd's current environment.
+restart_ollama() { launchctl kickstart -k "gui/$(id -u)/com.ollama.ollama"; }
+# The app's "Expose Ollama to the network" toggle starts the server with
+# OLLAMA_HOST=0.0.0.0 whatever launchd says; the proxy is what exposes it now.
+set_expose() {
+  sqlite3 "$HOME/Library/Application Support/Ollama/db.sqlite" \
+    "update settings set expose=$1 where id=1;"
 }
 
 if [ "${1:-}" = --uninstall ]; then
   launchctl bootout "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || true
   rm -f "$PLIST"
   launchctl unsetenv OLLAMA_HOST
+  set_expose 1
   restart_ollama
   echo "Removed; Ollama is back on :11434."
   exit 0
@@ -51,6 +56,7 @@ src=$(mktemp -d)
 git clone -q https://github.com/nicolaslallier/ollama-metrics.git "$src"
 git -C "$src" checkout -q "$REF"
 mkdir -p "$(dirname "$BIN")" "$LOG_DIR"
+set_expose 0
 (cd "$src" && go build -o "$BIN" .)
 rm -rf "$src"
 
@@ -67,7 +73,7 @@ cat > "$PLIST" <<PLIST
     <string>-c</string>
     <string>launchctl setenv OLLAMA_HOST $OLLAMA_ADDR
 if /usr/sbin/lsof -nP -a -c '/^ollama\$/' -iTCP:11434 -sTCP:LISTEN >/dev/null; then
-  osascript -e 'quit app "Ollama"'; sleep 3; open -a Ollama; sleep 5
+  launchctl kickstart -k gui/\$(id -u)/com.ollama.ollama; sleep 5
 fi
 exec "$BIN"</string>
   </array>
