@@ -35,7 +35,8 @@
         },
         "refresh": 2,
         "includeAll": true,
-        "multi": true
+        "multi": true,
+        "allValue": ".*"
       }
     ]
   },
