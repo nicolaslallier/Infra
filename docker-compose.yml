@@ -594,12 +594,6 @@ services:
     networks:
       - infra-net
 
-  ollama-proxy-mac-02:
-    <<: *ollama-proxy
-    environment:
-      <<: *ollama-proxy-env
-      OLLAMA_HOST: http://192.168.2.41:11434
-
   # The Windows laptop this stack runs on. By LAN address, which it answers
   # on; host.docker.internal would also work but only while that stays true.
   ollama-proxy-laptop:
