@@ -31,7 +31,7 @@ from typing import Any
 
 from prefect import flow, task
 
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://192.168.2.40:11434")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ollama-proxy:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen3.8:27b-mlx")
 PREFIX = os.environ.get("SORTER_LABEL_PREFIX", "Tri/")
 MAX_THREADS = int(os.environ.get("SORTER_MAX_THREADS", "20"))

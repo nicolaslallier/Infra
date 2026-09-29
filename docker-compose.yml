@@ -569,6 +569,27 @@ services:
     depends_on:
       - nginx
 
+  # --- Ollama metrics proxy (no host ports) ---
+  # Ollama runs on a Mac outside this stack and has no /metrics of its own.
+  # Every client on infra-net (LibreChat, prefect-flows) reaches it through
+  # this proxy, which relays each request as-is and counts tokens, latency
+  # and loaded models per model -- traffic that bypasses it is not counted.
+  # The image is built by `make app-images`, not pulled (see the Makefile).
+  ollama-proxy:
+    image: infra-ollama-proxy:95a02da
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      OLLAMA_HOST: ${OLLAMA_UPSTREAM_URL:-http://192.168.2.35:11434}
+      # Same port as Ollama, so a client switches by changing the host only.
+      PORT: "11434"
+      # Both "repairs" rewrite responses and are on by default; off, so a
+      # client sees exactly what Ollama sent.
+      OLLAMA_SANITIZE_UTF8_RESPONSE: "false"
+      OLLAMA_PROMOTE_REASONING_TO_CONTENT: "false"
+    networks:
+      - infra-net
+
   # --- Object storage: SeaweedFS (S3 via NGINX; no host ports) ---
 
   s3:
@@ -797,7 +818,7 @@ services:
       PREFECT_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?Set PREFECT_AUTH_STRING in .env (user:password)}
       # organize-inbox. Not PREFECT_*: Prefect reads that namespace as its
       # own settings.
-      OLLAMA_URL: ${OLLAMA_URL:-http://192.168.2.40:11434}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama-proxy:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.8:27b-mlx}
       ORGANIZER_S3_ENDPOINT: http://s3:8333
       ORGANIZER_S3_BUCKET: obsidian

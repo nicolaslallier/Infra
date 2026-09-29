@@ -7,7 +7,7 @@ SHELL := bash
 # depends on that: vault-render writes the .env that check-env then reads.
 .NOTPARALLEL:
 
-.PHONY: help init net certs seal-key up down restart logs ps status pull config \
+.PHONY: help init net certs seal-key app-images up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision \
@@ -36,7 +36,7 @@ endif
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-init: net app-volumes certs seal-key ## Create network, volumes, certs, OpenBao's seal key, and .env
+init: net app-volumes app-images certs seal-key ## Create network, volumes, certs, OpenBao's seal key, and .env
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "Created .env — edit passwords, LAN_IP, and DNS_ADMIN_PASSWORD before 'make up'."; \
@@ -58,6 +58,19 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist
 		&& echo "volume darkangel-web already exists" \
 		|| { docker volume create darkangel-web >/dev/null \
 			&& echo "created volume darkangel-web"; }
+
+# Images compose references but cannot pull. ollama-proxy is built from a
+# pinned commit of a fork that publishes no image (the one that counts /v1,
+# LibreChat's dialect), and here rather than via `build:` because Portainer's
+# Git stacks do not reliably build. Change the commit here and the tag in
+# docker-compose.yml together; a tag already on the daemon is not rebuilt.
+OLLAMA_PROXY_REF := 95a02da49236e0e60ae0cc3d4824584360f63ed5
+app-images: ## Build the images the stack references but cannot pull
+	@tag=infra-ollama-proxy:$$(echo $(OLLAMA_PROXY_REF) | cut -c1-7); \
+	docker image inspect $$tag >/dev/null 2>&1 \
+		&& echo "image $$tag already exists" \
+		|| docker build -q -t $$tag \
+			https://github.com/datahub-local/ollama-metrics.git#$(OLLAMA_PROXY_REF)
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
@@ -136,7 +149,7 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
-up: check-docker vault-render check-env net app-volumes ## Deploy/redeploy the stack via Portainer (Git main)
+up: check-docker vault-render check-env net app-volumes app-images ## Deploy/redeploy the stack via Portainer (Git main)
 	./scripts/portainer-stack.sh up
 
 down: ## Stop the stack via Portainer (keeps volumes)
@@ -153,7 +166,7 @@ ps: status
 status: ## Show service status (alias: ps)
 	docker compose ps
 
-pull: check-docker vault-render check-env net app-volumes ## Redeploy via Portainer, re-pulling images
+pull: check-docker vault-render check-env net app-volumes app-images ## Redeploy via Portainer, re-pulling images
 	./scripts/portainer-stack.sh pull
 
 config: check-env check-docker ## Validate docker-compose.yml + .env
