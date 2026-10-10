@@ -1016,6 +1016,97 @@ poll), `portainer_exporter_scrape_total` / `_scrape_errors_total`,
 / `portainer_stack_last_deploy_timestamp_seconds` (a git stack's last
 successful snapshot update).
 
+## Notifications
+
+Two services let applications on `infra-net` notify people, both with no host
+port:
+
+| Channel | Service | Address on `infra-net` | From a browser / phone |
+|---|---|---|---|
+| Email | `smtp` (Postfix relay) | `smtp:25`, no credentials | — |
+| Push | `ntfy` | `http://ntfy` | `https://ntfy.infra.famillelallier.net` |
+
+`smtp` does not deliver mail itself: it relays everything to a smarthost
+(`SMTP_RELAY_HOST`, a dedicated Google Workspace account by default), because
+mail sent straight from a home IP is rejected or spam-foldered. Only that
+container holds the smarthost login; applications authenticate to nothing.
+It relays without authentication only for clients in `SMTP_MYNETWORKS` (pin it
+to `infra-net`'s subnet; `make check-env` warns while it is still the broad
+private-range default) and rejects a `From` outside `SMTP_ALLOWED_SENDER_DOMAINS`. Queued mail survives a restart (`smtp-spool`).
+
+`ntfy` is deny-all (`ntfy/server.yml`): no topic is readable or writable
+without a user or token. Its users, ACLs and tokens live in the `ntfy-data`
+volume. The NGINX vhost is deliberately not behind oauth2-proxy, since phones
+and apps authenticate with a token or Basic auth.
+
+**Variables for applications.** These are conventions for the application's
+own `.env` / compose file, not variables Infra reads. Infra's side is only
+`SMTP_RELAY_HOST`, `SMTP_RELAY_USERNAME`, `SMTP_RELAY_PASSWORD`,
+`SMTP_ALLOWED_SENDER_DOMAINS` and `SMTP_MYNETWORKS` in `.env.example`; there are no `NTFY_*`
+variables in Infra's `.env`.
+
+| Variable | Value |
+|---|---|
+| `SMTP_HOST` | `smtp` |
+| `SMTP_PORT` | `25` |
+| `SMTP_FROM` | `notifications@famillelallier.net`, the smarthost account. Any other address in `SMTP_ALLOWED_SENDER_DOMAINS` passes Postfix, but Gmail rewrites the From to the authenticated account unless that address is a verified "Send mail as" alias of it |
+| `SMTP_TLS` | `none` (plain SMTP inside `infra-net`; TLS is enforced on the smarthost hop) |
+| `SMTP_USER` / `SMTP_PASSWORD` | empty |
+| `NTFY_URL` | `http://ntfy` |
+| `NTFY_TOKEN` | the token printed by `make ntfy-provision` |
+| `NTFY_TOPIC` | `<app>-<category>`, e.g. `jarvis-alerts` |
+
+Publishing a push:
+
+```bash
+curl -H "Authorization: Bearer $NTFY_TOKEN" \
+     -H "Title: Backup finished" -H "Priority: default" \
+     -d "Nightly backup OK" "$NTFY_URL/$NTFY_TOPIC"
+```
+
+**Giving an application access.** The `SMTP_RELAY_*` keys have no `:?` guard
+(an unset login never blocks a deploy; `make check-env` warns, and mail stays
+queued). Set the password in `.env` (an app password for the relay account,
+from <https://myaccount.google.com/apppasswords>), run `make vault-seed`, then
+`make up`. Then:
+
+```bash
+make ntfy-provision app=<name> [topic=<prefix>]
+```
+
+This creates the user `<name>` if missing, lets it **write only** to
+`<prefix>-*` (`prefix` defaults to the app name), and prints one new token on
+stdout (progress goes to stderr). Every run mints a **new** token and older
+ones stay valid: revoke them with `docker compose exec ntfy ntfy token list`
+and `ntfy token remove <token>`. The account's password is random and never
+shown; the app uses the token.
+
+**Receiving on a phone.** Create a human user who can read everything:
+
+```bash
+docker compose exec ntfy ntfy user add <name>      # prompts for a password
+docker compose exec ntfy ntfy access <name> '*' read-only
+```
+
+Install the ntfy app, set the default server to
+`https://ntfy.infra.famillelallier.net` (the phone must trust the local CA,
+see "Certificates"), log in, and subscribe to the topics.
+
+**Mail deliverability.** Set up SPF, DKIM and DMARC for `famillelallier.net`
+at the *public* DNS provider and the smarthost (Workspace: Admin console →
+Gmail → Authenticate email). Technitium only serves the LAN and has nothing
+to do with it.
+
+**Limits.**
+
+- Nothing is reachable outside the LAN without a VPN, phones included.
+- Outgoing mail is capped by the smarthost's quota (Gmail/Workspace limits).
+- `upstream-base-url` is unset on purpose. Without it Android (F-Droid build)
+  keeps its own connection, but iOS and Play-Store Android get no instant
+  delivery, since APNs/FCM need ntfy.sh as a relay: expect delays on iOS.
+  Opting in (`upstream-base-url: "https://ntfy.sh"`) sends ntfy.sh a poll
+  request (topic hash, never content).
+
 ## Connecting an application repo
 
 1. Add a database + role for the app: put its name in `APP_DATABASES` in

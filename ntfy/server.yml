@@ -1,0 +1,37 @@
+# ntfy server config, mounted read-only by the `ntfy` service
+# (docker-compose.yml). Must be committed: the Portainer drift guard refuses
+# untracked files.
+
+# Public URL phones and browsers use (NGINX vhost ntfy.conf). Apps on
+# infra-net call http://ntfy directly instead.
+base-url: "https://ntfy.infra.famillelallier.net"
+listen-http: ":80"
+# Behind NGINX: trust X-Forwarded-For for rate limiting and logs.
+behind-proxy: true
+
+cache-file: "/var/lib/ntfy/cache.db"
+
+# Nothing is readable or writable without a user/token. Per-app users and
+# write-only tokens come from `make ntfy-provision`. Do not loosen this:
+# the API is reachable from every container on infra-net.
+auth-file: "/var/lib/ntfy/auth.db"
+auth-default-access: "deny-all"
+
+# /metrics on the main listener needs admin credentials under deny-all, so it
+# gets its own listener. Prometheus scrapes ntfy:9090/metrics (job `ntfy`)
+# anonymously; the port is on infra-net only and the NGINX vhost 404s /metrics.
+enable-metrics: true
+metrics-listen-http: ":9090"
+
+# Attachments are off (no attachment-cache-dir): notifications are text.
+
+# upstream-base-url is deliberately unset. Setting it to https://ntfy.sh would
+# relay a poll request (topic hash, never content) through ntfy.sh so iOS and
+# Play-Store Android get instant delivery via APNs/FCM. Without it, Android
+# (F-Droid build) holds its own connection and iOS is delayed. Opt in with:
+# upstream-base-url: "https://ntfy.sh"
+
+# Web Push (browser) is not enabled in v1. To enable: `ntfy webpush keys`,
+# keep the private key out of the repo (pass it as an environment variable,
+# declared in .env.example), and set web-push-public-key,
+# web-push-file and web-push-email-address.

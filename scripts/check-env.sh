@@ -320,6 +320,20 @@ else
 	fi
 fi
 
+# --- smtp relay (warnings only) ---------------------------------------------
+# Not errors: the relay is not a precondition for deploying the stack, and the
+# vault may not hold these keys yet when a merge triggers a deploy.
+for var in SMTP_RELAY_HOST SMTP_RELAY_USERNAME SMTP_RELAY_PASSWORD; do
+	value="${!var:-}"
+	if [ -z "$value" ] || [ "$value" = "$PLACEHOLDER" ]; then
+		warnings+=("$var is unset in $ENV_FILE -- the smtp relay will queue mail it cannot deliver; set it, then 'make vault-seed'")
+	fi
+done
+if [ "${SMTP_MYNETWORKS:-}" = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" ]; then
+	infra_subnet=$(docker network inspect infra-net --format '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null || true)
+	warnings+=("SMTP_MYNETWORKS is still the broad private-range default -- any client in those ranges can relay mail unauthenticated; pin it to 127.0.0.0/8,${infra_subnet:-<infra-net subnet>}")
+fi
+
 # --- the client secrets Keycloak has to generate first ----------------------
 for entry in "${POST_BOOT[@]}"; do
 	var=${entry%%:*}
