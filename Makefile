@@ -10,7 +10,7 @@ SHELL := bash
 .PHONY: help init net certs seal-key app-images up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
-	migrate-volumes keycloak-seed-users s3-provision \
+	migrate-volumes keycloak-seed-users s3-provision ntfy-provision \
 	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
@@ -281,6 +281,10 @@ keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 s3-provision: check-env ## Create/update an app's S3 bucket + identity (app=<name> [bucket=] [versioned=1])
 	@test -n "$(app)" || { echo "usage: make s3-provision app=<name> [bucket=<bucket>] [versioned=1]" >&2; exit 1; }
 	@./scripts/provision-s3.sh "$(app)" "$(or $(bucket),$(app))" "$(or $(versioned),0)"
+
+ntfy-provision: check-env ## Create an app's ntfy user + write-only token (app=<name> [topic=<prefix>])
+	@test -n "$(app)" || { echo "usage: make ntfy-provision app=<name> [topic=<topic-prefix>]" >&2; exit 1; }
+	@./scripts/provision-ntfy.sh "$(app)" "$(or $(topic),$(app))"
 
 # --- OpenBao (the secret store) --------------------------------------------
 # vault-init runs once per vault; seed/env are the two directions of the .env

@@ -47,6 +47,13 @@ scrape_configs:
     static_configs:
       - targets: ["rabbitmq:15692"]
 
+  # ntfy: enable-metrics is on in ntfy/server.yml, served on the same
+  # listener as the API (:80) at /metrics.
+  - job_name: ntfy
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ntfy:80"]
+
   # OpenBao. /v1/sys/metrics is an authenticated endpoint by default, which
   # would make this scrape a 403 with no obvious cause; the listener in
   # openbao/config.hcl opens it with unauthenticated_metrics_access, the same
