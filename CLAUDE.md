@@ -115,8 +115,9 @@ never orphans another app that's still attached to it):
   `X-Forwarded-For`, which ntfy rate-limits on, so the vhost overwrites it
   with `$remote_addr` and adds a `limit_req`. Long-lived streams, hence
   `proxy_read_timeout 12h` and `proxy_buffering off`. Users, ACLs, tokens and
-  the message cache live in the `ntfy-data` volume. `upstream-base-url` is
-  unset on purpose (iOS push is delayed without it). Prometheus job `ntfy` scrapes the separate metrics listener
+  the message cache live in the `ntfy-data` volume. `upstream-base-url`
+  is `https://ntfy.sh` (iOS push is delayed without it; only a topic hash, never
+  content, goes to ntfy.sh). Prometheus job `ntfy` scrapes the separate metrics listener
   `ntfy:9090` (on `:80` `/metrics` needs credentials under deny-all); the
   vhost 404s `/metrics`.
   There is no `NTFY_*` key in `.env`; the `SMTP_*`/`NTFY_*` application
