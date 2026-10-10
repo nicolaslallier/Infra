@@ -1101,11 +1101,11 @@ to do with it.
 
 - Nothing is reachable outside the LAN without a VPN, phones included.
 - Outgoing mail is capped by the smarthost's quota (Gmail/Workspace limits).
-- `upstream-base-url` is unset on purpose. Without it Android (F-Droid build)
-  keeps its own connection, but iOS and Play-Store Android get no instant
-  delivery, since APNs/FCM need ntfy.sh as a relay: expect delays on iOS.
-  Opting in (`upstream-base-url: "https://ntfy.sh"`) sends ntfy.sh a poll
-  request (topic hash, never content).
+- `upstream-base-url` is `https://ntfy.sh`: iOS and Play-Store Android get
+  instant delivery, since APNs/FCM need ntfy.sh as a relay. ntfy.sh receives
+  only a poll request (topic hash, never content). Removing the line gives
+  Android (F-Droid build) its own connection, but iOS then gets delayed
+  delivery.
 
 ## Connecting an application repo
 

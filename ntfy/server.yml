@@ -25,11 +25,11 @@ metrics-listen-http: ":9090"
 
 # Attachments are off (no attachment-cache-dir): notifications are text.
 
-# upstream-base-url is deliberately unset. Setting it to https://ntfy.sh would
-# relay a poll request (topic hash, never content) through ntfy.sh so iOS and
-# Play-Store Android get instant delivery via APNs/FCM. Without it, Android
-# (F-Droid build) holds its own connection and iOS is delayed. Opt in with:
-# upstream-base-url: "https://ntfy.sh"
+# Relay through ntfy.sh so iOS and Play-Store Android get instant delivery via
+# APNs/FCM. Only a poll request (topic hash, never the message content) goes
+# to ntfy.sh; the messages stay on this server. Without it iOS is delayed, and
+# the Heaven backup alerts target an iPhone.
+upstream-base-url: "https://ntfy.sh"
 
 # Web Push (browser) is not enabled in v1. To enable: `ntfy webpush keys`,
 # keep the private key out of the repo (pass it as an environment variable,

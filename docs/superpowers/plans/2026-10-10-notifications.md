@@ -48,7 +48,7 @@ de la spec (statut → « approuvé »).
 - [ ] Q1 smarthost : Workspace + mot de passe d'application autorisé ? Sinon
   choisir le fournisseur transactionnel (change `SMTP_RELAY_HOST` et les
   enregistrements DNS de la Tâche 5, rien d'autre).
-- [ ] Q2 relais `upstream-base-url: https://ntfy.sh` : oui/non (Tâche 2).
+- [x] Q2 relais `upstream-base-url: https://ntfy.sh` : oui (iPhone, alertes de sauvegarde Heaven) (Tâche 2).
 - [ ] Q3 VPN : confirmer qu'il est hors de ce lot.
 - [ ] Q4 Web Push navigateur : v1 ou plus tard (Tâche 2, clés VAPID).
 - [ ] Créer le compte `notifications@famillelallier.net` (ou alias « Envoyer
