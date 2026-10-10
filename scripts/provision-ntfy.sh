@@ -34,22 +34,30 @@ password="$(openssl rand -hex 24)"
 export NTFYP_APP="$app" NTFYP_PREFIX="$prefix" NTFY_PASSWORD="$password"
 docker compose exec -T -e NTFYP_APP -e NTFYP_PREFIX -e NTFY_PASSWORD \
   ntfy sh -eu -s <<'EOF2'
-# Capture first so `-e` aborts if listing fails, rather than grep -q masking it.
-users=$(ntfy user list 2>&1)
-if printf '%s\n' "$users" | grep -qE "^user $NTFYP_APP "; then
+# Do not parse `ntfy user list` (human-readable, not a stable format): try
+# the add and treat "already exists" as success. Anything else is a real
+# failure and aborts with ntfy's own message.
+if err=$(ntfy user add --role=user "$NTFYP_APP" 2>&1 >/dev/null); then
+  echo "provision-ntfy.sh: user '$NTFYP_APP' created" >&2
+elif printf '%s\n' "$err" | grep -qi 'exist'; then
   echo "provision-ntfy.sh: user '$NTFYP_APP' already exists, keeping it" >&2
 else
-  ntfy user add --role=user "$NTFYP_APP" >/dev/null
-  echo "provision-ntfy.sh: user '$NTFYP_APP' created" >&2
+  printf '%s\n' "$err" >&2
+  echo "provision-ntfy.sh: 'ntfy user add' failed" >&2
+  exit 1
 fi
 
 ntfy access "$NTFYP_APP" "${NTFYP_PREFIX}-*" write-only >/dev/null
 echo "provision-ntfy.sh: '$NTFYP_APP' may write to '${NTFYP_PREFIX}-*' (write-only)" >&2
 
-out=$(ntfy token add "$NTFYP_APP")
+# The token is only ever printed inside prose; match its shape (tk_ + 29
+# chars) and, if nothing matches, show ntfy's output so a changed format is
+# diagnosable instead of a bare "could not read a token".
+out=$(ntfy token add "$NTFYP_APP" 2>&1)
 tok=$(printf '%s\n' "$out" | grep -oE 'tk_[A-Za-z0-9]+' | head -n1)
 if [ -z "$tok" ]; then
-  echo "provision-ntfy.sh: could not read a token from 'ntfy token add'" >&2
+  echo "provision-ntfy.sh: no token (tk_...) in the output of 'ntfy token add'; it said:" >&2
+  printf '%s\n' "$out" | sed 's/^/  /' >&2
   exit 1
 fi
 printf '%s\n' "$tok"

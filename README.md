@@ -1030,8 +1030,9 @@ port:
 (`SMTP_RELAY_HOST`, a dedicated Google Workspace account by default), because
 mail sent straight from a home IP is rejected or spam-foldered. Only that
 container holds the smarthost login; applications authenticate to nothing.
-It relays for private-range clients only and rejects a `From` outside
-`SMTP_ALLOWED_SENDER_DOMAINS`. Queued mail survives a restart (`smtp-spool`).
+It relays without authentication only for clients in `SMTP_MYNETWORKS` (pin it
+to `infra-net`'s subnet; `make check-env` warns while it is still the broad
+private-range default) and rejects a `From` outside `SMTP_ALLOWED_SENDER_DOMAINS`. Queued mail survives a restart (`smtp-spool`).
 
 `ntfy` is deny-all (`ntfy/server.yml`): no topic is readable or writable
 without a user or token. Its users, ACLs and tokens live in the `ntfy-data`
@@ -1040,15 +1041,15 @@ and apps authenticate with a token or Basic auth.
 
 **Variables for applications.** These are conventions for the application's
 own `.env` / compose file, not variables Infra reads. Infra's side is only
-`SMTP_RELAY_HOST`, `SMTP_RELAY_USERNAME`, `SMTP_RELAY_PASSWORD` and
-`SMTP_ALLOWED_SENDER_DOMAINS` in `.env.example`; there are no `NTFY_*`
+`SMTP_RELAY_HOST`, `SMTP_RELAY_USERNAME`, `SMTP_RELAY_PASSWORD`,
+`SMTP_ALLOWED_SENDER_DOMAINS` and `SMTP_MYNETWORKS` in `.env.example`; there are no `NTFY_*`
 variables in Infra's `.env`.
 
 | Variable | Value |
 |---|---|
 | `SMTP_HOST` | `smtp` |
 | `SMTP_PORT` | `25` |
-| `SMTP_FROM` | an address in `SMTP_ALLOWED_SENDER_DOMAINS`, e.g. `jarvis@famillelallier.net` |
+| `SMTP_FROM` | `notifications@famillelallier.net`, the smarthost account. Any other address in `SMTP_ALLOWED_SENDER_DOMAINS` passes Postfix, but Gmail rewrites the From to the authenticated account unless that address is a verified "Send mail as" alias of it |
 | `SMTP_TLS` | `none` (plain SMTP inside `infra-net`; TLS is enforced on the smarthost hop) |
 | `SMTP_USER` / `SMTP_PASSWORD` | empty |
 | `NTFY_URL` | `http://ntfy` |
@@ -1063,10 +1064,11 @@ curl -H "Authorization: Bearer $NTFY_TOKEN" \
      -d "Nightly backup OK" "$NTFY_URL/$NTFY_TOPIC"
 ```
 
-**Giving an application access.** The three new `SMTP_RELAY_*` keys have a `:?`
-guard, so set the password in `.env` (an app password for the relay account,
-from <https://myaccount.google.com/apppasswords>), run `make vault-seed`
-before merging/deploying, then `make up`. Then:
+**Giving an application access.** The `SMTP_RELAY_*` keys have no `:?` guard
+(an unset login never blocks a deploy; `make check-env` warns, and mail stays
+queued). Set the password in `.env` (an app password for the relay account,
+from <https://myaccount.google.com/apppasswords>), run `make vault-seed`, then
+`make up`. Then:
 
 ```bash
 make ntfy-provision app=<name> [topic=<prefix>]
@@ -1104,9 +1106,6 @@ to do with it.
   delivery, since APNs/FCM need ntfy.sh as a relay: expect delays on iOS.
   Opting in (`upstream-base-url: "https://ntfy.sh"`) sends ntfy.sh a poll
   request (topic hash, never content).
-- The `smtp` and `ntfy` image digests are marked `TODO` in
-  `docker-compose.yml` and need confirming with `docker manifest inspect` on
-  the first pull.
 
 ## Connecting an application repo
 

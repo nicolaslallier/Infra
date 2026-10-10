@@ -65,10 +65,6 @@ REQUIRED=(
 	DARKANGEL_S3_SECRET_KEY
 	RABBITMQ_DEFAULT_PASS
 	NEO4J_PASSWORD
-	# The smtp relay's smarthost login (docker-compose.yml guards all three with :?).
-	SMTP_RELAY_HOST
-	SMTP_RELAY_USERNAME
-	SMTP_RELAY_PASSWORD
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
 	S3_ADMIN_OAUTH_COOKIE_SECRET
@@ -322,6 +318,20 @@ else
 	if [ "$seal_size" != "32" ]; then
 		errors+=("$SEAL_KEY is $seal_size bytes; OpenBao's static seal only accepts a 32-byte key. If the vault has never been initialised, delete it and run 'make seal-key'; if it has, restore the real key from your backup -- nothing else can decrypt openbao-data.")
 	fi
+fi
+
+# --- smtp relay (warnings only) ---------------------------------------------
+# Not errors: the relay is not a precondition for deploying the stack, and the
+# vault may not hold these keys yet when a merge triggers a deploy.
+for var in SMTP_RELAY_HOST SMTP_RELAY_USERNAME SMTP_RELAY_PASSWORD; do
+	value="${!var:-}"
+	if [ -z "$value" ] || [ "$value" = "$PLACEHOLDER" ]; then
+		warnings+=("$var is unset in $ENV_FILE -- the smtp relay will queue mail it cannot deliver; set it, then 'make vault-seed'")
+	fi
+done
+if [ "${SMTP_MYNETWORKS:-}" = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" ]; then
+	infra_subnet=$(docker network inspect infra-net --format '{{(index .IPAM.Config 0).Subnet}}' 2>/dev/null || true)
+	warnings+=("SMTP_MYNETWORKS is still the broad private-range default -- any client in those ranges can relay mail unauthenticated; pin it to 127.0.0.0/8,${infra_subnet:-<infra-net subnet>}")
 fi
 
 # --- the client secrets Keycloak has to generate first ----------------------
