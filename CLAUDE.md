@@ -88,6 +88,32 @@ never orphans another app that's still attached to it):
   apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
   exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
   `neo4j-data` volume — and `make clean` deletes that volume like the rest.
+- **`smtp`** — `boky/postfix` (Postfix), pinned by tag *and* digest. Apps on
+  `infra-net` send to `smtp:25` with no credentials; it relays everything to
+  a smarthost (`SMTP_RELAY_*`, a Workspace account by default) over
+  mandatory STARTTLS, because mail sent straight from a home IP is rejected
+  or spam-foldered. Only this container holds the smarthost login. Publishes
+  no host port and has no `stream{}` passthrough: nothing on the host speaks
+  SMTP. `mynetworks` is the private ranges, not infra-net's subnet (the
+  network is external, so the daemon picks it); the real boundary is that it
+  joins only `infra-net`. `ALLOWED_SENDER_DOMAINS` rejects any other `From`.
+  Queue in the `smtp-spool` volume. The image digest is marked TODO in
+  `docker-compose.yml` (from the tags API, unverified until the first pull).
+- **`ntfy`** — `binwiederhier/ntfy`, pinned by tag *and* digest (same TODO).
+  Push notifications, at `ntfy.infra.famillelallier.net` (NGINX → `ntfy:80`);
+  apps use `http://ntfy`. Publishes no host port. `ntfy/server.yml` sets
+  `auth-default-access: deny-all`: never loosen it, the API is reachable
+  from every container on `infra-net`. `make ntfy-provision app=<name>
+  [topic=<prefix>]` (`scripts/provision-ntfy.sh`) creates a user with
+  write-only access to `<prefix>-*` and prints a token; **every run mints a
+  new token**, older ones stay valid until `ntfy token remove`. The vhost is
+  deliberately **not** behind oauth2-proxy: phones and apps use tokens/Basic
+  auth, which an SSO redirect would break. Long-lived streams, hence
+  `proxy_read_timeout 12h` and `proxy_buffering off`. Users, ACLs, tokens and
+  the message cache live in the `ntfy-data` volume. `upstream-base-url` is
+  unset on purpose (iOS push is delayed without it). Prometheus job `ntfy`.
+  There is no `NTFY_*` key in `.env`; the `SMTP_*`/`NTFY_*` application
+  variables are documented in the README ("Notifications").
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2
@@ -271,7 +297,8 @@ produces connection-refused, not a DNS or reachability problem.
 `scripts/check-env.sh` blocks deploys against a `.env` that can't bring the
 stack up (keys missing vs `.env.example`, `change-me`/empty passwords,
 bad oauth2-proxy cookie keys, a missing/wrong-sized `openbao/seal.key`, a
-`LAN_IP` the host doesn't own). Rules that apply outside `scripts/`: every
+`LAN_IP` the host doesn't own, unset `SMTP_RELAY_HOST`/`_USERNAME`/`_PASSWORD`,
+which `smtp` guards with `:?`). Rules that apply outside `scripts/`: every
 cookie-secret recipe must end in `| tr -- '+/' '-_'` (oauth2-proxy decodes
 URL-safe base64 only), and the oauth2-proxy *client* secrets must never get
 a `:?` guard in `docker-compose.yml` — Keycloak creates them on first realm
@@ -488,7 +515,7 @@ This rule governs *backend application services* — anything NGINX fronts
 (`postgres`, `pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `openbao`,
 `portainer`, `grafana`, monitoring backends, and future apps) — not top-level infra
 processes that own a protocol NGINX can't meaningfully front. `postgres`,
-`pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `grafana`, and the
+`pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `smtp`, `ntfy`, `grafana`, and the
 rest of LGTM/exporters deliberately have no `ports:` key. All host access
 to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
@@ -519,7 +546,7 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `ollama-proxy*`, `rabbitmq`, `neo4j`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
+`oauth2-proxy-prefect`, `ollama-proxy*`, `rabbitmq`, `neo4j`, `smtp`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
 monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
