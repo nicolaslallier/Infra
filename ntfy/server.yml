@@ -17,8 +17,11 @@ cache-file: "/var/lib/ntfy/cache.db"
 auth-file: "/var/lib/ntfy/auth.db"
 auth-default-access: "deny-all"
 
-# Prometheus scrapes ntfy:80/metrics (job `ntfy`).
+# /metrics on the main listener needs admin credentials under deny-all, so it
+# gets its own listener. Prometheus scrapes ntfy:9090/metrics (job `ntfy`)
+# anonymously; the port is on infra-net only and the NGINX vhost 404s /metrics.
 enable-metrics: true
+metrics-listen-http: ":9090"
 
 # Attachments are off (no attachment-cache-dir): notifications are text.
 

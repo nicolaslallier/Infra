@@ -94,12 +94,14 @@ never orphans another app that's still attached to it):
   mandatory STARTTLS, because mail sent straight from a home IP is rejected
   or spam-foldered. Only this container holds the smarthost login. Publishes
   no host port and has no `stream{}` passthrough: nothing on the host speaks
-  SMTP. `mynetworks` is the private ranges, not infra-net's subnet (the
-  network is external, so the daemon picks it); the real boundary is that it
-  joins only `infra-net`. `ALLOWED_SENDER_DOMAINS` rejects any other `From`.
-  Queue in the `smtp-spool` volume. The image digest is marked TODO in
-  `docker-compose.yml` (from the tags API, unverified until the first pull).
-- **`ntfy`** — `binwiederhier/ntfy`, pinned by tag *and* digest (same TODO).
+  SMTP. `mynetworks` comes from `SMTP_MYNETWORKS`; infra-net is external, so the
+  daemon picks its subnet and compose cannot name it. The default is the broad
+  private ranges and `check-env` warns until `.env` pins the exact subnet.
+  `ALLOWED_SENDER_DOMAINS` rejects any other `From`. The `SMTP_RELAY_*` login
+  has no `:?` guard and `check-env` only warns: a relay is not worth failing a
+  whole-stack redeploy (and the merge-triggered CI deploy) over.
+  Queue in the `smtp-spool` volume.
+- **`ntfy`** — `binwiederhier/ntfy`, pinned by tag *and* digest.
   Push notifications, at `ntfy.infra.famillelallier.net` (NGINX → `ntfy:80`);
   apps use `http://ntfy`. Publishes no host port. `ntfy/server.yml` sets
   `auth-default-access: deny-all`: never loosen it, the API is reachable
@@ -108,10 +110,15 @@ never orphans another app that's still attached to it):
   write-only access to `<prefix>-*` and prints a token; **every run mints a
   new token**, older ones stay valid until `ntfy token remove`. The vhost is
   deliberately **not** behind oauth2-proxy: phones and apps use tokens/Basic
-  auth, which an SSO redirect would break. Long-lived streams, hence
+  auth, which an SSO redirect would break. It does not include
+  `snippets/proxy.conf`: that snippet appends to a client-sent
+  `X-Forwarded-For`, which ntfy rate-limits on, so the vhost overwrites it
+  with `$remote_addr` and adds a `limit_req`. Long-lived streams, hence
   `proxy_read_timeout 12h` and `proxy_buffering off`. Users, ACLs, tokens and
   the message cache live in the `ntfy-data` volume. `upstream-base-url` is
-  unset on purpose (iOS push is delayed without it). Prometheus job `ntfy`.
+  unset on purpose (iOS push is delayed without it). Prometheus job `ntfy` scrapes the separate metrics listener
+  `ntfy:9090` (on `:80` `/metrics` needs credentials under deny-all); the
+  vhost 404s `/metrics`.
   There is no `NTFY_*` key in `.env`; the `SMTP_*`/`NTFY_*` application
   variables are documented in the README ("Notifications").
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
@@ -297,8 +304,7 @@ produces connection-refused, not a DNS or reachability problem.
 `scripts/check-env.sh` blocks deploys against a `.env` that can't bring the
 stack up (keys missing vs `.env.example`, `change-me`/empty passwords,
 bad oauth2-proxy cookie keys, a missing/wrong-sized `openbao/seal.key`, a
-`LAN_IP` the host doesn't own, unset `SMTP_RELAY_HOST`/`_USERNAME`/`_PASSWORD`,
-which `smtp` guards with `:?`). Rules that apply outside `scripts/`: every
+`LAN_IP` the host doesn't own; unset `SMTP_RELAY_*` only warns). Rules that apply outside `scripts/`: every
 cookie-secret recipe must end in `| tr -- '+/' '-_'` (oauth2-proxy decodes
 URL-safe base64 only), and the oauth2-proxy *client* secrets must never get
 a `:?` guard in `docker-compose.yml` — Keycloak creates them on first realm

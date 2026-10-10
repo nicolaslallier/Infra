@@ -1,6 +1,8 @@
 # Service de notifications partagé (courriel + push)
 
-Statut : brouillon 2026-10-10 — décisions à valider dans « Questions ouvertes »
+Statut : brouillon 2026-10-10 — décisions à valider dans « Questions ouvertes ».
+Valeurs retenues par l'implémentation : smarthost Workspace, pas de relais
+`ntfy.sh`, pas de Web Push, pas de VPN.
 
 ## But
 
@@ -123,12 +125,16 @@ l'application avant tout envoi.
 ## Variables de l'Infra (`.env` / `.env.example`)
 
 - `SMTP_RELAY_HOST` (`[smtp.gmail.com]:587`), `SMTP_RELAY_USERNAME`,
-  `SMTP_RELAY_PASSWORD` (garde `:?`, rejeté par `check-env` si `change-me` ou vide),
-  `SMTP_ALLOWED_SENDER_DOMAINS` (`famillelallier.net`).
-- `NTFY_BASE_URL` (si on veut le rendre configurable), `NTFY_UPSTREAM_URL`
-  (vide = pas de relais FCM/APNs).
-- `check-env.sh` : ajouter ces clés et leurs règles ; sinon une clé absente est
-  déployée comme chaîne vide sans avertissement.
+  `SMTP_RELAY_PASSWORD` (sans garde `:?` : un relais de notifications ne doit
+  pas bloquer le déploiement de toute la stack ; `check-env` avertit s'ils sont
+  vides), `SMTP_ALLOWED_SENDER_DOMAINS` (`famillelallier.net`),
+  `SMTP_MYNETWORKS` (clients autorisés à relayer ; à fixer sur le sous-réseau
+  d'`infra-net`).
+- Pas de variable `NTFY_*` : `base-url` et `upstream-base-url` sont dans
+  `ntfy/server.yml` (une variable `NTFY_*` dans l'environnement du conteneur
+  serait lue par ntfy comme une surcharge de sa propre configuration).
+- `check-env.sh` : les clés sont dans `.env.example` (donc exigées présentes) ;
+  les valeurs vides ne produisent qu'un avertissement.
 - `make vault-seed` / `vault-env` couvrent ces clés comme les autres (1:1).
 
 ## Délivrabilité (SPF / DKIM / DMARC)

@@ -31,8 +31,11 @@ côté DarkAngel (autre dépôt), Web Push navigateur (voir Tâche 0).
 Une fusion sur `main` déclenche `deploy.yml`, qui redéploie toute la pile
 (brève coupure DNS comprise) avec un `.env` **rendu depuis OpenBao**. Si les
 nouvelles variables (`SMTP_RELAY_*`, …) ne sont pas dans le coffre à ce
-moment-là, `check-env` refuse et le déploiement échoue. Donc, **avant de
-fusionner** : les ajouter à `.env` puis `make vault-seed` (Tâche 7). Un PR
+moment-là, `vault-env` les remplit depuis `.env.example`. Le déploiement ne
+doit pas en dépendre : pas de garde `:?` sur `SMTP_RELAY_*`, et `check-env`
+n'avertit que si elles sont vides (le relais reste alors sans effet). Il reste
+préférable, **avant de fusionner**, de les ajouter à `.env` puis
+`make vault-seed` (Tâche 7). Un PR
 « docs seulement » (spec, plan) ne déploie pas ; le PR d'implémentation, si.
 
 ---
@@ -66,14 +69,15 @@ de la spec (statut → « approuvé »).
 - [ ] Ajouter le service : `restart: unless-stopped`, réseau `infra-net`
   (alias `smtp`), volume nommé `smtp-spool` déclaré en bas du fichier, pas de
   `ports:`, healthcheck sur `:25`.
-  Variables : `RELAYHOST: ${SMTP_RELAY_HOST:?…}`,
-  `RELAYHOST_USERNAME: ${SMTP_RELAY_USERNAME:?…}`,
-  `RELAYHOST_PASSWORD: ${SMTP_RELAY_PASSWORD:?…}`,
+  Variables : `RELAYHOST: ${SMTP_RELAY_HOST:-}`,
+  `RELAYHOST_USERNAME: ${SMTP_RELAY_USERNAME:-}`,
+  `RELAYHOST_PASSWORD: ${SMTP_RELAY_PASSWORD:-}` (pas de `:?`),
+  `POSTFIX_mynetworks: ${SMTP_MYNETWORKS:-…}`,
   `ALLOWED_SENDER_DOMAINS: ${SMTP_ALLOWED_SENDER_DOMAINS:-famillelallier.net}`.
-- [ ] `.env.example` : les quatre clés, avec commentaire (pourquoi un
+- [ ] `.env.example` : les cinq clés, avec commentaire (pourquoi un
   smarthost, où créer le mot de passe d'application).
-- [ ] `check-env.sh` : clés requises ; refuser vide et `change-me` pour
-  `SMTP_RELAY_PASSWORD`.
+- [ ] `check-env.sh` : avertir (sans bloquer) si `SMTP_RELAY_*` est vide ou
+  `change-me`, et tant que `SMTP_MYNETWORKS` est la valeur large par défaut.
 - [ ] Tester le relais seul sur la machine de dev : `docker compose config`
   puis `docker compose up -d smtp`.
 
