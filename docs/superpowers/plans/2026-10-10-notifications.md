@@ -89,7 +89,7 @@ de la spec (statut → « approuvé »).
 **Fichiers :** `docker-compose.yml`, `ntfy/server.yml` (nouveau, versionné),
 `.env.example`
 
-- [ ] Image `binwiederhall/ntfy` : tag + digest ; commande `serve`.
+- [ ] Image `binwiederhier/ntfy` : tag + digest ; commande `serve`.
 - [ ] `ntfy/server.yml` : `base-url`, `behind-proxy: true`,
   `listen-http: ":80"`, `cache-file`, `auth-file`,
   `auth-default-access: deny-all`, `enable-metrics: true` ; selon Tâche 0 :

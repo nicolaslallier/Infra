@@ -48,7 +48,7 @@ unless-stopped`, **sans `ports:`** (règle d'ingress unique, CLAUDE.md).
 
 ### `ntfy` — push
 
-- Image : `binwiederhall/ntfy` (épinglée tag + digest), commande `serve`.
+- Image : `binwiederhier/ntfy` (épinglée tag + digest), commande `serve`.
 - `server.yml` monté depuis `ntfy/` (`${INFRA_DIR:-.}/ntfy/server.yml`,
   fichier **versionné**, sinon le garde de dérive refuse) :
   `base-url: https://ntfy.infra.famillelallier.net`, `behind-proxy: true`,
