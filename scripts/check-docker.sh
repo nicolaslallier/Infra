@@ -200,15 +200,6 @@ windows)
 	;;
 esac
 
-# The stack needs roughly 6 CPU / 12 GB; Docker Desktop's own defaults are
-# smaller, and a reinstall or a "Reset to factory defaults" puts them back.
-if [ "${dd_mem:-0}" -lt $((11 * 1024 * 1024 * 1024)) ] 2>/dev/null; then
-	say "docker: the VM has only $((dd_mem / 1024 / 1024 / 1024)) GB of memory." \
-	    "  Keycloak's JVM, Postgres, the LGTM stack, SeaweedFS and RabbitMQ together" \
-	    "  need ~12 GB. Raise it in Settings -> Resources."
-	warned=1
-fi
-
 if [ "${dd_cpu:-0}" -lt 4 ] 2>/dev/null; then
 	say "docker: the VM has only $dd_cpu CPUs (this stack is sized for 6)." \
 	    "  Raise it in Settings -> Resources."
