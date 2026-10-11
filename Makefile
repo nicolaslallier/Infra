@@ -11,7 +11,7 @@ SHELL := bash
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision \
-	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
+	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
 	runner-shell runner-env check-runner-env \
@@ -314,6 +314,9 @@ vault-init: ## Initialise the vault (root token -> .openbao.env, mount KV v2)
 
 vault-seed: ## Copy .env into the vault (infra/env)
 	@./scripts/vault-seed.sh
+
+vault-oidc: ## Enable Keycloak (OIDC) login for OpenBao; group openbao-admin = admin
+	@./scripts/vault-oidc.sh
 
 vault-seed-ea: ## Copy EA's deploy/ea.env into the vault (ea/env)
 	@./scripts/vault-seed.sh $(EA_ENV) ea
