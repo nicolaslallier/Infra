@@ -26,7 +26,7 @@ PORTAINER_HOST ?= portainer.infra.famillelallier.net
 # which run in a curl container -- goes there over SSH (key auth required).
 # 'make DOCKER_HOST=' targets the local daemon instead.
 INFRA_HOST ?= 192.168.2.10
-INFRA_SSH_USER ?= nicol
+INFRA_SSH_USER ?= this
 ifeq ($(shell uname -s),Darwin)
 export DOCKER_HOST ?= ssh://$(INFRA_SSH_USER)@$(INFRA_HOST)
 # This checkout (C:\Users\nicol\OpenCode\Infra, SMB-mounted on the Mac) as
@@ -34,8 +34,11 @@ export DOCKER_HOST ?= ssh://$(INFRA_SSH_USER)@$(INFRA_HOST)
 export PORTAINER_INFRA_DIR ?= /run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra
 endif
 
-help: ## Show available targets
-	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  %-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+##@ Setup & host
+help: ## Show available targets, grouped
+	@awk 'BEGIN {FS = ":.*## "} \
+		/^##@ / {printf "\n\033[1m%s\033[0m\n", substr($$0, 5)} \
+		/^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-26s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 init: net app-volumes app-images certs seal-key ## Create network, volumes, certs, OpenBao's seal key, and .env
 	@if [ ! -f .env ]; then \
@@ -45,20 +48,15 @@ init: net app-volumes app-images certs seal-key ## Create network, volumes, cert
 		echo ".env already exists, left untouched — 'make check-env' lists the settings .env.example has gained since."; \
 	fi
 
-net: ## Ensure the external infra-net Docker network exists
-	@docker network create infra-net >/dev/null 2>&1 \
-		&& echo "created network infra-net" \
-		|| echo "network infra-net already exists"
+net: ## Ensure infra-net exists and Portainer is on it (via Portainer's API)
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/portainer-net.sh
 
 # Volumes an app stack writes and this stack reads, declared external in both
 # so the name is the same on each side (the way infra-net is). Compose does not
 # create an external volume: a missing one fails `make up` for the whole stack,
 # not just the vhost that wants it -- hence a prerequisite, not a note.
-app-volumes: ## Ensure the external volumes shared with app stacks exist
-	@docker volume inspect darkangel-web >/dev/null 2>&1 \
-		&& echo "volume darkangel-web already exists" \
-		|| { docker volume create darkangel-web >/dev/null \
-			&& echo "created volume darkangel-web"; }
+app-volumes: ## Ensure the external volumes shared with app stacks exist (via Portainer's API)
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/portainer-volumes.sh
 
 # Images compose references but cannot pull. ollama-proxy is built from a
 # pinned commit of nicolaslallier/ollama-metrics, which publishes no image,
@@ -66,12 +64,8 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist
 # Git stacks do not reliably build. Change the commit here and the tag in
 # docker-compose.yml together; a tag already on the daemon is not rebuilt.
 OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
-app-images: ## Build the images the stack references but cannot pull
-	@tag=infra-ollama-proxy:$$(echo $(OLLAMA_PROXY_REF) | cut -c1-7); \
-	docker image inspect $$tag >/dev/null 2>&1 \
-		&& echo "image $$tag already exists" \
-		|| docker build -q -t $$tag \
-			https://github.com/nicolaslallier/ollama-metrics.git#$(OLLAMA_PROXY_REF)
+app-images: ## Build the images the stack references but cannot pull (via Portainer's API)
+	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) ./scripts/portainer-images.sh
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
@@ -150,6 +144,7 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
+##@ Stack (deploy via Portainer)
 up: check-docker vault-render check-env net app-volumes app-images ## Deploy/redeploy the stack via Portainer (Git main)
 	./scripts/portainer-stack.sh up
 
@@ -182,6 +177,7 @@ psql: ## Open a psql shell as the superuser
 
 PORTAINER_COMPOSE := docker compose -f docker-compose.portainer.yml
 
+##@ Portainer itself
 portainer-up: check-env check-docker net ## Start Portainer (its own compose project)
 	@docker volume create infra_portainer-data >/dev/null
 	$(PORTAINER_COMPOSE) up -d
@@ -202,6 +198,7 @@ portainer-restart: ## Restart Portainer
 portainer-logs: ## Tail Portainer's logs
 	$(PORTAINER_COMPOSE) logs -f
 
+##@ CI runners
 # --- CI runner (deploy on a push to main) ----------------------------------
 # The self-hosted GitHub Actions runner lives in its own compose project,
 # outside the stack it deploys, for the reason Portainer does: a redeploy
@@ -277,6 +274,7 @@ runner-ea-down: check-runner-env ## Stop the EA runner (not mid-job: that deploy
 runner-ea-logs: check-runner-env ## Tail the EA runner's logs
 	$(RUNNER_EA_COMPOSE) logs -f
 
+##@ App provisioning
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
 	@./scripts/provision-app.sh "$(app)"
@@ -301,6 +299,7 @@ ntfy-provision: check-env ## Create an app's ntfy user + write-only token (app=<
 	@test -n "$(app)" || { echo "usage: make ntfy-provision app=<name> [topic=<topic-prefix>]" >&2; exit 1; }
 	@./scripts/provision-ntfy.sh "$(app)" "$(or $(topic),$(app))"
 
+##@ Secrets (OpenBao)
 # --- OpenBao (the secret store) --------------------------------------------
 # vault-init runs once per vault; seed/env are the two directions of the .env
 # round trip, and vault-render is the deploy-time half of it that 'make up'
@@ -371,6 +370,7 @@ vault-cli: ## Run a bao command (args="kv list infra/")
 # Deleting the Portainer stack only removes its containers; 'down -v' then
 # drops the volumes docker-compose.yml declares -- infra_portainer-data is
 # no longer one of them, so Portainer keeps its data.
+##@ Danger zone
 clean: ## Delete the stack and its volumes (CONFIRM=1 required)
 	@test "$(CONFIRM)" = "1" || { echo "usage: make clean CONFIRM=1" >&2; exit 1; }
 	./scripts/portainer-stack.sh delete
