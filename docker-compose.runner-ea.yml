@@ -41,7 +41,8 @@ services:
     # tmpfs, not a named volume: `restart` reuses the container, so only memory
     # is wiped between jobs. A volume would carry one job's files to the next.
     tmpfs:
-      - /_work
+      # exec: Docker mounts tmpfs noexec by default, and the job runs scripts it checked out.
+      - /_work:exec
     volumes:
       # The Infra CA, to verify Portainer's certificate (public cert, no key).
       - ./certs/infra-ca.crt:/etc/ea/infra-ca.crt:ro
