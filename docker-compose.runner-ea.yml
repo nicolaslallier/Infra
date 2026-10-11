@@ -33,10 +33,10 @@ services:
       # A PAT allowed to administer runners on the EA repo, in .runner.env
       # (never .env, which is handed to the stack's containers wholesale).
       ACCESS_TOKEN: ${GH_RUNNER_TOKEN_EA:?Set GH_RUNNER_TOKEN_EA in .runner.env (a PAT that administers runners on nicolaslallier/EA)}
+    # tmpfs, not a named volume: `restart` reuses the container, so only memory
+    # is wiped between jobs. A volume would carry one job's files to the next.
+    tmpfs:
+      - /_work
     volumes:
       # The Infra CA, to verify Portainer's certificate (public cert, no key).
       - ./certs/infra-ca.crt:/etc/ea/infra-ca.crt:ro
-      - runner-work:/_work
-
-volumes:
-  runner-work:
