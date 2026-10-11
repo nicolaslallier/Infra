@@ -387,7 +387,8 @@ make vault-seed-ea  # copy ../EA/deploy/ea.env into ea/env
 ```
 
 `make vault-init` is idempotent, so re-running it after a redeploy is
-harmless. Log in to the UI with the root token from `.openbao.env`, or use
+harmless. `make vault-oidc` adds Keycloak login (realm `infra`, members of group
+`openbao-admin` get the `infra-admin` policy; sign in with method OIDC). Otherwise log in to the UI with the root token from `.openbao.env`, or use
 the CLI without pasting it anywhere:
 
 ```bash
