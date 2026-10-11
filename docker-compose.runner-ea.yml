@@ -1,0 +1,42 @@
+# The self-hosted GitHub Actions runner that deploys the EA app (repo
+# nicolaslallier/EA) through Portainer after a push to its main. Its own
+# compose project, for the reason docker-compose.runner.yml is: it must not be
+# recreated by a redeploy of "infra" mid-job.
+#
+# Unlike the Infra runner it holds NO Docker socket. EA's
+# scripts/portainer-stack.sh calls Portainer's API by URL (EA docs/adr/0045),
+# so a compromised job holds the two deploy secrets and nothing else. It sits
+# on this host so that URL is reachable: a Docker Desktop on another machine
+# cannot reach the LAN.
+#
+# EA is a public repo: this runner only ever serves a workflow that triggers on
+# push to main (EA .github/workflows/deploy.yml). Never widen that to
+# pull_request -- a fork's PR would run on this host. EPHEMERAL keeps one job
+# from inheriting another's leftovers.
+#
+# Driven by `make runner-ea-up` / -down / -logs.
+name: runner-ea
+
+services:
+  runner:
+    # Moving tag on purpose, as in docker-compose.runner.yml.
+    image: myoung34/github-runner:ubuntu-noble
+    restart: unless-stopped
+    environment:
+      RUNNER_SCOPE: repo
+      REPO_URL: https://github.com/nicolaslallier/EA
+      RUNNER_NAME: ${GH_RUNNER_NAME_EA:-ea-host}
+      # EA's deploy.yml selects this label; a renamed label leaves the job
+      # queued forever with no error.
+      LABELS: ea
+      EPHEMERAL: "true"
+      # A PAT allowed to administer runners on the EA repo, in .runner.env
+      # (never .env, which is handed to the stack's containers wholesale).
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_EA:?Set GH_RUNNER_TOKEN_EA in .runner.env (a PAT that administers runners on nicolaslallier/EA)}
+    # tmpfs, not a named volume: `restart` reuses the container, so only memory
+    # is wiped between jobs. A volume would carry one job's files to the next.
+    tmpfs:
+      - /_work
+    volumes:
+      # The Infra CA, to verify Portainer's certificate (public cert, no key).
+      - ./certs/infra-ca.crt:/etc/ea/infra-ca.crt:ro

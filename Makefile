@@ -14,7 +14,8 @@ SHELL := bash
 	vault-init vault-seed vault-seed-ea vault-env vault-render vault-status vault-cli \
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
-	runner-shell runner-env check-runner-env
+	runner-shell runner-env check-runner-env \
+	runner-ea-up runner-ea-down runner-ea-logs
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -261,6 +262,20 @@ runner-pull: check-runner-env ## Re-pull the runner image and recreate it (FORCE
 
 runner-shell: check-runner-env ## Open a shell in the running CI runner
 	$(RUNNER_COMPOSE) exec runner bash
+
+# The EA app's deploy runner (docker-compose.runner-ea.yml): same .runner.env,
+# its own token GH_RUNNER_TOKEN_EA, since a PAT is scoped to repos.
+RUNNER_EA_COMPOSE := docker compose -f docker-compose.runner-ea.yml --env-file .runner.env
+
+runner-ea-up: check-runner-env ## Start the EA repo's deploy runner (needs GH_RUNNER_TOKEN_EA in .runner.env)
+	$(RUNNER_EA_COMPOSE) up -d
+	@echo "Runner -> https://github.com/nicolaslallier/EA/settings/actions/runners (label 'ea')"
+
+runner-ea-down: check-runner-env ## Stop the EA runner (not mid-job: that deploy would be lost)
+	$(RUNNER_EA_COMPOSE) down
+
+runner-ea-logs: check-runner-env ## Tail the EA runner's logs
+	$(RUNNER_EA_COMPOSE) logs -f
 
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
