@@ -81,9 +81,10 @@ bao auth tune -listing-visibility=unauth oidc
 
 # Discovery goes through nginx (the keycloak.famillelallier.net alias on
 # infra-net), whose certificate our local CA signed, hence the CA bundle.
-jq -n --arg url "$ISSUER" --arg id openbao --arg secret "$secret" \
+# Secret via the environment, not --arg: argv is visible in the host's ps.
+OIDC_SECRET="$secret" jq -n --arg url "$ISSUER" --arg id openbao \
       --rawfile ca certs/infra-ca.crt \
-  '{oidc_discovery_url:$url, oidc_client_id:$id, oidc_client_secret:$secret,
+  '{oidc_discovery_url:$url, oidc_client_id:$id, oidc_client_secret:env.OIDC_SECRET,
     oidc_discovery_ca_pem:$ca, default_role:"admin"}' \
   | bao write auth/oidc/config -
 
