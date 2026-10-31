@@ -293,6 +293,13 @@ else of it publishes a port. Heaven, the backup appliance
 (github.com/nicolaslallier/Heaven): its `heaven-web` container serves the
 interface and relays `/api/` to `heaven:8000` on its own, so
 `nginx/conf.d/heaven.conf` is a plain pass-through to one upstream.
+Moria, the game server (github.com/nicolaslallier/Moria), is the one outside
+stack deliberately **not** on `infra-net`: its `:7777` is port-forwarded to the
+Internet, and a compromised game server must not land next to `smtp` (an
+unauthenticated relay) or `ollama-proxy`. Prometheus scrapes its `:9464/metrics`
+through the Docker host instead (job `moria`, `host.docker.internal:9464`, the
+same route as the laptop's windows_exporter); dashboard `moria.json`
+(`uid: moria-overview`). Never forward `9464` on the router.
 When registering the Postgres server inside pgAdmin's own UI, the host is
 the Compose service name `postgres` (pgAdmin and `postgres` share
 `infra-net` directly), port `5432` — never a
