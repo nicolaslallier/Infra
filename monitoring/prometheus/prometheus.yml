@@ -84,6 +84,14 @@ scrape_configs:
       - targets: ["ollama-proxy-laptop:11434"]
         labels: {host: laptop-dopbpc0j}
 
+  # Moria (github.com/nicolaslallier/Moria), the game server. Its stack stays
+  # off infra-net on purpose -- it is port-forwarded to the Internet -- so it
+  # publishes :9464 on the Docker host and is reached the way the laptop's
+  # windows_exporter is. Dashboard moria.json.
+  - job_name: moria
+    static_configs:
+      - targets: ["host.docker.internal:9464"]
+
   # Windows machines, each running windows_exporter on :9182. The only job
   # whose targets are not containers on infra-net, so they live in a file
   # rather than inline here: file_sd is re-read every 30s, so adding a machine
