@@ -153,7 +153,9 @@ migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=
 # recreated, so record the infra container IDs first and let wait-healthy.sh
 # wait until none of them is left (and everything is up). WAIT_HEALTHY=0 skips.
 define deploy_and_wait
-before=$$(docker ps -a -q --no-trunc --filter label=com.docker.compose.project=infra | tr '\n' ' '); \
+before=$$(docker ps -a -q --no-trunc --filter label=com.docker.compose.project=infra) \
+  || { echo "deploy aborted: cannot list infra containers (docker ps failed); an empty BEFORE_IDS would let the gate pass on the old stack" >&2; exit 1; }; \
+before=$$(echo $$before); \
 ./scripts/portainer-stack.sh $(1) && { [ "$(WAIT_HEALTHY)" = 0 ] || BEFORE_IDS="$$before" ./scripts/wait-healthy.sh; }
 endef
 
