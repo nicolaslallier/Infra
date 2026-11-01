@@ -1,0 +1,32 @@
+# LiteLLM proxy config, bind-mounted read-only at /app/config.yaml (see the
+# `litellm` service in docker-compose.yml). No secrets here: every
+# `os.environ/NAME` is read from the container's environment at start.
+#
+# Models listed here are the baseline; models added in the admin UI
+# (https://litellm.infra.famillelallier.net/ui) are stored in Postgres
+# (store_model_in_db) and served alongside them. Edit this file + `make up`
+# for anything that should survive a fresh database.
+
+model_list:
+  # exo cluster on the Macs, in OpenAI format (exo's Anthropic endpoint
+  # rejects role "system" messages, so clients go through LiteLLM instead).
+  - model_name: mlx-community/GLM-4.7-Flash-8bit
+    litellm_params:
+      model: openai/mlx-community/GLM-4.7-Flash-8bit
+      api_base: os.environ/EXO_API_BASE
+      api_key: "x"
+
+  # Ollama, through the stack's ollama-proxy.
+  - model_name: qwen3.8:27b-mlx
+    litellm_params:
+      model: ollama_chat/qwen3.8:27b-mlx
+      api_base: http://ollama-proxy:11434
+
+litellm_settings:
+  # Silently drop OpenAI/Anthropic params the local backends don't support.
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  store_model_in_db: true

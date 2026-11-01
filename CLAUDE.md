@@ -122,6 +122,15 @@ never orphans another app that's still attached to it):
   vhost 404s `/metrics`.
   There is no `NTFY_*` key in `.env`; the `SMTP_*`/`NTFY_*` application
   variables are documented in the README ("Notifications").
+- **`litellm`** — `ghcr.io/berriai/litellm-database`, the LLM gateway, at
+  `litellm.infra.famillelallier.net` (NGINX → `litellm:4000`; admin UI at
+  `/ui`). OpenAI- and Anthropic-format API in front of exo on the Macs
+  (`EXO_API_BASE`, by LAN address) and `ollama-proxy`. Config is
+  `litellm/config.yaml`; secrets (`LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`,
+  `LITELLM_UI_PASSWORD`) come from `.env`. Database/role `litellm`, provisioned
+  like any other app; without it the UI login fails with "Not connected to DB".
+  Publishes no host port. Not behind oauth2-proxy: API clients use bearer
+  keys. Never rotate `LITELLM_SALT_KEY` once models are stored in the DB.
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2
@@ -560,7 +569,7 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `ollama-proxy*`, `rabbitmq`, `neo4j`, `smtp`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
+`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `neo4j`, `smtp`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
 monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a

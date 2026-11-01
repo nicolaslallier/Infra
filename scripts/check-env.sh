@@ -71,6 +71,9 @@ REQUIRED=(
 	PREFECT_AUTH_STRING
 	PREFECT_S3_SECRET_KEY
 	PREFECT_OAUTH_COOKIE_SECRET
+	LITELLM_MASTER_KEY
+	LITELLM_SALT_KEY
+	LITELLM_UI_PASSWORD
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start
