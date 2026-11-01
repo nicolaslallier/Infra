@@ -21,12 +21,19 @@ set -a; . "$env_file"; set +a
 
 url="${PORTAINER_URL:-https://${INFRA_HOST:?set PORTAINER_URL or INFRA_HOST}:9443}/api"
 # The key goes in a curl config on stdin, not on the command line.
+# The body goes through a private (0600) temp file, never argv: it can carry a
+# secret (the CIFS password of a volume create) and argv is world-readable in
+# the process list. printf is a builtin, so the body is not in argv there either.
 api() { # <method> <path> [json-body]
-  local out
+  local out rc=0 bf=""
+  if [ -n "${3:-}" ]; then
+    bf="$(umask 077; mktemp)" && printf '%s' "$3" >"$bf" || { rm -f "$bf"; die "cannot write a request body file"; }
+  fi
   out="$(printf 'header = "X-API-Key: %s"\n' "$PORTAINER_API_KEY" |
     curl -sSk --pinnedpubkey "$PORTAINER_PINNEDPUBKEY" -K - --fail-with-body -X "$1" -H "Content-Type: ${API_CONTENT_TYPE:-application/json}" \
-      ${3:+--data-binary "$3"} "$url$2" 2>&1)" \
-    || die "$1 $2 failed (is Portainer up at $url? 'make portainer-up')\n${out:+Portainer said: $out}"
+      ${bf:+--data-binary @"$bf"} "$url$2" 2>&1)" || rc=$?
+  [ -z "$bf" ] || rm -f "$bf"
+  [ "$rc" = 0 ] || die "$1 $2 failed (is Portainer up at $url? 'make portainer-up')\n${out:+Portainer said: $out}"
   printf '%s' "$out"
 }
 
