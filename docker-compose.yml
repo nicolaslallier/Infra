@@ -938,8 +938,9 @@ services:
     # spend tracking -- without a DATABASE_URL the UI login answers "Not
     # connected to DB". Database/role `litellm`, provisioned like any other
     # app (APP_DATABASES / make provision-app app=litellm).
-    # ponytail: pin to a vX.Y.Z-stable tag once one is chosen.
-    image: ghcr.io/berriai/litellm-database:main-stable
+    # Pinned by tag *and* digest: this container holds the master key and the
+    # DB salt, and main-stable moves under every redeploy. Upgrade on purpose.
+    image: ghcr.io/berriai/litellm-database:v1.83.14-stable@sha256:da4ab06d9d57da205263877425544d6df8e78147737b0dd8dc1e9e93a6d8ac2e
     restart: unless-stopped
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
