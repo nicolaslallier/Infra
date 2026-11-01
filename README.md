@@ -74,7 +74,7 @@ make init      # creates infra-net, local dev certs, OpenBao's seal key, copies 
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `S3_ADMIN_SECRET_KEY`,
-`RABBITMQ_DEFAULT_PASS`, `MONITORING_DB_PASSWORD`, and one
+`RABBITMQ_DEFAULT_PASS`, `MORIA_AMQP_PASSWORD`, `MONITORING_DB_PASSWORD`, and one
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the two
 oauth2-proxy cookie keys (`JARVIS_OAUTH_COOKIE_SECRET`,
@@ -144,16 +144,6 @@ Prefect: `https://prefect.infra.famillelallier.net` (Keycloak realm `infra`,
 group `prefect`, then `PREFECT_AUTH_STRING`; flows go in `prefect/flows/`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
-
-Moria's account: vhost `moria`, user `moria` (no management tag, no access to
-`/`), URL `amqp://moria:<password>@rabbitmq:5672/moria`. The password is
-`MORIA_AMQP_PASSWORD`, kept in the vault like every other secret
-(`openssl rand -hex 24`: letters and digits only, it goes into a URL;
-`check-env` rejects anything else). Once it is in `infra/env`
-(`make vault-cli args="kv patch -mount=infra env MORIA_AMQP_PASSWORD=..."`) and
-`.env` is re-rendered (`make vault-env`), run `make rabbitmq-provision app=moria`;
-re-run it after a rotation. In Portainer, the Moria stack's
-`MORIA_AMQP_PASSWORD` must equal this value.
 Portainer: `https://portainer.infra.famillelallier.net` (admin account and
 access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
@@ -168,6 +158,27 @@ below; apps on `infra-net` use `http://openbao:8200`)
 Heaven (backups): `https://heaven.infra.famillelallier.net` (read-only
 snapshot list and health, no login — its own Portainer stack, see
 github.com/nicolaslallier/Heaven)
+
+### Moria's RabbitMQ account
+
+Vhost `moria`, user `moria` (no management tag, no access to `/`), URL
+`amqp://moria:<password>@rabbitmq:5672/moria`. The password is
+`MORIA_AMQP_PASSWORD`, kept in the vault like every other secret
+(`openssl rand -hex 24`: letters and digits only, it goes into a URL;
+`check-env` rejects anything else).
+
+**Order matters: `make up`, `pull` and `config` fail until
+`MORIA_AMQP_PASSWORD` is in the vault.**
+
+1. Infra: `make vault-cli args="kv patch -mount=infra env MORIA_AMQP_PASSWORD=..."`,
+   then `make vault-env`, then `make up`, then `make rabbitmq-provision app=moria`.
+2. Moria: set the Portainer variable `MORIA_AMQP_PASSWORD` of the Moria stack to
+   the same value, then deploy the Moria stack.
+
+Re-run `make rabbitmq-provision app=moria` after a password rotation, and
+after the `rabbitmq-data` volume is wiped (`make clean`, a new host): a fresh
+volume only recreates `RABBITMQ_DEFAULT_USER`, so the `moria` vhost and user
+are gone until you do.
 
 ### Keeping an existing `.env` in step with `.env.example`
 

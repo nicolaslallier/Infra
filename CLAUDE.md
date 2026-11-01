@@ -105,6 +105,11 @@ never orphans another app that's still attached to it):
   permissions on that vhost only) from `<APP>_AMQP_PASSWORD` (alphanumeric:
   it goes in an amqp:// URL; `check-env` enforces it for
   `MORIA_AMQP_PASSWORD`). Idempotent; re-run to rotate the password.
+  A wiped/fresh `rabbitmq-data` volume loses these accounts (only
+  `RABBITMQ_DEFAULT_*` is recreated): re-run `make rabbitmq-provision
+  app=moria`. `make up`/`pull`/`config` fail until `MORIA_AMQP_PASSWORD` is
+  in the vault (patch it, `make vault-env`, `make up`); the Moria stack's
+  Portainer `MORIA_AMQP_PASSWORD` must equal it, set before deploying Moria.
 - **`neo4j`** — `neo4j:<version>-community`, pinned by tag *and* digest
   because a store-format upgrade must not ride along with a redeploy. The
   EA repo's architecture graph (its `docs/adr/0030`). Publishes no host
