@@ -37,6 +37,10 @@ limits_config:
   volume_enabled: true
   # 31 days; without the compactor block below this does nothing.
   retention_period: 744h
+  # Loki is unauthenticated on infra-net: the delete API would let any container
+  # erase logs (incl. the OpenBao audit trail). Retention works without it;
+  # re-enable only deliberately.
+  deletion_mode: disabled
 
 compactor:
   working_directory: /loki/compactor
