@@ -11,12 +11,15 @@
 # INFRA_DIR=<this checkout>; plain CLI use falls back to ./.
 
 services:
+  # Every image is pinned tag@digest (the multi-arch index digest), so a
+  # redeploy -- which force-recreates everything -- never pulls a surprise.
+  # The tag is for humans; the digest is what is pulled. Bump both together.
   postgres:
     # pgvector/pgvector:pg18 is the official Postgres 18 image plus the
     # pgvector extension (needed by Jarvis RAG / file_chunks embeddings).
     # No alpine tag exists for pg18; this is Debian bookworm-based.
     # PGDATA layout matches stock postgres:18 (/var/lib/postgresql/18/docker).
-    image: pgvector/pgvector:pg18
+    image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
     restart: unless-stopped
     # Audit trail of who connected and when (lands in Loki via Alloy). PG18
     # still accepts `on` for log_connections (= receipt,authentication,authorization).
@@ -49,7 +52,9 @@ services:
       start_period: 30s
 
   pgadmin:
-    image: dpage/pgadmin4:9
+    # No version tag maps to this digest (it carries only a date tag), so the
+    # major-version tag stays for the human and the digest does the pinning.
+    image: dpage/pgadmin4:9@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
@@ -67,7 +72,7 @@ services:
         condition: service_healthy
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.0
+    image: quay.io/keycloak/keycloak:26.7.0@sha256:0f198be292568439d700cdbfb893e69a6009bb43a94a06a945b1d3d506c76b13
     restart: unless-stopped
     # --import-realm loads keycloak/realm-import/*.json on every boot; it's
     # a no-op for a realm that already exists, so this is safe to leave on
@@ -138,7 +143,7 @@ services:
   # ("static://202") because it's never used as a reverse proxy here,
   # only as the thing nginx's auth_request/oauth2/ locations call into.
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -213,7 +218,7 @@ services:
   # are different realms and therefore different processes. Same dummy
   # upstream, same auth_request role as the jarvis instance.
   oauth2-proxy-ea:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -266,7 +271,7 @@ services:
   # oauth2-proxy-ea has one: one process, one issuer. Unlike that one it
   # also narrows by group -- s3-admin is root on every bucket.
   oauth2-proxy-infra:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -314,7 +319,7 @@ services:
   # s3-admin hostname. It gates people; PREFECT_AUTH_STRING gates the API,
   # which prefect-flows reaches directly on infra-net, never through here.
   oauth2-proxy-prefect:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -353,7 +358,7 @@ services:
 
   nginx:
     # -otel variant: same image plus ngx_otel_module (see nginx/nginx.conf).
-    image: nginx:alpine-otel
+    image: nginx:1.31.5-alpine-otel@sha256:bae73de6d7d335de5fd156db9e53db5cfa3b74164aa350ebb1a36853ae197b5b
     restart: unless-stopped
     ports:
       - "80:80"
@@ -397,7 +402,9 @@ services:
         condition: service_started
 
   dns:
-    image: technitium/dns-server:latest
+    # No version tag maps to this digest (it predates 15.5.0's tag), so
+    # `latest` stays for the human and the digest does the pinning.
+    image: technitium/dns-server:latest@sha256:3580381de00ba316748abced1ad0f942aff5a625993fa5dee22a902e26d2c524
     restart: unless-stopped
     environment:
       DNS_SERVER_DOMAIN: dns.infra.famillelallier.net
@@ -418,7 +425,7 @@ services:
   # --- LGTM monitoring (Grafana UI only via NGINX; no host ports) ---
 
   prometheus:
-    image: prom/prometheus:v3.5.0
+    image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -438,7 +445,7 @@ services:
       - infra-net
 
   loki:
-    image: grafana/loki:3.5.3
+    image: grafana/loki:3.5.3@sha256:3165cecce301ce5b9b6e3530284b080934a05cd5cafac3d3d82edcb887b45ecd
     restart: unless-stopped
     command: ["-config.file=/etc/loki/config.yml"]
     volumes:
@@ -448,7 +455,7 @@ services:
       - infra-net
 
   tempo:
-    image: grafana/tempo:2.8.1
+    image: grafana/tempo:2.8.1@sha256:bc9245fe3da4e63dc4c6862d9c2dad9bcd8be13d0ba4f7705fa6acda4c904d0e
     restart: unless-stopped
     command: ["-config.file=/etc/tempo/config.yml"]
     volumes:
@@ -458,7 +465,7 @@ services:
       - infra-net
 
   alloy:
-    image: grafana/alloy:v1.10.1
+    image: grafana/alloy:v1.10.1@sha256:582f5a5169cd67a2bdbf98777c1a6f596203f573cdef5c021749fd3279605768
     restart: unless-stopped
     command:
       - run
@@ -476,7 +483,7 @@ services:
       - tempo
 
   grafana:
-    image: grafana/grafana:12.1.0
+    image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
@@ -510,7 +517,7 @@ services:
   cadvisor:
     # gcr.io/cadvisor moved; Docker 29's containerd snapshotter needs ≥ the
     # fix in google/cadvisor#3709 (merged into 0.5x+/0.60).
-    image: ghcr.io/google/cadvisor:v0.60.5
+    image: ghcr.io/google/cadvisor:v0.60.5@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe
     restart: unless-stopped
     # The mounts below (/, /sys, /var/lib/docker, the containerd socket) are
     # absolute paths Docker Desktop does not share from the Mac, so they
@@ -543,7 +550,7 @@ services:
       - --disable_metrics=disk
 
   node-exporter:
-    image: prom/node-exporter:v1.9.1
+    image: prom/node-exporter:v1.9.1@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
     restart: unless-stopped
     command:
       - --path.rootfs=/host
@@ -557,7 +564,7 @@ services:
     pid: host
 
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:v0.17.1
+    image: prometheuscommunity/postgres-exporter:v0.17.1@sha256:38606faa38c54787525fb0ff2fd6b41b4cfb75d455c1df294927c5f611699b17
     restart: unless-stopped
     environment:
       DATA_SOURCE_NAME: postgresql://monitoring:${MONITORING_DB_PASSWORD}@postgres:5432/postgres?sslmode=disable
@@ -568,7 +575,7 @@ services:
         condition: service_healthy
 
   nginx-exporter:
-    image: nginx/nginx-prometheus-exporter:1.4.2
+    image: nginx/nginx-prometheus-exporter:1.4.2@sha256:6edfb73afd11f2d83ea4e8007f5068c3ffaa38078a6b0ad1339e5bd2f637aacd
     restart: unless-stopped
     command:
       - --nginx.scrape-uri=http://nginx:8080/stub_status
@@ -676,7 +683,7 @@ services:
   # --- Message broker (AMQP via NGINX stream; management UI via NGINX http) ---
 
   rabbitmq:
-    image: rabbitmq:4-management
+    image: rabbitmq:4.3.5-management@sha256:57bddb6fbc3498b5d8b5a14dc6f4506073ebcf94c66ba2a7678c335faa8dd631
     restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
@@ -801,7 +808,7 @@ services:
     # OpenBao 2.x: the MPL-licensed fork of HashiCorp Vault, which went BUSL
     # at 1.15. Same KV v2 API and the same `bao`/`vault` CLI, so Vault's
     # documentation and client libraries work against it unchanged.
-    image: openbao/openbao:2.6.2
+    image: openbao/openbao:2.6.2@sha256:11fd73a2102cda9c55d5d881a8c3210303146a7ec1e8ac76f526e175c6d24641
     restart: unless-stopped
     # Without an explicit `server`, the image falls back to its own CMD --
     # a `-dev` server that keeps every secret in RAM and prints a root token
@@ -841,7 +848,7 @@ services:
     # obsidian.infra.famillelallier.net behind the Keycloak gate
     # (nginx/conf.d/obsidian.conf). No auth of its own and a full desktop
     # session inside, so it must never get a `ports:` entry.
-    image: lscr.io/linuxserver/obsidian:latest
+    image: lscr.io/linuxserver/obsidian:v1.13.7-ls144@sha256:c6c86336a2cf57506b0db2beb09ef4a50170808820a59c20063e669d12122dd4
     restart: unless-stopped
     environment:
       PUID: 1000
@@ -860,7 +867,7 @@ services:
   # --- Prefect (UI + API via NGINX behind oauth2-proxy-prefect; no host ports) ---
 
   prefect-server:
-    image: prefecthq/prefect:3.8.7-python3.12
+    image: prefecthq/prefect:3.8.7-python3.12@sha256:f15a7bda40608ee890ff97e963ec3403dc25d633810a4ef1fff93ff303f4ef5f
     restart: unless-stopped
     command: ["prefect", "server", "start", "--host", "0.0.0.0"]
     environment:
@@ -887,7 +894,7 @@ services:
         condition: service_healthy
 
   prefect-flows:
-    image: prefecthq/prefect:3.8.7-python3.12
+    image: prefecthq/prefect:3.8.7-python3.12@sha256:f15a7bda40608ee890ff97e963ec3403dc25d633810a4ef1fff93ff303f4ef5f
     restart: unless-stopped
     # serve.py registers every deployment with its schedule and runs flows as
     # subprocesses of this container: no work pool, no worker, no deploy

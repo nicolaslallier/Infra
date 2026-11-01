@@ -56,14 +56,15 @@ GITHUB_API = "https://api.github.com"
 # new one on every night's run. Invisible in the rendered comment.
 COMMENT_MARKER = "<!-- infra-pr-validation -->"
 
-# Images are pinned by tag rather than digest on purpose: these are throwaway
-# validation containers, and a check that silently stops matching the image
-# the stack actually deploys is worse than one that follows it.
+# IMG_NGINX and IMG_PROMETHEUS mirror docker-compose.yml's pins: a check that
+# stops matching the image the stack deploys is worse than none. Bump them
+# together with the compose file -- Renovate does not touch this file. The
+# rest are throwaway tooling containers and follow their tag.
 IMG_GIT = "alpine/git:latest"
 IMG_SHELLCHECK = "koalaman/shellcheck-alpine:stable"
 IMG_DOCKER_CLI = "docker:28-cli"
-IMG_NGINX = "nginx:alpine-otel"  # must match docker-compose.yml's nginx image
-IMG_PROMETHEUS = "prom/prometheus:latest"
+IMG_NGINX = "nginx:1.31.5-alpine-otel@sha256:bae73de6d7d335de5fd156db9e53db5cfa3b74164aa350ebb1a36853ae197b5b"
+IMG_PROMETHEUS = "prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996"
 
 
 def _token() -> str:
@@ -144,7 +145,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
 
     Each one mounts the workspace the way the real service mounts the repo, so
     a check exercises the same paths the deployed container would see -- that
-    is the whole point of running `nginx -t` in `nginx:alpine-otel` rather than
+    is the whole point of running `nginx -t` in the pinned nginx image rather than
     in some generic linter image.
     """
     ro = lambda path: {"bind": path, "mode": "ro"}  # noqa: E731
