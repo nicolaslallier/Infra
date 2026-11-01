@@ -277,6 +277,11 @@ never orphans another app that's still attached to it):
   collect container logs (all Compose projects on the host) and accepts
   OTLP (`alloy:4317` / `alloy:4318`) for traces forwarded to Tempo.
   Retention is bounded: Loki 31d (compactor), Prometheus 90d or 20GB.
+  Alert rules are provisioned from `monitoring/grafana/provisioning/alerting/`
+  (folder `Infra`, group `infra`, 60s): add a rule to `rules.yml`. The single
+  contact point `ntfy` posts to topic `alerts-infra` using `GRAFANA_NTFY_TOKEN`
+  (`make ntfy-provision app=grafana topic=alerts`; `check-env` only warns when
+  empty). Provisioned rules are read-only in the UI.
 - **Windows machines** — no service of this stack at all: `windows_exporter`
   runs *on* each Windows host and Prometheus scrapes it over the LAN as job
   `windows`. See "Windows machines (`windows_exporter`)" below.

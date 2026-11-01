@@ -1,0 +1,97 @@
+apiVersion: 1
+
+# One folder, one group, evaluated every minute. Add new rules to this group.
+groups:
+  - orgId: 1
+    name: infra
+    folder: Infra
+    interval: 1m
+    rules:
+      - uid: infra-target-down
+        title: Target down
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            # `up == 0` would drop the live targets and leave the down one at value 0,
+            # which a "> 0" threshold never trips; keep every series, test for < 1.
+            # LAN machines and outside stacks are off by design; an exclusion list (not an
+            # allow list) so a new in-stack job alerts by default; give those hosts their
+            # own rule if they ever matter.
+            model: {refId: A, expr: 'up{job!~"windows|macos|ollama|moria|jarvis"}', instant: true}
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: lt, params: [1]}
+        # OK on no data; an unreachable Prometheus shows as the Error state, not "down".
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "{{ $labels.job }} target {{ $labels.instance }} is down"
+        labels: {}
+        isPaused: false
+
+      - uid: infra-disk-low
+        title: Disk low
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # /var/lib is the Docker VM's data disk (the one that fills up);
+              # node-exporter reports no "/" or "/host" mountpoint here.
+              expr: node_filesystem_avail_bytes{job="node",mountpoint="/var/lib"} / node_filesystem_size_bytes{job="node",mountpoint="/var/lib"}
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: lt, params: [0.15]}
+        # OK on no data: a dead node-exporter pages via Target down; if the /var/lib
+        # mountpoint ever disappears (VM/runtime change) this rule goes silent -- re-check
+        # the expr after such changes.
+        noDataState: OK
+        execErrState: Error
+        for: 15m
+        annotations:
+          summary: "Docker data disk has under 15% free"
+        labels: {}
+        isPaused: false
+
+      - uid: infra-restart-loop
+        title: Container restart loop
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: changes(container_start_time_seconds{name=~"infra-.+"}[15m])
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [2]}
+        noDataState: OK
+        execErrState: Error
+        for: 0s
+        annotations:
+          summary: "{{ $labels.name }} restarted more than twice in 15m"
+        labels: {}
+        isPaused: false
