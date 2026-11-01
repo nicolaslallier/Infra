@@ -17,8 +17,8 @@ services:
   runner:
     # A moving tag on purpose. GitHub retires old runner versions
     # server-side, so a digest pinned today ages into a runner the service
-    # refuses to talk to -- the same moving-tag tradeoff as
-    # portainer-ce:lts, made for a harder reason.
+    # refuses to talk to. Unlike every other image in this repo, which is
+    # digest-pinned.
     image: myoung34/github-runner:ubuntu-noble
     restart: unless-stopped
     environment:

@@ -40,12 +40,16 @@ running the stack (`make up`) and exercising it, per the checks below.
 
 ## Architecture
 
+Every image is pinned `tag@sha256` (the index digest). Renovate (`renovate.json`) proposes bumps on
+Saturdays before 6am, never automerges, blocks majors for pgvector/neo4j/openbao/seaweedfs, and
+ignores the runner image and `infra-ollama-proxy`; merging a Renovate PR redeploys the whole stack.
+
 Services on one external Docker network (`infra-net`, created by
 `make net` / `make init`, not by Compose itself — `external: true` in
 `docker-compose.yml` so the network outlives `docker compose down` and
 never orphans another app that's still attached to it):
 
-- **`postgres`** — `pgvector/pgvector:pg18` (Postgres 18 + pgvector;
+- **`postgres`** — `pgvector/pgvector:0.8.6-pg18-bookworm` (Postgres 18 + pgvector;
   Debian bookworm — no alpine tag for pg18). Publishes no host port.
   Per-app provisioning also runs `CREATE EXTENSION IF NOT EXISTS vector`
   as the superuser in each app database, so app roles (e.g. Jarvis RAG
@@ -77,7 +81,7 @@ never orphans another app that's still attached to it):
   oauth2-proxy, `oauth2-proxy-infra` (realm `infra`, client `s3-admin`,
   `OAUTH2_PROXY_ALLOWED_GROUPS: s3-admin`). Only `s3-admin` members get in,
   as full admins; there is no read-only UI role.
-- **`rabbitmq`** — `rabbitmq:4-management`. Publishes no host port. AMQP
+- **`rabbitmq`** — `rabbitmq:4.3.5-management`. Publishes no host port. AMQP
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
@@ -146,7 +150,8 @@ never orphans another app that's still attached to it):
   directions of the `.env` round trip. See "Secrets (OpenBao)" below — the
   seal key and the trade it makes are the part worth reading before touching
   anything here.
-- **`portainer`** — `portainer/portainer-ce:lts`, the Docker management
+- **`portainer`** — `portainer/portainer-ce:2.45.0` (pinned by digest; move to the next LTS
+  by hand, forward only), the Docker management
   UI, at `portainer.infra.famillelallier.net` and directly at
   `https://${LAN_IP}:9443`. The one backend that **publishes its own
   ports** (9443/9000/8000, bound to `${LAN_IP}`) — see "Single-ingress
@@ -165,7 +170,7 @@ never orphans another app that's still attached to it):
   `portainer`, volume `infra_portainer-data`) because it deploys the
   `infra` stack and a redeploy must never stop it. `make portainer-up` /
   `-down` / `-restart` / `-logs` drive it.
-- **`nginx`** — `nginx:alpine-otel`. Fronts every backend application service —
+- **`nginx`** — `nginx:1.31.5-alpine-otel`. Fronts every backend application service —
   the only one of those services with a `ports:` entry. Also listens on
   internal `:8080/stub_status` for `nginx-exporter` (not published on the
   host). The `-otel` variant is load-bearing: `nginx.conf` loads
@@ -691,7 +696,7 @@ Four things here are load-bearing.
 - **Only `prefect-flows` gets the Docker socket.** `prefect-server` has no
   reason to hold it. If the flow goes away, remove the mount with it.
 - **Each check runs in the image the real service uses**, mounted the way the
-  real service mounts the repo — `nginx -t` inside `nginx:alpine-otel`,
+  real service mounts the repo — `nginx -t` inside the pinned nginx image (the same ref as docker-compose.yml),
   `promtool check config` with `monitoring/prometheus/` at `/etc/prometheus`.
 - **`scripts/ci-fake-env.sh` comes from the PR's own checkout**, so a PR that
   breaks it fails on its own change. It renders values shaped the way
