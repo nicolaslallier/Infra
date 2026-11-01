@@ -149,9 +149,19 @@ check-docker:
 migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=1 previews)
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
+# Deploy + health gate. Portainer's API returns before containers are
+# recreated, so record the infra container IDs first and let wait-healthy.sh
+# wait until none of them is left (and everything is up). WAIT_HEALTHY=0 skips.
+define deploy_and_wait
+before=$$(docker ps -a -q --no-trunc --filter label=com.docker.compose.project=infra) \
+  || { echo "deploy aborted: cannot list infra containers (docker ps failed); an empty BEFORE_IDS would let the gate pass on the old stack" >&2; exit 1; }; \
+before=$$(echo $$before); \
+./scripts/portainer-stack.sh $(1) && { [ "$(WAIT_HEALTHY)" = 0 ] || BEFORE_IDS="$$before" ./scripts/wait-healthy.sh $(or $(WAIT_HEALTHY_TIMEOUT),600); }
+endef
+
 ##@ Stack (deploy via Portainer)
 up: check-docker vault-render check-env net app-volumes app-images ## Deploy/redeploy the stack via Portainer (Git main)
-	./scripts/portainer-stack.sh up
+	$(call deploy_and_wait,up)
 
 down: ## Stop the stack via Portainer (keeps volumes)
 	./scripts/portainer-stack.sh down
@@ -171,7 +181,7 @@ status: ## Show service status (alias: ps)
 	docker compose ps
 
 pull: check-docker vault-render check-env net app-volumes app-images ## Redeploy via Portainer, re-pulling images
-	./scripts/portainer-stack.sh pull
+	$(call deploy_and_wait,pull)
 
 config: check-env check-docker ## Validate docker-compose.yml + .env
 	docker compose config
