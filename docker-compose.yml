@@ -140,7 +140,7 @@ services:
   # ("static://202") because it's never used as a reverse proxy here,
   # only as the thing nginx's auth_request/oauth2/ locations call into.
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -215,7 +215,7 @@ services:
   # are different realms and therefore different processes. Same dummy
   # upstream, same auth_request role as the jarvis instance.
   oauth2-proxy-ea:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -268,7 +268,7 @@ services:
   # oauth2-proxy-ea has one: one process, one issuer. Unlike that one it
   # also narrows by group -- s3-admin is root on every bucket.
   oauth2-proxy-infra:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
@@ -316,7 +316,7 @@ services:
   # s3-admin hostname. It gates people; PREFECT_AUTH_STRING gates the API,
   # which prefect-flows reaches directly on infra-net, never through here.
   oauth2-proxy-prefect:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.6.0
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
