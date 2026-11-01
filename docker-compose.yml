@@ -73,6 +73,8 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.0@sha256:0f198be292568439d700cdbfb893e69a6009bb43a94a06a945b1d3d506c76b13
+    # 14d peak 1722 MiB x1.5; the JVM sizes its heap from this limit.
+    mem_limit: 2816m
     restart: unless-stopped
     # --import-realm loads keycloak/realm-import/*.json on every boot; it's
     # a no-op for a realm that already exists, so this is safe to leave on
@@ -451,6 +453,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    # 14d peak 528 MiB x1.5.
+    mem_limit: 1024m
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -478,6 +482,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    # 14d peak 407 MiB x1.5.
+    mem_limit: 768m
     restart: unless-stopped
     command: ["-config.file=/etc/loki/config.yml"]
     volumes:
@@ -746,6 +752,8 @@ services:
     # between releases, so a redeploy must not upgrade it without a commit.
     # Same version as the instance the data was migrated from.
     image: neo4j:2026.07.1-community@sha256:956faa5d14b6beaa629b80c718bfd389ec12064f97e276ed9a58b0c53b25a323
+    # 14d peak 1147 MiB x1.5; above heap 512M + pagecache 256M + 512M floor.
+    mem_limit: 1792m
     restart: unless-stopped
     environment:
       # Read once, on first boot against an empty volume -- changing it
@@ -848,6 +856,8 @@ services:
     # (nginx/conf.d/obsidian.conf). No auth of its own and a full desktop
     # session inside, so it must never get a `ports:` entry.
     image: lscr.io/linuxserver/obsidian:v1.13.7-ls144@sha256:c6c86336a2cf57506b0db2beb09ef4a50170808820a59c20063e669d12122dd4
+    # 14d peak 684 MiB x1.5.
+    mem_limit: 1280m
     restart: unless-stopped
     environment:
       PUID: 1000
@@ -969,6 +979,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s
+    # 14d peak 1176 MiB x1.5 (only ~1 day of history).
+    mem_limit: 1792m
     restart: unless-stopped
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:
