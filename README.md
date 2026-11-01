@@ -74,7 +74,7 @@ make init      # creates infra-net, local dev certs, OpenBao's seal key, copies 
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `S3_ADMIN_SECRET_KEY`,
-`RABBITMQ_DEFAULT_PASS`, `MONITORING_DB_PASSWORD`, and one
+`RABBITMQ_DEFAULT_PASS`, `MORIA_AMQP_PASSWORD`, `MONITORING_DB_PASSWORD`, and one
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the two
 oauth2-proxy cookie keys (`JARVIS_OAUTH_COOKIE_SECRET`,
@@ -158,6 +158,27 @@ below; apps on `infra-net` use `http://openbao:8200`)
 Heaven (backups): `https://heaven.infra.famillelallier.net` (read-only
 snapshot list and health, no login — its own Portainer stack, see
 github.com/nicolaslallier/Heaven)
+
+### Moria's RabbitMQ account
+
+Vhost `moria`, user `moria` (no management tag, no access to `/`), URL
+`amqp://moria:<password>@rabbitmq:5672/moria`. The password is
+`MORIA_AMQP_PASSWORD`, kept in the vault like every other secret
+(`openssl rand -hex 24`: letters and digits only, it goes into a URL;
+`check-env` rejects anything else).
+
+**Order matters: `make up`, `pull` and `config` fail until
+`MORIA_AMQP_PASSWORD` is in the vault.**
+
+1. Infra: `make vault-cli args="kv patch -mount=infra env MORIA_AMQP_PASSWORD=..."`,
+   then `make vault-env`, then `make up`, then `make rabbitmq-provision app=moria`.
+2. Moria: set the Portainer variable `MORIA_AMQP_PASSWORD` of the Moria stack to
+   the same value, then deploy the Moria stack.
+
+Re-run `make rabbitmq-provision app=moria` after a password rotation, and
+after the `rabbitmq-data` volume is wiped (`make clean`, a new host): a fresh
+volume only recreates `RABBITMQ_DEFAULT_USER`, so the `moria` vhost and user
+are gone until you do.
 
 ### Keeping an existing `.env` in step with `.env.example`
 
@@ -551,6 +572,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
+| `make rabbitmq-provision app=<name>` | Create/update an app's RabbitMQ vhost + user (`<APP>_AMQP_PASSWORD` from `.env`; no tags, permissions on its own vhost only) on the **running** broker |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make seal-key` | Generate OpenBao's auto-unseal key (`FORCE=1` replaces it — destroys an existing vault) |

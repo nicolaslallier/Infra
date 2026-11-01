@@ -10,7 +10,7 @@ SHELL := bash
 .PHONY: help test init net certs seal-key app-images up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
-	migrate-volumes keycloak-seed-users s3-provision ntfy-provision \
+	migrate-volumes keycloak-seed-users s3-provision ntfy-provision rabbitmq-provision \
 	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli vault-backup-token \
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
@@ -319,6 +319,10 @@ s3-provision: check-env ## Create/update an app's S3 bucket + identity (app=<nam
 ntfy-provision: check-env ## Create an app's ntfy user + write-only token (app=<name> [topic=<prefix>])
 	@test -n "$(app)" || { echo "usage: make ntfy-provision app=<name> [topic=<topic-prefix>]" >&2; exit 1; }
 	@./scripts/provision-ntfy.sh "$(app)" "$(or $(topic),$(app))"
+
+rabbitmq-provision: check-env ## Create/update an app's RabbitMQ vhost + user (app=<name>; password <APP>_AMQP_PASSWORD)
+	@test -n "$(app)" || { echo "usage: make rabbitmq-provision app=<name>" >&2; exit 1; }
+	@./scripts/provision-rabbitmq.sh "$(app)"
 
 ##@ Secrets (OpenBao)
 # --- OpenBao (the secret store) --------------------------------------------
