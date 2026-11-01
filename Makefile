@@ -32,8 +32,11 @@ export DOCKER_HOST ?= ssh://$(INFRA_SSH_USER)@$(INFRA_HOST)
 # The laptop's checkout (C:\Users\nicol\OpenCode\Infra) as its Docker
 # Desktop VM sees it: Portainer bind-mounts from there, not from this Mac
 # checkout, so 'make up'/'pull' first fast-forward it to origin/main
-# (sync_host_checkout in scripts/portainer-stack.sh).
+# (sync_host_checkout in scripts/portainer-stack.sh). Not under
+# 'make DOCKER_HOST=': the local daemon mounts this checkout.
+ifneq ($(DOCKER_HOST),)
 export PORTAINER_INFRA_DIR ?= /run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra
+endif
 endif
 
 ##@ Setup & host
