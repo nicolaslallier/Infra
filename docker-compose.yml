@@ -737,46 +737,7 @@ services:
       retries: 10
       start_period: 60s
 
-  # --- Notifications (smtp relay + ntfy push; both on infra-net only) ---
-
-  smtp:
-    # Postfix that relays to a smarthost (see SMTP_RELAY_* in .env.example).
-    # Apps on infra-net send to smtp:25 with no credentials; only this
-    # container holds the smarthost login. Publishes no host port: nothing on
-    # the host speaks SMTP, so there is no stream{} passthrough either.
-    # Tag *and* digest, like neo4j and s3. The digest is the manifest-list
-    # digest the registry returns for this tag.
-    image: boky/postfix:5.1.0-alpine@sha256:6e761312e833947f77af755072c0e77b67d298d127595470a79e9454008dd594
-    restart: unless-stopped
-    environment:
-      # No `:?` guards on purpose: a notification relay must not be a
-      # precondition for deploying the whole stack (a git redeploy fails as a
-      # unit). Unset login = mail stays queued, and `make check-env` warns.
-      RELAYHOST: ${SMTP_RELAY_HOST:-}
-      RELAYHOST_USERNAME: ${SMTP_RELAY_USERNAME:-}
-      RELAYHOST_PASSWORD: ${SMTP_RELAY_PASSWORD:-}
-      # Postfix rejects a From outside these domains.
-      ALLOWED_SENDER_DOMAINS: ${SMTP_ALLOWED_SENDER_DOMAINS:-famillelallier.net}
-      # Port 587 on the smarthost: STARTTLS is mandatory, never opportunistic.
-      POSTFIX_smtp_tls_security_level: encrypt
-      # Clients allowed to relay without authentication. infra-net's subnet is
-      # chosen by the daemon (the network is external), so this file cannot
-      # name it: pin SMTP_MYNETWORKS in .env to the exact subnet (`make
-      # check-env` prints it). The default is the private ranges.
-      POSTFIX_mynetworks: ${SMTP_MYNETWORKS:-127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16}
-    volumes:
-      # The mail queue: a message waiting for the smarthost survives a restart.
-      - smtp-spool:/var/spool/postfix
-    networks:
-      infra-net:
-        aliases:
-          - smtp
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z 127.0.0.1 25 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+  # --- Notifications (ntfy push; infra-net only) ---
 
   ntfy:
     # Push notifications. Config is ntfy/server.yml (committed: the drift
@@ -996,7 +957,6 @@ volumes:
   rabbitmq-data:
   neo4j-data:
   neo4j-logs:
-  smtp-spool:
   ntfy-data:
   obsidian-config:
   openbao-data:

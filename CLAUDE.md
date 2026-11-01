@@ -92,19 +92,6 @@ never orphans another app that's still attached to it):
   apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
   exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
   `neo4j-data` volume — and `make clean` deletes that volume like the rest.
-- **`smtp`** — `boky/postfix` (Postfix), pinned by tag *and* digest. Apps on
-  `infra-net` send to `smtp:25` with no credentials; it relays everything to
-  a smarthost (`SMTP_RELAY_*`, a Workspace account by default) over
-  mandatory STARTTLS, because mail sent straight from a home IP is rejected
-  or spam-foldered. Only this container holds the smarthost login. Publishes
-  no host port and has no `stream{}` passthrough: nothing on the host speaks
-  SMTP. `mynetworks` comes from `SMTP_MYNETWORKS`; infra-net is external, so the
-  daemon picks its subnet and compose cannot name it. The default is the broad
-  private ranges and `check-env` warns until `.env` pins the exact subnet.
-  `ALLOWED_SENDER_DOMAINS` rejects any other `From`. The `SMTP_RELAY_*` login
-  has no `:?` guard and `check-env` only warns: a relay is not worth failing a
-  whole-stack redeploy (and the merge-triggered CI deploy) over.
-  Queue in the `smtp-spool` volume.
 - **`ntfy`** — `binwiederhier/ntfy`, pinned by tag *and* digest.
   Push notifications, at `ntfy.infra.famillelallier.net` (NGINX → `ntfy:80`);
   apps use `http://ntfy`. Publishes no host port. `ntfy/server.yml` sets
@@ -124,7 +111,7 @@ never orphans another app that's still attached to it):
   content, goes to ntfy.sh). Prometheus job `ntfy` scrapes the separate metrics listener
   `ntfy:9090` (on `:80` `/metrics` needs credentials under deny-all); the
   vhost 404s `/metrics`.
-  There is no `NTFY_*` key in `.env`; the `SMTP_*`/`NTFY_*` application
+  There is no `NTFY_*` key in `.env`; the `NTFY_*` application
   variables are documented in the README ("Notifications").
 - **`litellm`** — `ghcr.io/berriai/litellm-database`, the LLM gateway, at
   `litellm.infra.famillelallier.net` (NGINX → `litellm:4000`; admin UI at
@@ -315,8 +302,8 @@ interface and relays `/api/` to `heaven:8000` on its own, so
 `nginx/conf.d/heaven.conf` is a plain pass-through to one upstream.
 Moria, the game server (github.com/nicolaslallier/Moria), is the one outside
 stack deliberately **not** on `infra-net`: its `:7777` is port-forwarded to the
-Internet, and a compromised game server must not land next to `smtp` (an
-unauthenticated relay) or `ollama-proxy`. Prometheus scrapes its `:9464/metrics`
+Internet, and a compromised game server must not land next to `ollama-proxy`
+and the other unauthenticated services on `infra-net`. Prometheus scrapes its `:9464/metrics`
 through the Docker host instead (job `moria`, `host.docker.internal:9464`, the
 same route as the laptop's windows_exporter); dashboard `moria.json`
 (`uid: moria-overview`). Never forward `9464` on the router.
@@ -332,7 +319,7 @@ produces connection-refused, not a DNS or reachability problem.
 `scripts/check-env.sh` blocks deploys against a `.env` that can't bring the
 stack up (keys missing vs `.env.example`, `change-me`/empty passwords,
 bad oauth2-proxy cookie keys, a missing/wrong-sized `openbao/seal.key`, a
-`LAN_IP` the host doesn't own; unset `SMTP_RELAY_*` only warns). Rules that apply outside `scripts/`: every
+`LAN_IP` the host doesn't own). Rules that apply outside `scripts/`: every
 cookie-secret recipe must end in `| tr -- '+/' '-_'` (oauth2-proxy decodes
 URL-safe base64 only), and the oauth2-proxy *client* secrets must never get
 a `:?` guard in `docker-compose.yml` — Keycloak creates them on first realm
@@ -549,7 +536,7 @@ This rule governs *backend application services* — anything NGINX fronts
 (`postgres`, `pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `openbao`,
 `portainer`, `grafana`, monitoring backends, and future apps) — not top-level infra
 processes that own a protocol NGINX can't meaningfully front. `postgres`,
-`pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `smtp`, `ntfy`, `grafana`, and the
+`pgadmin`, `keycloak`, `s3`, `s3-admin`, `rabbitmq`, `ntfy`, `grafana`, and the
 rest of LGTM/exporters deliberately have no `ports:` key. All host access
 to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 
@@ -580,7 +567,7 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `neo4j`, `smtp`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
+`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `neo4j`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, or other
 monitoring backends.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
