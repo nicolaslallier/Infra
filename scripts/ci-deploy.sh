@@ -82,7 +82,8 @@ exec docker run --rm \
     # Install only what is missing, so a base image that already ships a
     # tool is not shadowed by a second copy of it.
     missing=""
-    for t in bash make jq git; do
+    # curl: make up drives Portainer through its API (scripts/lib/portainer-api.sh).
+    for t in bash make jq git curl; do
       command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
     done
     docker compose version >/dev/null 2>&1 || missing="$missing docker-cli-compose"
