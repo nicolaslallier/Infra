@@ -1019,21 +1019,11 @@ successful snapshot update).
 
 ## Notifications
 
-Two services let applications on `infra-net` notify people, both with no host
-port:
+`ntfy` lets applications on `infra-net` notify people. It publishes no host port:
 
 | Channel | Service | Address on `infra-net` | From a browser / phone |
 |---|---|---|---|
-| Email | `smtp` (Postfix relay) | `smtp:25`, no credentials | — |
 | Push | `ntfy` | `http://ntfy` | `https://ntfy.infra.famillelallier.net` |
-
-`smtp` does not deliver mail itself: it relays everything to a smarthost
-(`SMTP_RELAY_HOST`, a dedicated Google Workspace account by default), because
-mail sent straight from a home IP is rejected or spam-foldered. Only that
-container holds the smarthost login; applications authenticate to nothing.
-It relays without authentication only for clients in `SMTP_MYNETWORKS` (pin it
-to `infra-net`'s subnet; `make check-env` warns while it is still the broad
-private-range default) and rejects a `From` outside `SMTP_ALLOWED_SENDER_DOMAINS`. Queued mail survives a restart (`smtp-spool`).
 
 `ntfy` is deny-all (`ntfy/server.yml`): no topic is readable or writable
 without a user or token. Its users, ACLs and tokens live in the `ntfy-data`
@@ -1041,18 +1031,11 @@ volume. The NGINX vhost is deliberately not behind oauth2-proxy, since phones
 and apps authenticate with a token or Basic auth.
 
 **Variables for applications.** These are conventions for the application's
-own `.env` / compose file, not variables Infra reads. Infra's side is only
-`SMTP_RELAY_HOST`, `SMTP_RELAY_USERNAME`, `SMTP_RELAY_PASSWORD`,
-`SMTP_ALLOWED_SENDER_DOMAINS` and `SMTP_MYNETWORKS` in `.env.example`; there are no `NTFY_*`
+own `.env` / compose file, not variables Infra reads. There are no `NTFY_*`
 variables in Infra's `.env`.
 
 | Variable | Value |
 |---|---|
-| `SMTP_HOST` | `smtp` |
-| `SMTP_PORT` | `25` |
-| `SMTP_FROM` | `notifications@famillelallier.net`, the smarthost account. Any other address in `SMTP_ALLOWED_SENDER_DOMAINS` passes Postfix, but Gmail rewrites the From to the authenticated account unless that address is a verified "Send mail as" alias of it |
-| `SMTP_TLS` | `none` (plain SMTP inside `infra-net`; TLS is enforced on the smarthost hop) |
-| `SMTP_USER` / `SMTP_PASSWORD` | empty |
 | `NTFY_URL` | `http://ntfy` |
 | `NTFY_TOKEN` | the token printed by `make ntfy-provision` |
 | `NTFY_TOPIC` | `<app>-<category>`, e.g. `jarvis-alerts` |
@@ -1065,11 +1048,7 @@ curl -H "Authorization: Bearer $NTFY_TOKEN" \
      -d "Nightly backup OK" "$NTFY_URL/$NTFY_TOPIC"
 ```
 
-**Giving an application access.** The `SMTP_RELAY_*` keys have no `:?` guard
-(an unset login never blocks a deploy; `make check-env` warns, and mail stays
-queued). Set the password in `.env` (an app password for the relay account,
-from <https://myaccount.google.com/apppasswords>), run `make vault-seed`, then
-`make up`. Then:
+**Giving an application access.**
 
 ```bash
 make ntfy-provision app=<name> [topic=<prefix>]
