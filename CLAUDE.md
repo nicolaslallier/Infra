@@ -820,8 +820,39 @@ gzipped), OpenBao (raft snapshot, below), neo4j (`neo4j-admin database dump` of 
 ntfy (tar of its volume) into the external volume `infra-backups`
 (`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
 `BACKUP_KEEP` (3) of each are kept. Heaven is to snapshot that volume (not wired
-yet; until then the backups share the data's disk); this flow only leaves
-consistent files there.
+yet); this flow only leaves consistent files there.
+
+The volume can live on an SMB share on mac-infra (192.168.2.35, external
+disk `/Volumes/Data`). Set `BACKUPS_SMB_SHARE` (`//192.168.2.35/infra-backups`),
+`BACKUPS_SMB_USER` and `BACKUPS_SMB_PASSWORD` (a secret) **in the vault**
+(`infra/env`), not in `.env`: every `make up` re-renders `.env` from the vault
+and blanks hand edits. E.g. `make vault-cli args="kv patch -mount=infra env
+BACKUPS_SMB_SHARE=... BACKUPS_SMB_USER=..."`, and the password via stdin, prompted
+silently (bash and zsh) -- at a terminal a bare `BACKUPS_SMB_PASSWORD=-` stores
+an empty value, and `printf '%s'` keeps a trailing newline out of it:
+`read -rs P && printf '%s' "$P" | make vault-cli args="kv patch -mount=infra env BACKUPS_SMB_PASSWORD=-"; unset P`. All three or none (`check-env` rejects a partial
+set); none means a plain local volume, so the backups then share the data's
+disk. `scripts/portainer-volumes.sh` (reads only those keys from `.env`)
+creates it with the `local` driver, `type=cifs`, `vers=3.0`, `uid=0`,
+`gid=65534`, `file_mode=0640`, `dir_mode=0750`: `prefect-flows` writes as
+root, node-exporter runs as nobody and must read `metrics/backup.prom`, and a
+postgres dump holds every app's data, so nothing is world-readable.
+
+- **It mounts lazily.** Volume creation succeeds even with the Mac
+  unreachable; the failure surfaces when `prefect-flows` / node-exporter
+  start, and the deploy health gate names them. The Mac must be awake at
+  01:30 (Energy settings, or `sudo pmset -c sleep 0`).
+- **Mac setup (owner):** System Settings -> General -> Sharing -> File Sharing
+  -> add `/Volumes/Data/infra-backups`, accessible to a dedicated macOS user
+  with read & write.
+- **Trade-off:** Docker keeps the mount options, password included, in the
+  volume's metadata on the laptop; anyone who can read it has daemon access,
+  which is root anyway.
+- **Migration:** driver options are immutable, so an existing local
+  `infra-backups` (or one with other credentials) makes `make app-volumes`
+  fail with the one-time steps (remove `infra-prefect-flows-1` and
+  `infra-node-exporter-1`, `docker volume rm infra-backups`, `make up`); at
+  most a few nightly dumps are lost. It never deletes anything itself.
 
 - **Neo4j is stopped for the dump** (Community has no online dump): about a
   minute of outage every night, and `start()` runs in `finally`.
@@ -1033,7 +1064,9 @@ Four things here are load-bearing.
   `openbao-data` volume can decrypt the vault offline.** That is the
   documented use of this seal type — chaining the vault to an existing source
   of trust — and here that source is the machine's own disk. Back the key up
-  somewhere the volume is not; lose it and the vault is unrecoverable, since
+  somewhere the volume is not (a copy is kept in the owner's password manager,
+  with its base64 and sha256 noted beside it; never in the repo, `.env` or the
+  vault); lose it and the vault is unrecoverable, since
   no recovery key unseals an auto-sealed vault (the recovery key in
   `.openbao.env` only regenerates a *root token*).
 - **The seal key is a file, not a `.env` value.** `.env` is handed to
