@@ -34,9 +34,24 @@ That ordering is why the Makefile declares `.NOTPARALLEL:`: prerequisites are
 only made left to right in a serial build. See "Rendering `.env` at deploy
 time" under "Secrets (OpenBao)" below for when it skips and when it fails.
 
-There is no build/lint/test step — this repo is Compose config, NGINX
-config, and shell scripts, not an application. Validate changes by actually
-running the stack (`make up`) and exercising it, per the checks below.
+There is no build or lint step — this repo is Compose config, NGINX
+config, and shell scripts, not an application. `make test`
+(`scripts/test.sh`) runs everything that can be checked without
+deploying: the flows' plain-assert tests; the `pr-validation` flow's checks,
+through `_run_all()` in `pr_validation.py` — the same function the nightly
+`run_checks` calls, so keep any new check in there; and cases asserting
+`check-env.sh` *rejects* broken `.env` files (after first asserting the
+unmutated one passes). It works on a throwaway copy of exactly the files git
+lists (`tar --no-recursion`, so a nested worktree's real `.env` never comes
+along) under `~/.cache/infra-test`, with a `ci-fake-env.sh` `.env`. It pins
+`DOCKER_HOST` to the *local* daemon and drops `DOCKER_CONTEXT`, because only
+the local daemon can bind-mount that copy — so Docker Desktop must be running
+on the machine `make test` runs on. The `prefect` and `fastapi` versions it
+tests against are read from the pinned `prefecthq/prefect` image (tag, and
+`pip show` cached per image digest), so a Renovate bump moves them too; a
+floating fastapi breaks prefect's import. Beyond
+that, validate changes by actually running the stack (`make up`) and
+exercising it, per the checks below.
 
 ## Architecture
 
@@ -808,10 +823,9 @@ Setup, once:
    JSON afterwards.
 3. Create the `Tri/...` labels in Gmail. The flow creates `Tri/_garder`.
 
-The flows have plain-assert tests, the only tests in this repo:
-`uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`
-and the same for `prefect/flows/test_serve.py` and
-`prefect/flows/test_sort_mail.py`.
+The flows have plain-assert tests (`prefect/flows/test_*.py`); `make test`
+runs them (`TEST_ONLY=unit make test` runs only them), against the prefect
+and fastapi versions of the pinned `prefecthq/prefect` image.
 
 #### `backup`
 

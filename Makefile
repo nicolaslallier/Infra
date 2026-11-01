@@ -7,7 +7,7 @@ SHELL := bash
 # depends on that: vault-render writes the .env that check-env then reads.
 .NOTPARALLEL:
 
-.PHONY: help init net certs seal-key app-images up down restart logs ps status pull config \
+.PHONY: help test init net certs seal-key app-images up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision \
@@ -83,6 +83,9 @@ seal-key: ## Generate OpenBao's auto-unseal key (FORCE=1 to replace)
 
 hosts: ## Print /etc/hosts lines for this stack
 	@./scripts/print-hosts-entries.sh
+
+test: ## Run the flow tests, the pr-validation checks and check-env's rejection cases (TEST_ONLY=unit: flow tests only)
+	@./scripts/test.sh
 
 # Asserts .env is complete and usable before anything deploys against it:
 # every setting .env.example defines is present (a variable added with a new

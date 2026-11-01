@@ -118,7 +118,7 @@ elif [ -z "$info" ]; then
 	exit 2
 fi
 
-IFS='|' read -r dd_name dd_os dd_mem dd_cpu <<<"$info"
+IFS='|' read -r dd_name dd_os _ dd_cpu <<<"$info"
 
 # Under Docker Desktop these are "docker-desktop" / "Docker Desktop"; under
 # Colima they are "colima" / "Alpine Linux v3.x". A leftover DOCKER_CONTEXT,

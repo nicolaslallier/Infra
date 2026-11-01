@@ -2,6 +2,7 @@
 # Ensure infra-net exists, through Portainer's API (see lib/portainer-api.sh) instead of the docker CLI, so it works from a
 # Mac with no daemon access. Reports whether the portainer container is on it.
 set -euo pipefail
+# shellcheck source=lib/portainer-api.sh
 . "$(dirname "$0")/lib/portainer-api.sh"
 
 printf '\n\033[1mNetwork infra-net\033[0m\n'

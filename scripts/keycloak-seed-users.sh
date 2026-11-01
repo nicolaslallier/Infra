@@ -13,6 +13,7 @@ if [ ! -f .env ]; then
 fi
 
 set -a
+# shellcheck source=/dev/null  # .env is generated, not lintable source
 source .env
 set +a
 

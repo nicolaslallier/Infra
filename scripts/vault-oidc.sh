@@ -21,7 +21,10 @@ cd "$(dirname "$0")/.."
 die() { echo "vault-oidc.sh: $*" >&2; exit 1; }
 [ -f .env ] || die ".env not found (run 'make init' first)"
 [ -f certs/infra-ca.crt ] || die "certs/infra-ca.crt missing (run 'make certs')"
-set -a; . ./.env; set +a
+set -a
+# shellcheck source=/dev/null  # .env is generated, not lintable source
+. ./.env
+set +a
 : "${KEYCLOAK_ADMIN:?}" "${KEYCLOAK_ADMIN_PASSWORD:?}"
 
 VAULT_URL="https://vault.infra.famillelallier.net"

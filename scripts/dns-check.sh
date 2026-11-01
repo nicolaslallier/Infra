@@ -19,8 +19,10 @@ if ! command -v dig >/dev/null 2>&1; then
 fi
 
 if [ -f .env ]; then
-  # shellcheck disable=SC1091
-  set -a; source .env; set +a
+  set -a
+  # shellcheck source=/dev/null  # .env is generated, not lintable source
+  source .env
+  set +a
 fi
 
 RESOLVER="${1:-${LAN_IP:?dns-check.sh: LAN_IP not set in .env and no resolver given}}"

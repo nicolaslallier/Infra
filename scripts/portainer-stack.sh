@@ -158,7 +158,10 @@ esac
 if [ "$cmd" != status ]; then
   check_main_checkout
   [ -f .env ] || die ".env not found (run 'make init' first)"
-  set -a; . ./.env; set +a
+  set -a
+  # shellcheck source=/dev/null  # .env is generated, not lintable source
+  . ./.env
+  set +a
 fi
 
 # PORTAINER_API_KEY lives in its own gitignored file, not .env: .env is
