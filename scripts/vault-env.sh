@@ -32,20 +32,17 @@ die() { echo "vault-env.sh: $*" >&2; exit 1; }
 : "${BAO_TOKEN:?vault-env.sh: BAO_TOKEN not set in .openbao.env}"
 export BAO_TOKEN
 
-# The token goes in as the first line of stdin, never as an argument, so it
-# stays out of the host's process list. Not `-e BAO_TOKEN`: on this host
-# neither `docker compose exec` nor `docker exec` forwards a bare `-e VAR`.
-bao() {
-  printf '%s\n' "$BAO_TOKEN" \
-    | docker compose exec -T openbao sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' bao "$@"
-}
+# shellcheck source=lib/bao.sh
+. scripts/lib/bao.sh
 
-secret_json="$(bao kv get -format=json -mount="$MOUNT" "$SECRET" 2>/dev/null | jq -c '.data.data' || true)"
+# bao's own stderr is kept: "no container" and "permission denied" are very
+# different problems, and both used to read as "empty".
+secret_json="$(bao kv get -format=json -mount="$MOUNT" "$SECRET" | jq -c '.data.data' || true)"
 if [ -z "$secret_json" ] || [ "$secret_json" = "null" ]; then
   die "$MOUNT/$SECRET is empty or unreadable.
   If this vault has never been seeded, run 'make vault-seed' first (it copies
   the current .env in). If it has, check that BAO_TOKEN in .openbao.env is
-  still valid: 'docker compose exec openbao bao token lookup'."
+  still valid: 'scripts/vault-cli.sh token lookup'."
 fi
 
 tmp="$(mktemp -d)"

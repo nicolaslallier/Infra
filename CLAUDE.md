@@ -50,7 +50,7 @@ never orphans another app that's still attached to it):
   Per-app provisioning also runs `CREATE EXTENSION IF NOT EXISTS vector`
   as the superuser in each app database, so app roles (e.g. Jarvis RAG
   migrations) can use the `vector` type without needing CREATE EXTENSION
-  privilege themselves.
+  privilege themselves. Logs connections/disconnections (`command:` flags).
 - **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
 - **`keycloak`** — `quay.io/keycloak/keycloak`. Publishes no host port;
   uses the shared `postgres` cluster (database/role `keycloak`, via the
@@ -276,6 +276,7 @@ never orphans another app that's still attached to it):
   Postgres database/role `grafana`. Alloy mounts the Docker socket to
   collect container logs (all Compose projects on the host) and accepts
   OTLP (`alloy:4317` / `alloy:4318`) for traces forwarded to Tempo.
+  Retention is bounded: Loki 31d (compactor), Prometheus 90d or 20GB.
   Alert rules are provisioned from `monitoring/grafana/provisioning/alerting/`
   (folder `Infra`, group `infra`, 60s): add a rule to `rules.yml`. The single
   contact point `ntfy` posts to topic `alerts-infra` using `GRAFANA_NTFY_TOKEN`
@@ -1067,6 +1068,9 @@ The running container is found by its compose label
 with `docker compose ps`, which would have to interpolate
 `docker-compose.yml` first and so would die on the very `${VAR:?}` guards a
 stale `.env` is there to fix.
+The `vault-*` scripts reach the container the same way (`scripts/lib/bao.sh`:
+labels, then `docker exec`), never through `docker compose exec`, for the same
+reason.
 
 Not done here, and worth knowing before assuming otherwise: the vault's only
 login is the root token in `.openbao.env`. There is no Keycloak OIDC auth

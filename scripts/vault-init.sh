@@ -23,14 +23,8 @@ MOUNTS=(infra ea)
 
 die() { echo "vault-init.sh: $*" >&2; exit 1; }
 
-# `bao` inside the container. The token goes in as the first line of stdin,
-# never as an argument, so it cannot be read out of another user's `ps`.
-# Not `-e BAO_TOKEN`: on this host neither `docker compose exec` nor
-# `docker exec` forwards a bare `-e VAR`, and the container gets it unset.
-bao() {
-  printf '%s\n' "$BAO_TOKEN" \
-    | docker compose exec -T openbao sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' bao "$@"
-}
+# shellcheck source=lib/bao.sh
+. scripts/lib/bao.sh
 
 [ -f openbao/seal.key ] || die "openbao/seal.key is missing -- run 'make seal-key' first, then redeploy."
 
@@ -124,7 +118,7 @@ done
 # SIGHUP. This process became active during initialisation above, i.e. after
 # it had already read its config, so the first run needs the HUP.
 if ! bao audit list -format=json 2>/dev/null | jq -e 'length > 0' >/dev/null; then
-  docker compose kill -s HUP openbao >/dev/null 2>&1 || true
+  docker kill -s HUP "$(openbao_container)" >/dev/null 2>&1 || true
   for _ in 1 2 3 4 5; do
     sleep 1
     if bao audit list -format=json 2>/dev/null | jq -e 'length > 0' >/dev/null; then break; fi
