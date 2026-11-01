@@ -36,7 +36,7 @@ die() { echo "vault-seed.sh: $*" >&2; exit 1; }
 export BAO_TOKEN
 
 # shellcheck source=lib/bao.sh
-. "$(dirname "$0")/lib/bao.sh"
+. scripts/lib/bao.sh
 
 # KEY<TAB>VALUE for every assignment in .env, same notion of "an assignment"
 # that scripts/check-env.sh uses. A key assigned twice keeps the last value,

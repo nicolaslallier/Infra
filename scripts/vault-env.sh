@@ -33,7 +33,7 @@ die() { echo "vault-env.sh: $*" >&2; exit 1; }
 export BAO_TOKEN
 
 # shellcheck source=lib/bao.sh
-. "$(dirname "$0")/lib/bao.sh"
+. scripts/lib/bao.sh
 
 # bao's own stderr is kept: "no container" and "permission denied" are very
 # different problems, and both used to read as "empty".

@@ -24,7 +24,7 @@ MOUNTS=(infra ea)
 die() { echo "vault-init.sh: $*" >&2; exit 1; }
 
 # shellcheck source=lib/bao.sh
-. "$(dirname "$0")/lib/bao.sh"
+. scripts/lib/bao.sh
 
 [ -f openbao/seal.key ] || die "openbao/seal.key is missing -- run 'make seal-key' first, then redeploy."
 

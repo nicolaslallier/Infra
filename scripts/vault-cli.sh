@@ -21,7 +21,7 @@ fi
 export BAO_TOKEN="${BAO_TOKEN:-}"
 
 # shellcheck source=lib/bao.sh
-. "$(dirname "$0")/lib/bao.sh"
+. scripts/lib/bao.sh
 # When stdin is a pipe it follows the token, so
 # `... | make vault-cli args="kv put -mount=infra x -"` still works. No TTY:
 # stdin is the token pipe, so interactive prompts (bao login) will not work.
