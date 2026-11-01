@@ -14,7 +14,9 @@ groups:
           - refId: A
             relativeTimeRange: {from: 600, to: 0}
             datasourceUid: prometheus
-            model: {refId: A, expr: "up == 0", instant: true}
+            # `up == 0` would drop the live targets and leave the down one at value 0,
+            # which a "> 0" threshold never trips; keep every series, test for < 1.
+            model: {refId: A, expr: "up", instant: true}
           - refId: B
             datasourceUid: __expr__
             model:
@@ -22,7 +24,8 @@ groups:
               type: threshold
               expression: A
               conditions:
-                - evaluator: {type: gt, params: [0]}
+                - evaluator: {type: lt, params: [1]}
+        # OK on no data; an unreachable Prometheus shows as the Error state, not "down".
         noDataState: OK
         execErrState: Error
         for: 5m
@@ -52,7 +55,8 @@ groups:
               expression: A
               conditions:
                 - evaluator: {type: lt, params: [0.15]}
-        noDataState: NoData
+        # OK, not NoData: a vanished node-exporter already pages via Target down.
+        noDataState: OK
         execErrState: Error
         for: 15m
         annotations:
