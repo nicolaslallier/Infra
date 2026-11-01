@@ -35,13 +35,8 @@ die() { echo "vault-seed.sh: $*" >&2; exit 1; }
 : "${BAO_TOKEN:?vault-seed.sh: BAO_TOKEN not set in .openbao.env}"
 export BAO_TOKEN
 
-# The token goes in as the first line of stdin, never as an argument, so it
-# stays out of the host's process list. Not `-e BAO_TOKEN`: on this host
-# neither `docker compose exec` nor `docker exec` forwards a bare `-e VAR`.
-# bao() sends only the token; bao_in() sends it followed by this stdin.
-_bao() { docker compose exec -T openbao sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' bao "$@"; }
-bao() { printf '%s\n' "$BAO_TOKEN" | _bao "$@"; }
-bao_in() { { printf '%s\n' "$BAO_TOKEN"; cat; } | _bao "$@"; }
+# shellcheck source=lib/bao.sh
+. scripts/lib/bao.sh
 
 # KEY<TAB>VALUE for every assignment in .env, same notion of "an assignment"
 # that scripts/check-env.sh uses. A key assigned twice keeps the last value,

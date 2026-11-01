@@ -1062,6 +1062,9 @@ The running container is found by its compose label
 with `docker compose ps`, which would have to interpolate
 `docker-compose.yml` first and so would die on the very `${VAR:?}` guards a
 stale `.env` is there to fix.
+The `vault-*` scripts reach the container the same way (`scripts/lib/bao.sh`:
+labels, then `docker exec`), never through `docker compose exec`, for the same
+reason.
 
 Not done here, and worth knowing before assuming otherwise: the vault's only
 login is the root token in `.openbao.env`. There is no Keycloak OIDC auth
