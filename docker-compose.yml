@@ -131,10 +131,15 @@ services:
           exec 3<>/dev/tcp/127.0.0.1/9000 &&
           printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
           cat <&3 | grep -q '200 OK'
+      # A warm boot logs "started in ~10s", but four oauth2-proxies
+      # depend_on this being healthy and compose aborts the whole deploy
+      # ("Container infra-keycloak-1 Error") when it is not, leaving nginx
+      # in `Created`. A cold boot (JVM + DB schema/realm import after
+      # postgres was recreated) is several times slower, so allow ~6 min.
       interval: 10s
       timeout: 5s
-      retries: 12
-      start_period: 60s
+      retries: 30
+      start_period: 120s
 
   # Nginx auth_request backend for the Jarvis vhost's Keycloak login gate
   # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself and
@@ -359,6 +364,13 @@ services:
   nginx:
     # -otel variant: same image plus ngx_otel_module (see nginx/nginx.conf).
     image: nginx:1.31.5-alpine-otel@sha256:bae73de6d7d335de5fd156db9e53db5cfa3b74164aa350ebb1a36853ae197b5b
+    # the internal stub_status listener nginx-exporter scrapes.
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/stub_status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
     ports:
       - "80:80"
@@ -405,6 +417,13 @@ services:
     # No version tag maps to this digest (it predates 15.5.0's tag), so
     # `latest` stays for the human and the digest does the pinning.
     image: technitium/dns-server:latest@sha256:3580381de00ba316748abced1ad0f942aff5a625993fa5dee22a902e26d2c524
+    # TCP connect to the web console; the image has bash but no wget/curl.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5380"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
     environment:
       DNS_SERVER_DOMAIN: dns.infra.famillelallier.net
@@ -426,6 +445,12 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml
@@ -446,6 +471,13 @@ services:
 
   loki:
     image: grafana/loki:3.5.3@sha256:3165cecce301ce5b9b6e3530284b080934a05cd5cafac3d3d82edcb887b45ecd
+    # only busybox wget is on hand in this image.
+    healthcheck:
+      test: ["CMD", "/busybox/wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3100/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     command: ["-config.file=/etc/loki/config.yml"]
     volumes:
@@ -484,6 +516,12 @@ services:
 
   grafana:
     image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
@@ -829,6 +867,13 @@ services:
 
   prefect-server:
     image: prefecthq/prefect:3.8.7-python3.12@sha256:f15a7bda40608ee890ff97e963ec3403dc25d633810a4ef1fff93ff303f4ef5f
+    # /api/health is exempt from the auth string (the rest 401s), so no secret in the probe.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4200/api/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
     restart: unless-stopped
     command: ["prefect", "server", "start", "--host", "0.0.0.0"]
     environment:
@@ -860,8 +905,8 @@ services:
     # serve.py registers every deployment with its schedule and runs flows as
     # subprocesses of this container: no work pool, no worker, no deploy
     # step. If the API is not up yet it exits, and the restart is the retry
-    # (no healthcheck on prefect-server: with auth on, one would need the
-    # secret on its command line).
+    # (prefect-server's healthcheck uses /api/health, which the auth string
+    # exempts, so it needs no secret; this container does not depend on it).
     working_dir: /opt/prefect/flows
     command: ["python", "serve.py"]
     environment:
@@ -917,6 +962,13 @@ services:
     # Pinned by tag *and* digest: this container holds the master key and the
     # DB salt, and main-stable moves under every redeploy. Upgrade on purpose.
     image: ghcr.io/berriai/litellm-database:v1.83.14-stable@sha256:da4ab06d9d57da205263877425544d6df8e78147737b0dd8dc1e9e93a6d8ac2e
+    # liveliness needs no key.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
     restart: unless-stopped
     command: ["--config", "/app/config.yaml", "--port", "4000"]
     environment:

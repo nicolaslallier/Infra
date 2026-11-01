@@ -377,6 +377,22 @@ Things that look odd and are load-bearing:
   outage on every `make up`, including a momentary LAN DNS drop from
   `dns` — this is a real behavior change from the pre-Portainer stack, not
   a bug.
+- **`up`/`pull` end with a health gate (`scripts/wait-healthy.sh`).**
+  Portainer's API returns before containers are recreated, and a compose run
+  that aborts half way (a dependency going unhealthy, e.g. keycloak) leaves
+  the rest — `nginx` included — in `Created` while the deploy reports
+  success. So the Makefile records the infra container IDs just before the
+  call (`BEFORE_IDS`) and the gate then polls (read-only: `docker ps -a` /
+  `inspect` on the `com.docker.compose.project=infra` label, never starts
+  anything) until no listed container still has a pre-deploy ID, none is
+  `created`/`restarting`/`exited`, and none is health `starting`/`unhealthy`;
+  timeout 600s, exit 1 with each offender, its last health log line and a
+  `docker start <names>` hint. It is ID-based because "everything is healthy"
+  is also true of the old stack before Portainer has touched it.
+  `WAIT_HEALTHY=0 make up` skips it. Services with a `healthcheck:` are
+  nginx, grafana, prometheus, loki, litellm, prefect-server (`/api/health`
+  is exempt from the auth string), dns, plus the older ones; the
+  oauth2-proxies have none (their image has no shell or probe binary).
 - **`.env` stays the source of truth for the stack itself.** Every `up` /
   `pull` sends it as the stack env (Portainer writes it to `stack.env`,
   hence the two optional `env_file` entries on `postgres`). Edits made in
