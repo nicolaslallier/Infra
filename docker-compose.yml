@@ -931,6 +931,39 @@ services:
     depends_on:
       - prefect-server
 
+  litellm:
+    # LLM gateway: OpenAI- and Anthropic-format API (Claude Code, opencode,
+    # scripts) in front of exo on the Macs and Ollama. The -database image
+    # ships Prisma, which LiteLLM needs for its admin UI, virtual keys and
+    # spend tracking -- without a DATABASE_URL the UI login answers "Not
+    # connected to DB". Database/role `litellm`, provisioned like any other
+    # app (APP_DATABASES / make provision-app app=litellm).
+    # Pinned by tag *and* digest: this container holds the master key and the
+    # DB salt, and main-stable moves under every redeploy. Upgrade on purpose.
+    image: ghcr.io/berriai/litellm-database:v1.83.14-stable@sha256:da4ab06d9d57da205263877425544d6df8e78147737b0dd8dc1e9e93a6d8ac2e
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      # The password sits inside a URL: keep it url-safe (hex).
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      # Encrypts provider credentials stored in the DB. Never change it once
+      # models have been added in the UI: they become undecryptable.
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?Set LITELLM_SALT_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      UI_USERNAME: ${LITELLM_UI_USERNAME:-admin}
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD:?Set LITELLM_UI_PASSWORD in .env}
+      # exo's OpenAI endpoint. Macs are reached by LAN address, never by
+      # host.docker.internal (that is the Windows Docker host).
+      EXO_API_BASE: ${EXO_API_BASE:-http://192.168.2.35:52415/v1}
+      STORE_MODEL_IN_DB: "True"
+    volumes:
+      - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - infra-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 networks:
   infra-net:
     external: true
