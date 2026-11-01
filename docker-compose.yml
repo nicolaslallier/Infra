@@ -18,6 +18,9 @@ services:
     # PGDATA layout matches stock postgres:18 (/var/lib/postgresql/18/docker).
     image: pgvector/pgvector:pg18
     restart: unless-stopped
+    # Audit trail of who connected and when (lands in Loki via Alloy). PG18
+    # still accepts `on` for log_connections (= receipt,authentication,authorization).
+    command: ["postgres", "-c", "log_connections=on", "-c", "log_disconnections=on"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -420,7 +423,10 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=15d
+      # Whichever limit is hit first applies: the size cap keeps a busy
+      # month from filling the disk image before 90d is reached.
+      - --storage.tsdb.retention.time=90d
+      - --storage.tsdb.retention.size=20GB
       - --web.enable-lifecycle
     volumes:
       - ${INFRA_DIR:-.}/monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
