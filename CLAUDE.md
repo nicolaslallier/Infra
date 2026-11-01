@@ -389,7 +389,10 @@ Things that look odd and are load-bearing:
   timeout 600s, exit 1 with each offender, its last health log line and a
   `docker start <names>` hint. It is ID-based because "everything is healthy"
   is also true of the old stack before Portainer has touched it.
-  `WAIT_HEALTHY=0 make up` skips it. Services with a `healthcheck:` are
+  `WAIT_HEALTHY=0 make up` skips it; `WAIT_HEALTHY_TIMEOUT=<seconds>`
+  changes the 600s. A one-shot/init service added to the infra project would
+  sit in `exited` and fail every deploy unless the gate is taught to skip it.
+  Services with a `healthcheck:` are
   nginx, grafana, prometheus, loki, litellm, prefect-server (`/api/health`
   is exempt from the auth string), dns, plus the older ones; the
   oauth2-proxies have none (their image has no shell or probe binary).
