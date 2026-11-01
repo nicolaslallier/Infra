@@ -822,19 +822,35 @@ ntfy (tar of its volume) into the external volume `infra-backups`
 `BACKUP_KEEP` (3) of each are kept. Heaven is to snapshot that volume (not wired
 yet); this flow only leaves consistent files there.
 
-The volume can live on the NAS: set `BACKUPS_NFS_ADDR` and
-`BACKUPS_NFS_EXPORT` in `.env` (both or neither; `check-env` rejects one
-alone) and `scripts/portainer-volumes.sh` creates `infra-backups` with the
-`local` driver over NFSv4.1 (`soft,timeo=100,retrans=3`: a down NAS fails
-reads and writes instead of hanging `prefect-flows` and node-exporter; the
-backup alerts cover it). With both empty it is a plain local volume, so the
-backups then share the data's disk. The export must allow the laptop's address
-read-write (Docker Desktop's VM NATs through it), and the flow writes as root:
-use `no_root_squash`, or an export owned by the squashed uid. Driver options
-are immutable, so an existing local `infra-backups` makes `make app-volumes`
-fail with the one-time migration (remove `infra-prefect-flows-1` and
-`infra-node-exporter-1`, `docker volume rm infra-backups`, `make up`); at most
-a few nightly dumps are lost. The script reads only those two keys from `.env`.
+The volume can live on an SMB share on mac-infra (192.168.2.35, external
+disk `/Volumes/Data`). Set `BACKUPS_SMB_SHARE` (`//192.168.2.35/infra-backups`),
+`BACKUPS_SMB_USER` and `BACKUPS_SMB_PASSWORD` (a secret) **in the vault**
+(`infra/env`), not in `.env`: every `make up` re-renders `.env` from the vault
+and blanks hand edits. E.g. `make vault-cli args="kv patch -mount=infra env
+BACKUPS_SMB_SHARE=... BACKUPS_SMB_USER=..."`, and the password via stdin with
+`BACKUPS_SMB_PASSWORD=-`. All three or none (`check-env` rejects a partial
+set); none means a plain local volume, so the backups then share the data's
+disk. `scripts/portainer-volumes.sh` (reads only those keys from `.env`)
+creates it with the `local` driver, `type=cifs`, `vers=3.0`, `uid=0`,
+`gid=65534`, `file_mode=0640`, `dir_mode=0750`: `prefect-flows` writes as
+root, node-exporter runs as nobody and must read `metrics/backup.prom`, and a
+postgres dump holds every app's data, so nothing is world-readable.
+
+- **It mounts lazily.** Volume creation succeeds even with the Mac
+  unreachable; the failure surfaces when `prefect-flows` / node-exporter
+  start, and the deploy health gate names them. The Mac must be awake at
+  01:30 (Energy settings, or `sudo pmset -c sleep 0`).
+- **Mac setup (owner):** System Settings -> General -> Sharing -> File Sharing
+  -> add `/Volumes/Data/infra-backups`, accessible to a dedicated macOS user
+  with read & write.
+- **Trade-off:** Docker keeps the mount options, password included, in the
+  volume's metadata on the laptop; anyone who can read it has daemon access,
+  which is root anyway.
+- **Migration:** driver options are immutable, so an existing local
+  `infra-backups` (or one with other credentials) makes `make app-volumes`
+  fail with the one-time steps (remove `infra-prefect-flows-1` and
+  `infra-node-exporter-1`, `docker volume rm infra-backups`, `make up`); at
+  most a few nightly dumps are lost. It never deletes anything itself.
 
 - **Neo4j is stopped for the dump** (Community has no online dump): about a
   minute of outage every night, and `start()` runs in `finally`.

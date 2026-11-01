@@ -276,12 +276,16 @@ if [ -n "${PREFECT_AUTH_STRING:-}" ] && [ "$PREFECT_AUTH_STRING" != "$PLACEHOLDE
 	errors+=("PREFECT_AUTH_STRING must be user:password (e.g. \"admin:\$(openssl rand -hex 16)\")")
 fi
 
-# Half-configured NFS would silently leave the backups on the local disk (or
-# mount a bogus device): both keys or neither.
-if [ -n "${BACKUPS_NFS_ADDR:-}" ] && [ -z "${BACKUPS_NFS_EXPORT:-}" ]; then
-	errors+=("BACKUPS_NFS_ADDR is set but BACKUPS_NFS_EXPORT is empty in $ENV_FILE -- set both (NAS volume) or neither (local volume)")
-elif [ -z "${BACKUPS_NFS_ADDR:-}" ] && [ -n "${BACKUPS_NFS_EXPORT:-}" ]; then
-	errors+=("BACKUPS_NFS_EXPORT is set but BACKUPS_NFS_ADDR is empty in $ENV_FILE -- set both (NAS volume) or neither (local volume)")
+# A partly set SMB share would silently leave the backups on the local disk (or
+# mount a bogus device): all three keys or none. Set them in the vault
+# (infra/env), not here: `make up` re-renders .env from it.
+smb_set=()
+smb_unset=()
+for var in BACKUPS_SMB_SHARE BACKUPS_SMB_USER BACKUPS_SMB_PASSWORD; do
+	if [ -n "${!var:-}" ]; then smb_set+=("$var"); else smb_unset+=("$var"); fi
+done
+if [ "${#smb_set[@]}" -gt 0 ] && [ "${#smb_unset[@]}" -gt 0 ]; then
+	errors+=("backups SMB share is partly configured: set ${smb_set[*]}, but empty: ${smb_unset[*]} -- set all three or none, in the vault (make vault-cli args=\"kv patch -mount=infra env KEY=...\"; password as BACKUPS_SMB_PASSWORD=- on stdin), then redeploy")
 fi
 if [ -z "${LAN_IP:-}" ]; then
 	errors+=("LAN_IP is not set in $ENV_FILE")
