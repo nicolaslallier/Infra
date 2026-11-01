@@ -21,4 +21,7 @@ else
 fi
 
 printf '\n\033[1mAttached containers\033[0m (%s)\n' "$(jq '.Containers | length' <<<"$net")"
-jq -r '[.Containers[].Name] | sort[]' <<<"$net" | column -c "${COLUMNS:-100}" | sed 's/^/  /'
+# column is cosmetic and util-linux, not busybox: the Alpine container
+# scripts/ci-deploy.sh runs make in has none, so fall back to one per line.
+if command -v column >/dev/null 2>&1; then fmt() { column -c "${COLUMNS:-100}"; }; else fmt() { cat; }; fi
+jq -r '[.Containers[].Name] | sort[]' <<<"$net" | fmt | sed 's/^/  /'
