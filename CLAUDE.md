@@ -827,8 +827,10 @@ disk `/Volumes/Data`). Set `BACKUPS_SMB_SHARE` (`//192.168.2.35/infra-backups`),
 `BACKUPS_SMB_USER` and `BACKUPS_SMB_PASSWORD` (a secret) **in the vault**
 (`infra/env`), not in `.env`: every `make up` re-renders `.env` from the vault
 and blanks hand edits. E.g. `make vault-cli args="kv patch -mount=infra env
-BACKUPS_SMB_SHARE=... BACKUPS_SMB_USER=..."`, and the password via stdin with
-`BACKUPS_SMB_PASSWORD=-`. All three or none (`check-env` rejects a partial
+BACKUPS_SMB_SHARE=... BACKUPS_SMB_USER=..."`, and the password via stdin, prompted
+silently (bash and zsh) -- at a terminal a bare `BACKUPS_SMB_PASSWORD=-` stores
+an empty value, and `printf '%s'` keeps a trailing newline out of it:
+`read -rs P && printf '%s' "$P" | make vault-cli args="kv patch -mount=infra env BACKUPS_SMB_PASSWORD=-"; unset P`. All three or none (`check-env` rejects a partial
 set); none means a plain local volume, so the backups then share the data's
 disk. `scripts/portainer-volumes.sh` (reads only those keys from `.env`)
 creates it with the `local` driver, `type=cifs`, `vers=3.0`, `uid=0`,

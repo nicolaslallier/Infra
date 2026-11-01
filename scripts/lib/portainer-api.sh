@@ -29,10 +29,16 @@ api() { # <method> <path> [json-body]
   if [ -n "${3:-}" ]; then
     bf="$(umask 077; mktemp)" && printf '%s' "$3" >"$bf" || { rm -f "$bf"; die "cannot write a request body file"; }
   fi
+  # A Ctrl-C mid-request must not leave the body file (it can hold a password);
+  # the callers' own INT/TERM traps are put back afterwards.
+  local ti tt
+  ti="$(trap -p INT)"; tt="$(trap -p TERM)"
+  trap 'rm -f "$bf"; exit 130' INT; trap 'rm -f "$bf"; exit 143' TERM
   out="$(printf 'header = "X-API-Key: %s"\n' "$PORTAINER_API_KEY" |
     curl -sSk --pinnedpubkey "$PORTAINER_PINNEDPUBKEY" -K - --fail-with-body -X "$1" -H "Content-Type: ${API_CONTENT_TYPE:-application/json}" \
       ${bf:+--data-binary @"$bf"} "$url$2" 2>&1)" || rc=$?
   [ -z "$bf" ] || rm -f "$bf"
+  trap - INT TERM; eval "$ti"; eval "$tt"
   [ "$rc" = 0 ] || die "$1 $2 failed (is Portainer up at $url? 'make portainer-up')\n${out:+Portainer said: $out}"
   printf '%s' "$out"
 }

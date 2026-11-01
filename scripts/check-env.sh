@@ -285,7 +285,10 @@ for var in BACKUPS_SMB_SHARE BACKUPS_SMB_USER BACKUPS_SMB_PASSWORD; do
 	if [ -n "${!var:-}" ]; then smb_set+=("$var"); else smb_unset+=("$var"); fi
 done
 if [ "${#smb_set[@]}" -gt 0 ] && [ "${#smb_unset[@]}" -gt 0 ]; then
-	errors+=("backups SMB share is partly configured: set ${smb_set[*]}, but empty: ${smb_unset[*]} -- set all three or none, in the vault (make vault-cli args=\"kv patch -mount=infra env KEY=...\"; password as BACKUPS_SMB_PASSWORD=- on stdin), then redeploy")
+	errors+=("backups SMB share is partly configured: set ${smb_set[*]}, but empty: ${smb_unset[*]} -- set all three or none, in the vault (make vault-cli args=\"kv patch -mount=infra env KEY=...\"; password, prompted silently: read -rs P && printf '%s' \"\$P\" | make vault-cli args=\"kv patch -mount=infra env BACKUPS_SMB_PASSWORD=-\"; unset P), then redeploy")
+fi
+if [ "${#smb_unset[@]}" -eq 0 ] && ! [[ "$BACKUPS_SMB_SHARE" =~ ^//[^/]+/.+ ]]; then
+	errors+=("BACKUPS_SMB_SHARE must look like //host/share (e.g. //192.168.2.35/infra-backups), not smb://... or a bare host")
 fi
 if [ -z "${LAN_IP:-}" ]; then
 	errors+=("LAN_IP is not set in $ENV_FILE")

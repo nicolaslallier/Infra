@@ -11,7 +11,8 @@ set -euo pipefail
 # Strip CR (CRLF .env from Windows), surrounding whitespace and quotes.
 envf="$(dirname "$0")/../.env"
 envkey() {
-  sed -n "s/^$1=//p" "$envf" 2>/dev/null | tail -1 | tr -d '\r' \
+  [ -f "$envf" ] || return 0   # no .env yet (fresh checkout, worktree): not configured
+  sed -n "s/^$1=//p" "$envf" | tail -1 | tr -d '\r' \
     | sed -E "s/^[[:space:]]+//; s/[[:space:]]+\$//; s/^(\"(.*)\"|'(.*)')\$/\2\3/"
 }
 smb_share="$(envkey BACKUPS_SMB_SHARE)"; smb_user="$(envkey BACKUPS_SMB_USER)"
@@ -37,9 +38,7 @@ for v in "$@"; do
       '.Options.type == "cifs" and .Options.device == $ENV.smb_share and .Options.o == $ENV.smb_opts' <<<"$vol" >/dev/null; then
       # A volume's driver options are immutable, so it has to be recreated.
       # Its options hold the password: never echo them.
-      die "$v exists but is not the SMB volume for $smb_share (a local one, or other share/credentials).\n" \
-        "One-time migration (at most a few nightly dumps live in the old volume):\n" \
-        "  DOCKER_HOST=... docker rm -f infra-prefect-flows-1 infra-node-exporter-1 && DOCKER_HOST=... docker volume rm $v && make up"
+      die "$v exists but is not the SMB volume for $smb_share (a local one, or other share/credentials).\nOne-time migration (at most a few nightly dumps live in the old volume):\n  DOCKER_HOST=... docker rm -f infra-prefect-flows-1 infra-node-exporter-1 && DOCKER_HOST=... docker volume rm $v && make up"
     fi
   else
     body="$(jq -nc --arg n "$v" '{Name: $n}')"
@@ -49,7 +48,8 @@ for v in "$@"; do
     vol="$(api GET "$d/volumes/$v")"
     ok "was missing, created"
   fi
-  ok "$(jq -r .Driver <<<"$vol") volume, created $(jq -r '.CreatedAt // "?"' <<<"$vol")"
+  kind="$(jq -r 'if .Options.type == "cifs" then "SMB \(.Options.device)" else "\(.Driver) volume" end' <<<"$vol")"
+  ok "$kind, created $(jq -r '.CreatedAt // "?"' <<<"$vol")"
   users="$(api GET "$d/containers/json?all=1&filters=$(jq -rn --arg v "$v" '{volume: [$v]} | tojson | @uri')" \
     | jq -r '.[] | "\(.Names[0] | ltrimstr("/")) (\(.State))"' | sort)"
   if [ -n "$users" ]; then
