@@ -4,6 +4,7 @@
 # itself, so nothing is built or sent from this machine. A tag already on the
 # daemon is not rebuilt. Needs OLLAMA_PROXY_REF (the Makefile sets it).
 set -euo pipefail
+# shellcheck source=scripts/lib/portainer-api.sh
 . "$(dirname "$0")/lib/portainer-api.sh"
 
 build() { # <tag> <git-url#ref>

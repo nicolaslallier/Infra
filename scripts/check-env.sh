@@ -311,10 +311,12 @@ fi
 # Not gated on .env, because this file is generated (`make seal-key`), not
 # copied, and a checkout that ran `make init` before OpenBao existed has none.
 SEAL_KEY=openbao/seal.key
-if [ ! -f "$SEAL_KEY" ]; then
-	errors+=("$SEAL_KEY is missing -- openbao would start against an auto-created directory and die. Generate it with 'make seal-key' (it is gitignored; back it up, it is what decrypts the vault).")
-elif [ -d "$SEAL_KEY" ]; then
+# -d first: a directory is not -f either, so testing -f first made this
+# branch unreachable and reported the directory as merely missing.
+if [ -d "$SEAL_KEY" ]; then
 	errors+=("$SEAL_KEY is a directory, which is what Docker leaves behind when the stack was deployed without it. Remove it and run 'make seal-key'.")
+elif [ ! -f "$SEAL_KEY" ]; then
+	errors+=("$SEAL_KEY is missing -- openbao would start against an auto-created directory and die. Generate it with 'make seal-key' (it is gitignored; back it up, it is what decrypts the vault).")
 else
 	seal_size=$(wc -c <"$SEAL_KEY")
 	seal_size=${seal_size//[[:space:]]/}

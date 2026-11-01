@@ -34,9 +34,18 @@ That ordering is why the Makefile declares `.NOTPARALLEL:`: prerequisites are
 only made left to right in a serial build. See "Rendering `.env` at deploy
 time" under "Secrets (OpenBao)" below for when it skips and when it fails.
 
-There is no build/lint/test step — this repo is Compose config, NGINX
-config, and shell scripts, not an application. Validate changes by actually
-running the stack (`make up`) and exercising it, per the checks below.
+There is no build or lint step — this repo is Compose config, NGINX
+config, and shell scripts, not an application. `make test`
+(`scripts/test.sh`) runs everything that can be checked without
+deploying: the flows' plain-assert tests; the `pr-validation` flow's own checks
+(imported from `pr_validation.py`, not copied, so the two cannot disagree);
+and cases asserting `check-env.sh` *rejects* broken `.env` files. It works on
+a throwaway copy of the working tree with a `ci-fake-env.sh` `.env`, never the
+real one, and unsets `DOCKER_HOST` because only the local daemon can
+bind-mount that copy. FastAPI is pinned to the version the `prefect-flows`
+image ships, since prefect 3.8.7 does not import under the latest one. Beyond
+that, validate changes by actually running the stack (`make up`) and
+exercising it, per the checks below.
 
 ## Architecture
 
@@ -808,10 +817,9 @@ Setup, once:
    JSON afterwards.
 3. Create the `Tri/...` labels in Gmail. The flow creates `Tri/_garder`.
 
-The flows have plain-assert tests, the only tests in this repo:
-`uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`
-and the same for `prefect/flows/test_serve.py` and
-`prefect/flows/test_sort_mail.py`.
+The flows have plain-assert tests (`prefect/flows/test_*.py`); `make test`
+runs them (`TEST_ONLY=unit make test` runs only them), with
+`fastapi==0.141.1` pinned beside `prefect==3.8.7`.
 
 #### `backup`
 

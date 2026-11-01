@@ -4,6 +4,7 @@
 # external volume; a missing one fails the deploy of the whole stack.
 # Usage: scripts/portainer-volumes.sh [volume...]   (default: darkangel-web infra-backups)
 set -euo pipefail
+# shellcheck source=scripts/lib/portainer-api.sh
 . "$(dirname "$0")/lib/portainer-api.sh"
 
 [ $# -gt 0 ] || set -- darkangel-web infra-backups

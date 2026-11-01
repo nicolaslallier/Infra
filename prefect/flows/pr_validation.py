@@ -104,6 +104,7 @@ def _docker_run(
     volumes: dict[str, dict[str, str]],
     working_dir: str | None = None,
     user: str | None = None,
+    entrypoint: str | None = None,
 ) -> tuple[int, str]:
     """Run one container to completion; return (exit code, combined output).
 
@@ -126,6 +127,7 @@ def _docker_run(
         volumes=volumes,
         working_dir=working_dir,
         user=user,
+        entrypoint=entrypoint,
         network_mode="bridge",
     )
     try:
@@ -157,7 +159,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
             "command": [
                 "sh",
                 "-c",
-                "shellcheck -S warning scripts/*.sh postgres/initdb/*.sh",
+                "shellcheck -x -S warning scripts/*.sh postgres/initdb/*.sh",
             ],
             "working_dir": "/repo",
             "volumes": {workspace: ro("/repo")},
@@ -371,8 +373,10 @@ def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
                 "working_dir": check.get("working_dir"),
             }
             if check.get("entrypoint"):
-                # promtool is a second binary in the prometheus image.
-                kwargs["command"] = [check["entrypoint"], *check["command"]]
+                # promtool is a second binary in the prometheus image. It has to
+                # replace the entrypoint: prepended to the command it would run
+                # as `prometheus promtool ...` and fail on the argument.
+                kwargs["entrypoint"] = check["entrypoint"]
             code, out = _docker_run(**kwargs)
             results.append({"name": check["name"], "code": code, "output": out})
 
