@@ -274,6 +274,11 @@ def test_postgres_nonzero_exit_leaves_no_file():
                 assert not list((Path(d) / "postgres").glob("*.gz*"))
 
 
+import gzip as _gzip_mod
+
+_BODY = _gzip_mod.compress(b"snapbytes")
+
+
 class _Secret:
     @staticmethod
     def load(name):
@@ -290,7 +295,7 @@ def _fake_urlopen(calls, fail_on=None):
         calls.append((req.get_method(), req.full_url, req.get_header("X-vault-token")))
         if fail_on and req.get_method() == fail_on:
             raise urllib.error.HTTPError(req.full_url, 403, "denied", {}, None)
-        return io.BytesIO(b"snapbytes")
+        return io.BytesIO(_BODY)
 
     return urlopen
 
@@ -304,7 +309,7 @@ def test_openbao_renews_then_snapshots():
     with tempfile.TemporaryDirectory() as d:
         backup.BACKUP_DIR = d
         out = backup.dump_openbao.fn()
-        assert out.suffix == ".snap" and out.read_bytes() == b"snapbytes"
+        assert out.suffix == ".snap" and out.read_bytes() == _BODY
     assert calls == [
         ("POST", "http://openbao:8200/v1/auth/token/renew-self", "tok"),
         ("GET", "http://openbao:8200/v1/sys/storage/raft/snapshot", "tok"),
@@ -325,6 +330,68 @@ def test_openbao_http_error_leaves_no_file():
         except urllib.error.HTTPError:
             pass
         assert not list((Path(d) / "openbao").glob("*"))
+
+
+def test_openbao_truncated_gzip_rejected():
+    global _BODY
+    import urllib.request
+
+    good = _BODY
+    backup.Secret = _Secret
+    try:
+        _BODY = good[:-6]
+        urllib.request.urlopen = _fake_urlopen([])
+        with tempfile.TemporaryDirectory() as d:
+            backup.BACKUP_DIR = d
+            try:
+                backup.dump_openbao.fn()
+                raise AssertionError("should have raised")
+            except RuntimeError:
+                pass
+            assert not list((Path(d) / "openbao").glob("*"))
+    finally:
+        _BODY = good
+
+
+def test_nonzero_exit_includes_logs():
+    class Failing(FakeOneShot):
+        def wait(self, timeout=None):
+            return {"StatusCode": 3}
+
+        def logs(self, tail=None):
+            return b"boom: disk full"
+
+    client = FakeClient({})
+    client.run = lambda image, command, **kw: Failing()
+    try:
+        backup._run_once(client, "img", ["x"])
+        raise AssertionError("should have raised")
+    except RuntimeError as e:
+        assert "boom: disk full" in str(e) and "exited 3" in str(e)
+
+
+def test_never_succeeded_target_exports_zero():
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+
+        def fail():
+            raise RuntimeError("x")
+
+        saved = (backup.dump_postgres, backup.dump_neo4j, backup.dump_ntfy, backup.dump_openbao)
+        import logging
+
+        backup.get_run_logger = lambda: logging.getLogger('t')
+        backup.dump_postgres = backup.dump_neo4j = backup.dump_ntfy = backup.dump_openbao = fail
+        try:
+            try:
+                backup.backup.fn()
+                raise AssertionError('flow should fail')
+            except RuntimeError as e:
+                assert 'backup failed for' in str(e), e
+        finally:
+            backup.dump_postgres, backup.dump_neo4j, backup.dump_ntfy, backup.dump_openbao = saved
+        m = backup.read_metrics(Path(d) / "metrics" / "backup.prom")
+        assert m == {t: 0.0 for t in backup.TARGETS}, m
 
 
 if __name__ == "__main__":

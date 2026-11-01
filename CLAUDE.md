@@ -819,14 +819,16 @@ At 01:30 America/Toronto it dumps postgres (`pg_dumpall` as `postgres`,
 gzipped), OpenBao (raft snapshot, below), neo4j (`neo4j-admin database dump` of `neo4j` and `system`) and
 ntfy (tar of its volume) into the external volume `infra-backups`
 (`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
-`BACKUP_KEEP` (3) of each are kept. Heaven snapshots that volume (plan Task
-13); this flow only leaves consistent files there.
+`BACKUP_KEEP` (3) of each are kept. Heaven is to snapshot that volume (not wired
+yet; until then the backups share the data's disk); this flow only leaves
+consistent files there.
 
 - **Neo4j is stopped for the dump** (Community has no online dump): about a
   minute of outage every night, and `start()` runs in `finally`.
 - **One-shot containers carry no `com.docker.compose.*` label.** The deploy
   health gate counts every container labelled project `infra` and fails on
-  exited ones; the neo4j dump and ntfy tar run with `remove=True` and no
+  exited ones; the neo4j dump and ntfy tar run detached with a
+  `BACKUP_STEP_TIMEOUT` wait, always force-removed, and no
   labels, and image and volume names are read from the running container.
 - **A dump is `.part` until it succeeds.** A non-zero `pg_dumpall` exit
   removes the file. Targets run independently; the run goes red if any failed.
@@ -837,7 +839,8 @@ ntfy (tar of its volume) into the external volume `infra-backups`
   `openbao-backup-token`, never `.env`. Owner steps, once: `make
   vault-backup-token` (writes policy `backup` from `openbao/policies/backup.hcl`,
   prints a new token once; re-running mints another), then paste it into
-  Prefect UI -> Blocks -> Secret `openbao-backup-token`. The snapshot is
+  Prefect UI -> Blocks -> Secret `openbao-backup-token`, then trigger
+  `backup/nightly` once from the Prefect UI so the backup alerts clear. The snapshot is
   encrypted with the seal key, so back up `openbao/seal.key` separately.
 - **Metric:** `backup.prom` under `metrics/` carries
   `infra_backup_last_success_timestamp_seconds{target=...}` for node-exporter's

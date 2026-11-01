@@ -21,8 +21,10 @@ bao_in policy write backup - < openbao/policies/backup.hcl >&2
 out="$(bao token create -policy=backup -period=768h -orphan \
   -display-name=prefect-backup -format=json)"
 token="$(printf '%s' "$out" | sed -n 's/.*"client_token": *"\([^"]*\)".*/\1/p')"
+accessor="$(printf '%s' "$out" | sed -n 's/.*"accessor": *"\([^"]*\)".*/\1/p')"
 [ -n "$token" ] || { echo "vault-backup-token: no token in bao output" >&2; exit 1; }
 
 echo "Paste the token below into Prefect UI -> Blocks -> Secret 'openbao-backup-token'." >&2
 echo "It is periodic (768h) and renewed by every backup run; it is shown only once." >&2
+echo "To revoke a previous token: make vault-cli args=\"token revoke -accessor <accessor>\" (this one: $accessor)" >&2
 printf '%s\n' "$token"

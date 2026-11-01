@@ -125,9 +125,13 @@ def _run_once(client, image, command, **kw) -> None:
         try:
             res = c.wait(timeout=BACKUP_STEP_TIMEOUT)
         except Exception as e:  # docker-py raises requests' ReadTimeout/ConnectionError
-            raise RuntimeError(f"{image} {command[0]} timed out after {BACKUP_STEP_TIMEOUT}s: {e}") from e
+            raise RuntimeError(f"{image} {command[0]} failed waiting for exit (limit {BACKUP_STEP_TIMEOUT}s): {e}") from e
         if res.get("StatusCode", 1) != 0:
-            raise RuntimeError(f"{image} {command[0]} exited {res.get('StatusCode')}")
+            try:
+                tail = c.logs(tail=20).decode(errors="replace")[-500:]
+            except Exception:
+                tail = "(no logs)"
+            raise RuntimeError(f"{image} {command[0]} exited {res.get('StatusCode')}: {tail}")
     finally:
         try:
             c.remove(force=True)
@@ -144,6 +148,17 @@ def _gzip(chunks: Iterable[bytes]) -> Iterator[bytes]:
     for c in chunks:
         yield z.compress(c)
     yield z.flush()
+
+
+def _gzip_checked(chunks: Iterable[bytes]) -> Iterator[bytes]:
+    # a body that ends cleanly but early is still a broken snapshot; raising
+    # inside the generator makes write_atomic drop the .part
+    d = zlib.decompressobj(wbits=31)
+    for c in chunks:
+        d.decompress(c)
+        yield c
+    if not d.eof:
+        raise RuntimeError("openbao snapshot: truncated gzip stream")
 
 
 # --- tasks -------------------------------------------------------------------
@@ -261,7 +276,7 @@ def dump_openbao() -> Path:
         pass
     path = Path(BACKUP_DIR) / dump_name("openbao", "snap", _now())
     with call("GET", "sys/storage/raft/snapshot") as r:  # non-2xx raises HTTPError
-        write_atomic(path, iter(lambda: r.read(1 << 20), b""))
+        write_atomic(path, _gzip_checked(iter(lambda: r.read(1 << 20), b"")))
     return path
 
 
@@ -281,7 +296,9 @@ def _prune(target: str) -> None:
 def backup() -> dict[str, str]:
     log = get_run_logger()
     prom = Path(BACKUP_DIR) / "metrics" / "backup.prom"
-    last = read_metrics(prom)  # a failed target keeps its previous time
+    # a failed target keeps its previous time; a never-succeeded one exports 0,
+    # so `Backup stale` fires for it
+    last = {t: 0.0 for t in TARGETS} | read_metrics(prom)
     results: dict[str, str] = {}
     failed = []
     for target, fn in zip(TARGETS, (dump_postgres, dump_neo4j, dump_ntfy, dump_openbao)):
