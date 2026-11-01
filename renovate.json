@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "docker:pinDigests"],
+  "enabledManagers": ["docker-compose"],
+  "docker-compose": {
+    "managerFilePatterns": ["/(^|/)docker-compose[^/]*\\.ya?ml$/"]
+  },
+  "schedule": ["before 6am on saturday"],
+  "prConcurrentLimit": 3,
+  "automerge": false,
+  "ignoreDeps": ["infra-ollama-proxy", "myoung34/github-runner"],
+  "packageRules": [
+    {
+      "matchPackageNames": ["pgvector/pgvector", "neo4j", "openbao/openbao", "chrislusf/seaweedfs"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
+    }
+  ]
+}
