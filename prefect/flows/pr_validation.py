@@ -277,6 +277,58 @@ def _check_env_script(workspace: str) -> tuple[int, str]:
     return proc.returncode, (proc.stdout + proc.stderr).strip() or "ok"
 
 
+def _run_all(workspace: str) -> list[dict[str, Any]]:
+    """Prepare a checked-out workspace and run every check against it.
+
+    Shared by run_checks and scripts/test.sh (`make test`), so the nightly PR
+    comment and a local run execute exactly the same steps. The workspace keeps
+    its throwaway .env / seal key / certs afterwards; cleanup is the caller's.
+    """
+    results: list[dict[str, Any]] = []
+
+    # Throwaway .env / seal key / certs, from the PR's own copy of the
+    # script -- so a PR that breaks it fails right here.
+    prep = subprocess.run(
+        ["bash", "scripts/ci-fake-env.sh", workspace],
+        cwd=workspace,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env={**os.environ, "CI_FAKE_ENV_FORCE": "1"},
+    )
+    results.append(
+        {
+            "name": "prepare workspace",
+            "code": prep.returncode,
+            "output": (prep.stdout + prep.stderr).strip(),
+        }
+    )
+    if prep.returncode != 0:
+        return results
+
+    for name, fn in (
+        ("check-env", _check_env_script),
+        ("json/yaml", _check_json_yaml),
+    ):
+        code, out = fn(workspace)
+        results.append({"name": name, "code": code, "output": out})
+
+    for check in _checks(workspace):
+        # promtool is a second binary in the prometheus image. It has to replace
+        # the entrypoint: prepended to the command it would run as
+        # `prometheus promtool ...` and fail on the argument.
+        code, out = _docker_run(
+            image=check["image"],
+            command=check["command"],
+            volumes=check["volumes"],
+            working_dir=check.get("working_dir"),
+            entrypoint=check.get("entrypoint"),
+        )
+        results.append({"name": check["name"], "code": code, "output": out})
+
+    return results
+
+
 # --------------------------------------------------------------------------
 # Flow
 # --------------------------------------------------------------------------
@@ -307,7 +359,6 @@ def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
     workspace = os.path.join(WORKSPACE_ROOT, f"pr-{pr['number']}-{run_id}")
 
     token = _token()
-    results: list[dict[str, Any]] = []
 
     try:
         os.makedirs(workspace, exist_ok=True)
@@ -338,49 +389,7 @@ def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
                 "results": [{"name": "clone", "code": code, "output": out}],
             }
 
-        # Throwaway .env / seal key / certs, from the PR's own copy of the
-        # script -- so a PR that breaks it fails right here.
-        prep = subprocess.run(
-            ["bash", "scripts/ci-fake-env.sh", workspace],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env={**os.environ, "CI_FAKE_ENV_FORCE": "1"},
-        )
-        results.append(
-            {
-                "name": "prepare workspace",
-                "code": prep.returncode,
-                "output": (prep.stdout + prep.stderr).strip(),
-            }
-        )
-        if prep.returncode != 0:
-            return {"pr": pr, "results": results}
-
-        for name, fn in (
-            ("check-env", _check_env_script),
-            ("json/yaml", _check_json_yaml),
-        ):
-            code, out = fn(workspace)
-            results.append({"name": name, "code": code, "output": out})
-
-        for check in _checks(workspace):
-            kwargs = {
-                "image": check["image"],
-                "command": check["command"],
-                "volumes": check["volumes"],
-                "working_dir": check.get("working_dir"),
-            }
-            if check.get("entrypoint"):
-                # promtool is a second binary in the prometheus image. It has to
-                # replace the entrypoint: prepended to the command it would run
-                # as `prometheus promtool ...` and fail on the argument.
-                kwargs["entrypoint"] = check["entrypoint"]
-            code, out = _docker_run(**kwargs)
-            results.append({"name": check["name"], "code": code, "output": out})
-
-        return {"pr": pr, "results": results}
+        return {"pr": pr, "results": _run_all(workspace)}
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
 

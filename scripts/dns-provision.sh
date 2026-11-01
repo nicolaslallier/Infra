@@ -22,6 +22,7 @@ if [ ! -f .env ]; then
 fi
 
 # shellcheck disable=SC1091
+# shellcheck source=/dev/null  # .env is generated, not lintable source
 set -a; source .env; set +a
 
 : "${LAN_IP:?dns-provision.sh: LAN_IP not set in .env}"

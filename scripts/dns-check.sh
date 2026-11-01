@@ -20,6 +20,7 @@ fi
 
 if [ -f .env ]; then
   # shellcheck disable=SC1091
+  # shellcheck source=/dev/null  # .env is generated, not lintable source
   set -a; source .env; set +a
 fi
 

@@ -37,13 +37,17 @@ time" under "Secrets (OpenBao)" below for when it skips and when it fails.
 There is no build or lint step — this repo is Compose config, NGINX
 config, and shell scripts, not an application. `make test`
 (`scripts/test.sh`) runs everything that can be checked without
-deploying: the flows' plain-assert tests; the `pr-validation` flow's own checks
-(imported from `pr_validation.py`, not copied, so the two cannot disagree);
-and cases asserting `check-env.sh` *rejects* broken `.env` files. It works on
-a throwaway copy of the working tree with a `ci-fake-env.sh` `.env`, never the
-real one, and unsets `DOCKER_HOST` because only the local daemon can
-bind-mount that copy. FastAPI is pinned to the version the `prefect-flows`
-image ships, since prefect 3.8.7 does not import under the latest one. Beyond
+deploying: the flows' plain-assert tests; the `pr-validation` flow's checks,
+through `_run_all()` in `pr_validation.py` — the same function the nightly
+`run_checks` calls, so keep any new check in there; and cases asserting
+`check-env.sh` *rejects* broken `.env` files (after first asserting the
+unmutated one passes). It works on a throwaway copy of the working tree with a
+`ci-fake-env.sh` `.env`, never the real one, and unsets `DOCKER_HOST` because
+only the local daemon can bind-mount that copy — so Docker Desktop must be
+running on the machine `make test` runs on. The `prefect` and `fastapi`
+versions it tests against are read from the pinned `prefecthq/prefect` image
+(tag and `pip show`), so a Renovate bump moves them too; a floating fastapi
+breaks prefect's import. Beyond
 that, validate changes by actually running the stack (`make up`) and
 exercising it, per the checks below.
 
@@ -818,8 +822,8 @@ Setup, once:
 3. Create the `Tri/...` labels in Gmail. The flow creates `Tri/_garder`.
 
 The flows have plain-assert tests (`prefect/flows/test_*.py`); `make test`
-runs them (`TEST_ONLY=unit make test` runs only them), with
-`fastapi==0.141.1` pinned beside `prefect==3.8.7`.
+runs them (`TEST_ONLY=unit make test` runs only them), against the prefect
+and fastapi versions of the pinned `prefecthq/prefect` image.
 
 #### `backup`
 

@@ -21,6 +21,7 @@ cd "$(dirname "$0")/.."
 die() { echo "vault-oidc.sh: $*" >&2; exit 1; }
 [ -f .env ] || die ".env not found (run 'make init' first)"
 [ -f certs/infra-ca.crt ] || die "certs/infra-ca.crt missing (run 'make certs')"
+# shellcheck source=/dev/null  # .env is generated, not lintable source
 set -a; . ./.env; set +a
 : "${KEYCLOAK_ADMIN:?}" "${KEYCLOAK_ADMIN_PASSWORD:?}"
 

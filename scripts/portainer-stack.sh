@@ -158,6 +158,7 @@ esac
 if [ "$cmd" != status ]; then
   check_main_checkout
   [ -f .env ] || die ".env not found (run 'make init' first)"
+  # shellcheck source=/dev/null  # .env is generated, not lintable source
   set -a; . ./.env; set +a
 fi
 
