@@ -50,7 +50,7 @@ never orphans another app that's still attached to it):
   Per-app provisioning also runs `CREATE EXTENSION IF NOT EXISTS vector`
   as the superuser in each app database, so app roles (e.g. Jarvis RAG
   migrations) can use the `vector` type without needing CREATE EXTENSION
-  privilege themselves.
+  privilege themselves. Logs connections/disconnections (`command:` flags).
 - **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
 - **`keycloak`** — `quay.io/keycloak/keycloak`. Publishes no host port;
   uses the shared `postgres` cluster (database/role `keycloak`, via the
@@ -276,6 +276,7 @@ never orphans another app that's still attached to it):
   Postgres database/role `grafana`. Alloy mounts the Docker socket to
   collect container logs (all Compose projects on the host) and accepts
   OTLP (`alloy:4317` / `alloy:4318`) for traces forwarded to Tempo.
+  Retention is bounded: Loki 31d (compactor), Prometheus 90d or 20GB.
 - **Windows machines** — no service of this stack at all: `windows_exporter`
   runs *on* each Windows host and Prometheus scrapes it over the LAN as job
   `windows`. See "Windows machines (`windows_exporter`)" below.
