@@ -4,11 +4,12 @@
 # come from this checkout (INFRA_DIR). See CLAUDE.md "Portainer-managed
 # stack".
 #
-# Usage: scripts/portainer-stack.sh up|pull|down|delete|selftest
+# Usage: scripts/portainer-stack.sh up|pull|down|delete|status|selftest
 #   up      create the stack, or pull main and redeploy it
 #   pull    redeploy, re-pulling every image
 #   down    stop the stack (volumes kept)
 #   delete  remove the stack from Portainer (volumes kept)
+#   status  list Portainer's stacks and the commit each is deployed at
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,6 +17,7 @@ STACK=infra
 REPO_URL=https://github.com/nicolaslallier/Infra
 REF=refs/heads/main
 CURL_IMAGE=curlimages/curl:8.5.0
+GIT_IMAGE=alpine/git:v2.49.1
 
 die() { printf 'portainer-stack.sh: %b\n' "$*" >&2; exit 1; }
 
@@ -114,14 +116,36 @@ check_synced() {
     || die "this checkout is not at origin/main -- 'git pull --ff-only' (or push) first"
 }
 
+# Against a remote daemon (the Mac driving the laptop), Portainer mounts
+# PORTAINER_INFRA_DIR -- the *host's* checkout -- not this one, so
+# check_synced vouches for the wrong tree. Bring the host's to origin/main
+# the way ci-deploy.sh does: git in a throwaway container on that daemon,
+# as root (CI deploys leave the host's .git root-owned, which is also why
+# ssh + git as the host user fails there).
+sync_host_checkout() {
+  [ -n "${PORTAINER_INFRA_DIR:-}" ] && [ "$PORTAINER_INFRA_DIR" != "$PWD" ] || return 0
+  local want got
+  want="$(git rev-parse HEAD)"
+  got="$(docker run --rm -v "$PORTAINER_INFRA_DIR:/repo" -w /repo --entrypoint sh "$GIT_IMAGE" -c '
+    [ -f docker-compose.yml ] || { echo "no docker-compose.yml in /repo: PORTAINER_INFRA_DIR is not the host checkout" >&2; exit 1; }
+    git config --global --add safe.directory /repo
+    [ "$(git rev-parse --abbrev-ref HEAD)" = main ] || { echo "host checkout is not on main" >&2; exit 1; }
+    [ -z "$(git status --porcelain)" ] || { echo "host checkout has local changes:" >&2; git status --short >&2; exit 1; }
+    git fetch -q origin main && git merge -q --ff-only origin/main && git rev-parse HEAD')" \
+    || die "could not bring the host checkout ($PORTAINER_INFRA_DIR) to origin/main"
+  [ "$got" = "$want" ] || die "host checkout is at ${got:0:7} but this one is at ${want:0:7}"
+  echo "portainer-stack.sh: host checkout at ${got:0:7}"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   selftest) selftest; exit 0 ;;
-  up|pull|down|delete) ;;
-  *) die "usage: scripts/portainer-stack.sh up|pull|down|delete|selftest" ;;
+  up|pull|down|delete|status) ;;
+  *) die "usage: scripts/portainer-stack.sh up|pull|down|delete|status|selftest" ;;
 esac
 
-check_main_checkout
+# status only reads, so it may run from a worktree.
+[ "$cmd" = status ] || check_main_checkout
 
 [ -f .env ] || die ".env not found (run 'make init' first)"
 set -a; . ./.env; set +a
@@ -144,6 +168,7 @@ sid=""
 case "$cmd" in
   up|pull)
     check_synced
+    sync_host_checkout
     # PORTAINER_INFRA_DIR: this checkout's path as the daemon sees it, when
     # that daemon is remote (set by the Makefile); $PWD otherwise.
     env="$(env_json .env "$(daemon_dir "${PORTAINER_INFRA_DIR:-$PWD}")")"
@@ -173,6 +198,15 @@ case "$cmd" in
     fi
     api POST "/stacks/$sid/stop?endpointId=$eid" >/dev/null
     echo "portainer-stack.sh: stopped stack '$STACK'"
+    ;;
+  status)
+    git fetch -q origin main 2>/dev/null || echo "portainer-stack.sh: git fetch failed; origin/main may be stale" >&2
+    main="$(git rev-parse --short=7 origin/main)"
+    api GET /stacks | jq -r --arg main "$main" '
+      .[] | (.GitConfig.ConfigHash // "" | .[0:7]) as $h
+      | [.Name, (if .Status == 1 then "running" else "stopped" end), (if $h == "" then "-" else $h end),
+         (if .Name == "infra" then (if $h == $main then "= origin/main" else "behind origin/main (\($main))" end) else "" end)]
+      | @tsv' | column -t -s "$(printf '\t')"
     ;;
   delete)
     [ -n "$sid" ] || { echo "portainer-stack.sh: no stack '$STACK' in Portainer"; exit 0; }

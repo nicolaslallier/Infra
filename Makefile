@@ -29,8 +29,10 @@ INFRA_HOST ?= 192.168.2.10
 INFRA_SSH_USER ?= this
 ifeq ($(shell uname -s),Darwin)
 export DOCKER_HOST ?= ssh://$(INFRA_SSH_USER)@$(INFRA_HOST)
-# This checkout (C:\Users\nicol\OpenCode\Infra, SMB-mounted on the Mac) as
-# the laptop's Docker Desktop VM sees it: Portainer bind-mounts from here.
+# The laptop's checkout (C:\Users\nicol\OpenCode\Infra) as its Docker
+# Desktop VM sees it: Portainer bind-mounts from there, not from this Mac
+# checkout, so 'make up'/'pull' first fast-forward it to origin/main
+# (sync_host_checkout in scripts/portainer-stack.sh).
 export PORTAINER_INFRA_DIR ?= /run/desktop/mnt/host/c/Users/nicol/OpenCode/Infra
 endif
 
@@ -150,6 +152,9 @@ up: check-docker vault-render check-env net app-volumes app-images ## Deploy/red
 
 down: ## Stop the stack via Portainer (keeps volumes)
 	./scripts/portainer-stack.sh down
+
+stack-status: ## List Portainer's stacks and the commit each is deployed at
+	./scripts/portainer-stack.sh status
 
 restart: ## Restart services (optional: s=<service>)
 	docker compose restart $(if $(s),"$(s)",)
