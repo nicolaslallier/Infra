@@ -320,6 +320,10 @@ ntfy-provision: check-env ## Create an app's ntfy user + write-only token (app=<
 	@test -n "$(app)" || { echo "usage: make ntfy-provision app=<name> [topic=<topic-prefix>]" >&2; exit 1; }
 	@./scripts/provision-ntfy.sh "$(app)" "$(or $(topic),$(app))"
 
+rabbitmq-provision: check-env ## Create/update an app's RabbitMQ vhost + user (app=<name>; password <APP>_AMQP_PASSWORD)
+	@test -n "$(app)" || { echo "usage: make rabbitmq-provision app=<name>" >&2; exit 1; }
+	@./scripts/provision-rabbitmq.sh "$(app)"
+
 ##@ Secrets (OpenBao)
 # --- OpenBao (the secret store) --------------------------------------------
 # vault-init runs once per vault; seed/env are the two directions of the .env

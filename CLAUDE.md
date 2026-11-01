@@ -100,6 +100,11 @@ never orphans another app that's still attached to it):
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
+  Per-app accounts: `make rabbitmq-provision app=<name>`
+  (`scripts/provision-rabbitmq.sh`) makes vhost + user `<name>` (no tags,
+  permissions on that vhost only) from `<APP>_AMQP_PASSWORD` (alphanumeric:
+  it goes in an amqp:// URL; `check-env` enforces it for
+  `MORIA_AMQP_PASSWORD`). Idempotent; re-run to rotate the password.
 - **`neo4j`** — `neo4j:<version>-community`, pinned by tag *and* digest
   because a store-format upgrade must not ride along with a redeploy. The
   EA repo's architecture graph (its `docs/adr/0030`). Publishes no host

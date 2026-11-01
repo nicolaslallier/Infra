@@ -144,6 +144,16 @@ Prefect: `https://prefect.infra.famillelallier.net` (Keycloak realm `infra`,
 group `prefect`, then `PREFECT_AUTH_STRING`; flows go in `prefect/flows/`)
 RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 `127.0.0.1:5672` from the host, or `rabbitmq:5672` on `infra-net`)
+
+Moria's account: vhost `moria`, user `moria` (no management tag, no access to
+`/`), URL `amqp://moria:<password>@rabbitmq:5672/moria`. The password is
+`MORIA_AMQP_PASSWORD`, kept in the vault like every other secret
+(`openssl rand -hex 24`: letters and digits only, it goes into a URL;
+`check-env` rejects anything else). Once it is in `infra/env`
+(`make vault-cli args="kv patch -mount=infra env MORIA_AMQP_PASSWORD=..."`) and
+`.env` is re-rendered (`make vault-env`), run `make rabbitmq-provision app=moria`;
+re-run it after a rotation. In Portainer, the Moria stack's
+`MORIA_AMQP_PASSWORD` must equal this value.
 Portainer: `https://portainer.infra.famillelallier.net` (admin account and
 access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
@@ -551,6 +561,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
+| `make rabbitmq-provision app=<name>` | Create/update an app's RabbitMQ vhost + user (`<APP>_AMQP_PASSWORD` from `.env`; no tags, permissions on its own vhost only) on the **running** broker |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make seal-key` | Generate OpenBao's auto-unseal key (`FORCE=1` replaces it — destroys an existing vault) |
