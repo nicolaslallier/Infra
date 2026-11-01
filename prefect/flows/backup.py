@@ -1,4 +1,4 @@
-"""Nightly backup of postgres, neo4j and ntfy into the infra-backups volume.
+"""Nightly backup of postgres, neo4j, ntfy and openbao into the infra-backups volume.
 
 Layout under BACKUP_DIR (/backups): <target>/<target>-<UTC stamp>.<ext>, plus
 metrics/backup.prom for node-exporter's textfile collector. Heaven snapshots
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.request
 import zlib
 from collections import deque
 from datetime import datetime, timezone
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import Iterable, Iterator
 
 from prefect import flow, get_run_logger, task
+from prefect.blocks.system import Secret
 
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "/backups")
 BACKUP_PG_USER = os.environ.get("BACKUP_PG_USER", "postgres")
@@ -32,7 +34,7 @@ METRIC = "infra_backup_last_success_timestamp_seconds"
 BACKUP_STEP_TIMEOUT = int(os.environ.get("BACKUP_STEP_TIMEOUT", "900"))
 BACKUP_VOLUME = "infra-backups"
 NEO4J_DATABASES = ("neo4j", "system")
-TARGETS = ("postgres", "neo4j", "ntfy")
+TARGETS = ("postgres", "neo4j", "ntfy", "openbao")
 
 
 # --- pure helpers ------------------------------------------------------------
@@ -244,6 +246,25 @@ def dump_ntfy() -> Path:
     return final
 
 
+@task(name="dump-openbao")
+def dump_openbao() -> Path:
+    # Scoped periodic token (policy `backup`: snapshot read + renew-self only),
+    # minted by `make vault-backup-token`. Renewed first so it never lapses.
+    addr = os.environ.get("BACKUP_BAO_ADDR", "http://openbao:8200")
+    headers = {"X-Vault-Token": Secret.load("openbao-backup-token").get()}
+
+    def call(method: str, path: str):
+        req = urllib.request.Request(f"{addr}/v1/{path}", method=method, headers=headers)
+        return urllib.request.urlopen(req, timeout=BACKUP_STEP_TIMEOUT)
+
+    with call("POST", "auth/token/renew-self"):
+        pass
+    path = Path(BACKUP_DIR) / dump_name("openbao", "snap", _now())
+    with call("GET", "sys/storage/raft/snapshot") as r:  # non-2xx raises HTTPError
+        write_atomic(path, iter(lambda: r.read(1 << 20), b""))
+    return path
+
+
 # --- flow --------------------------------------------------------------------
 
 
@@ -263,7 +284,7 @@ def backup() -> dict[str, str]:
     last = read_metrics(prom)  # a failed target keeps its previous time
     results: dict[str, str] = {}
     failed = []
-    for target, fn in zip(TARGETS, (dump_postgres, dump_neo4j, dump_ntfy)):
+    for target, fn in zip(TARGETS, (dump_postgres, dump_neo4j, dump_ntfy, dump_openbao)):
         try:
             path = fn()
             last[target] = _now().timestamp()

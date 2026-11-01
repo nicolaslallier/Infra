@@ -274,6 +274,59 @@ def test_postgres_nonzero_exit_leaves_no_file():
                 assert not list((Path(d) / "postgres").glob("*.gz*"))
 
 
+class _Secret:
+    @staticmethod
+    def load(name):
+        assert name == "openbao-backup-token"
+        return type("S", (), {"get": lambda self: "tok"})()
+
+
+def _fake_urlopen(calls, fail_on=None):
+    import io
+    import urllib.error
+
+    def urlopen(req, timeout=None):
+        assert timeout, "every request needs a timeout"
+        calls.append((req.get_method(), req.full_url, req.get_header("X-vault-token")))
+        if fail_on and req.get_method() == fail_on:
+            raise urllib.error.HTTPError(req.full_url, 403, "denied", {}, None)
+        return io.BytesIO(b"snapbytes")
+
+    return urlopen
+
+
+def test_openbao_renews_then_snapshots():
+    import urllib.request
+
+    calls = []
+    backup.Secret = _Secret
+    urllib.request.urlopen = _fake_urlopen(calls)
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+        out = backup.dump_openbao.fn()
+        assert out.suffix == ".snap" and out.read_bytes() == b"snapbytes"
+    assert calls == [
+        ("POST", "http://openbao:8200/v1/auth/token/renew-self", "tok"),
+        ("GET", "http://openbao:8200/v1/sys/storage/raft/snapshot", "tok"),
+    ], calls
+
+
+def test_openbao_http_error_leaves_no_file():
+    import urllib.error
+    import urllib.request
+
+    backup.Secret = _Secret
+    urllib.request.urlopen = _fake_urlopen([], fail_on="GET")
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+        try:
+            backup.dump_openbao.fn()
+            raise AssertionError("should have raised")
+        except urllib.error.HTTPError:
+            pass
+        assert not list((Path(d) / "openbao").glob("*"))
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

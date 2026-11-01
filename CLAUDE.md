@@ -816,7 +816,7 @@ and the same for `prefect/flows/test_serve.py` and
 #### `backup`
 
 At 01:30 America/Toronto it dumps postgres (`pg_dumpall` as `postgres`,
-gzipped), neo4j (`neo4j-admin database dump` of `neo4j` and `system`) and
+gzipped), OpenBao (raft snapshot, below), neo4j (`neo4j-admin database dump` of `neo4j` and `system`) and
 ntfy (tar of its volume) into the external volume `infra-backups`
 (`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
 `BACKUP_KEEP` (3) of each are kept. Heaven snapshots that volume (plan Task
@@ -830,6 +830,15 @@ ntfy (tar of its volume) into the external volume `infra-backups`
   labels, and image and volume names are read from the running container.
 - **A dump is `.part` until it succeeds.** A non-zero `pg_dumpall` exit
   removes the file. Targets run independently; the run goes red if any failed.
+- **OpenBao** is snapshotted over HTTP (`GET /v1/sys/storage/raft/snapshot`
+  at `BACKUP_BAO_ADDR`, default `http://openbao:8200`) into
+  `openbao/openbao-<stamp>.snap`, after a `renew-self` of the token (periodic,
+  768h, so the nightly renewal keeps it alive). The token is the Secret block
+  `openbao-backup-token`, never `.env`. Owner steps, once: `make
+  vault-backup-token` (writes policy `backup` from `openbao/policies/backup.hcl`,
+  prints a new token once; re-running mints another), then paste it into
+  Prefect UI -> Blocks -> Secret `openbao-backup-token`. The snapshot is
+  encrypted with the seal key, so back up `openbao/seal.key` separately.
 - **Metric:** `backup.prom` under `metrics/` carries
   `infra_backup_last_success_timestamp_seconds{target=...}` for node-exporter's
   textfile collector (`prefect-flows` creates `metrics/` at start); a failed
@@ -1108,9 +1117,10 @@ reason.
 
 Not done here, and worth knowing before assuming otherwise: the vault's only
 login is the root token in `.openbao.env`. There is no Keycloak OIDC auth
-method, no per-app policy, and no app in this stack or any sibling repo reads
-its secrets from the vault yet — they all still get them from `.env` via
-Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
+method, and the only consumer is the nightly backup flow (below), which holds
+a scoped periodic token (policy `backup`: raft snapshot read plus
+`renew-self`, nothing else), renewed on each run; no app reads its secrets
+from the vault yet — they all still get them from `.env` via Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
 the listener sets `unauthenticated_metrics_access`, the same posture as
 SeaweedFS's /metrics), but there is no Grafana dashboard for it.
 
