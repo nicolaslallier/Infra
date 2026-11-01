@@ -909,13 +909,18 @@ services:
       # (manual runs still work). Installed by the image's entrypoint at start.
       # ponytail: drop once a Prefect release pins sqlalchemy itself.
       EXTRA_PIP_PACKAGES: "sqlalchemy<2.1"
-      # Pool of 5 + 10 overflow is Prefect's default; a burst of concurrent
-      # requests above 5 opens and closes overflow connections every time
-      # (production: 2570 logins in 10 min, ~4/s). Measured locally under 30
-      # concurrent requests: ~35 new logins per burst by default, 0 once the
-      # pool (30) covers the burst. Max ~40 per engine, under max_connections.
-      PREFECT_SERVER_DATABASE_SQLALCHEMY_POOL_SIZE: "30"
-      PREFECT_SERVER_DATABASE_SQLALCHEMY_MAX_OVERFLOW: "10"
+      # Production logged 540 prefect logins in 2 min (~4.5/s). Prefect's
+      # default is pool 5 + overflow 10, and overflow connections are opened
+      # per burst and closed on return: that is the churn. Pool 20, overflow
+      # 0 keeps them long-lived and hard-caps each engine at 20. Production
+      # showed 7 idle prefect connections on a pool of 5, so at least two
+      # engines (one per event loop): worst case ~40+, against a
+      # max_connections of 100 shared with grafana, litellm, keycloak, ...
+      # Requests above the cap wait for a pooled connection, up to SQLAlchemy's
+      # pool_timeout (30 s; Prefect's ..._SQLALCHEMY_POOL_TIMEOUT setting
+      # defaults to 30 but its Postgres engine does not pass it on).
+      PREFECT_SERVER_DATABASE_SQLALCHEMY_POOL_SIZE: "20"
+      PREFECT_SERVER_DATABASE_SQLALCHEMY_MAX_OVERFLOW: "0"
     networks:
       - infra-net
     depends_on:
