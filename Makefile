@@ -11,7 +11,7 @@ SHELL := bash
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision \
-	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli \
+	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli vault-backup-token \
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
 	runner-shell runner-env check-runner-env \
@@ -387,6 +387,9 @@ vault-status: ## Show the vault's seal/init state
 vault-cli: ## Run a bao command (args="kv list infra/")
 	@test -n "$(args)" || { echo 'usage: make vault-cli args="kv list infra/"' >&2; exit 1; }
 	@./scripts/vault-cli.sh $(args)
+
+vault-backup-token: ## Mint the scoped token for the backup flow (prints it once)
+	@./scripts/vault-backup-token.sh
 
 # Deleting the Portainer stack only removes its containers; 'down -v' then
 # drops the volumes docker-compose.yml declares -- infra_portainer-data is

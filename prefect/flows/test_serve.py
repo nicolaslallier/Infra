@@ -25,8 +25,25 @@ def test_sort_mail_starts_dry():
     assert sort_mail.parameters == {"dry_run": True}
 
 
+def test_backup_deployment_exists():
+    assert any(d.flow_name == "backup" for d in serve.deployments())
+
+
+def test_backup_metrics_dir_created():
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as d:
+        serve.ensure_backup_dirs(d)
+        assert (Path(d) / "metrics").is_dir()
+
+
 if __name__ == "__main__":
     test_one_run_at_a_time()
     print("ok test_one_run_at_a_time")
     test_sort_mail_starts_dry()
     print("ok test_sort_mail_starts_dry")
+    test_backup_deployment_exists()
+    print("ok test_backup_deployment_exists")
+    test_backup_metrics_dir_created()
+    print("ok test_backup_metrics_dir_created")
