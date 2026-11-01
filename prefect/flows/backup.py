@@ -29,6 +29,7 @@ BACKUP_DIR = os.environ.get("BACKUP_DIR", "/backups")
 BACKUP_PG_USER = os.environ.get("BACKUP_PG_USER", "postgres")
 BACKUP_KEEP = int(os.environ.get("BACKUP_KEEP", "3"))
 METRIC = "infra_backup_last_success_timestamp_seconds"
+BACKUP_STEP_TIMEOUT = int(os.environ.get("BACKUP_STEP_TIMEOUT", "900"))
 BACKUP_VOLUME = "infra-backups"
 NEO4J_DATABASES = ("neo4j", "system")
 TARGETS = ("postgres", "neo4j", "ntfy")
@@ -42,7 +43,9 @@ def dump_name(target: str, ext: str, now: datetime) -> str:
 
 
 def to_prune(names: list[str], keep: int) -> list[str]:
-    # the UTC stamp sorts lexically, so the newest are last
+    # the UTC stamp sorts lexically, so the newest are last; an in-flight
+    # .part is neither counted nor returned
+    names = [n for n in names if not n.endswith(".part")]
     return sorted(names)[: max(len(names) - keep, 0)]
 
 
@@ -109,6 +112,27 @@ def _volume(container, destination: str) -> str:
     raise RuntimeError(f"{container.attrs.get('Name', '?')}: no named volume at {destination}")
 
 
+def _run_once(client, image, command, **kw) -> None:
+    """Run a one-shot container to completion, with a timeout.
+
+    No labels (see module doc). Detached so a hung process cannot block
+    forever; always removed, on success, failure and timeout.
+    """
+    c = client.containers.run(image, command, detach=True, **kw)
+    try:
+        try:
+            res = c.wait(timeout=BACKUP_STEP_TIMEOUT)
+        except Exception as e:  # docker-py raises requests' ReadTimeout/ConnectionError
+            raise RuntimeError(f"{image} {command[0]} timed out after {BACKUP_STEP_TIMEOUT}s: {e}") from e
+        if res.get("StatusCode", 1) != 0:
+            raise RuntimeError(f"{image} {command[0]} exited {res.get('StatusCode')}")
+    finally:
+        try:
+            c.remove(force=True)
+        except Exception:
+            pass  # already gone
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -169,7 +193,8 @@ def dump_neo4j() -> Path:
     try:
         container.stop(timeout=60)
         for db in NEO4J_DATABASES:
-            client.containers.run(
+            _run_once(
+                client,
                 image,
                 ["database", "dump", db, "--to-path=/backups/neo4j/.tmp"],
                 # bypass the image entrypoint, which drops to the neo4j user;
@@ -177,21 +202,23 @@ def dump_neo4j() -> Path:
                 entrypoint=["neo4j-admin"],
                 user="root",
                 volumes={
-                    data_volume: {"bind": "/data", "mode": "ro"},
+                    # Writable on purpose: neo4j-admin writes
+                    # /data/databases/<db>/database_lock even for a dump, and
+                    # fails with "Could not write to ... database_lock" on ro.
+                    data_volume: {"bind": "/data"},
                     BACKUP_VOLUME: {"bind": "/backups"},
                 },
-                remove=True,
             )
     finally:
         container.start()
-    result = None
+    if not NEO4J_DATABASES:
+        raise RuntimeError("no neo4j database to dump")
     for db in NEO4J_DATABASES:
         target = "neo4j" if db == "neo4j" else "neo4j-system"
         final = base / dump_name(target, "dump", now)
         final.parent.mkdir(parents=True, exist_ok=True)
         (tmp / f"{db}.dump").rename(final)
-        result = result or final
-    return result
+    return base / dump_name("neo4j", "dump", now)
 
 
 @task(name="dump-ntfy")
@@ -201,14 +228,16 @@ def dump_ntfy() -> Path:
     src = _volume(container, "/var/lib/ntfy")
     base = Path(BACKUP_DIR)
     (base / "ntfy").mkdir(parents=True, exist_ok=True)
-    client.containers.run(
+    # ponytail: tars ntfy's live SQLite files while ntfy may be writing, so a
+    # torn copy is possible; upgrade: `sqlite3 .backup` or pause ntfy for the tar.
+    _run_once(
+        client,
         "alpine:3",
         ["tar", "czf", "/backups/ntfy/.tmp.tgz", "-C", "/src", "."],
         volumes={
             src: {"bind": "/src", "mode": "ro"},
             BACKUP_VOLUME: {"bind": "/backups"},
         },
-        remove=True,
     )
     final = base / dump_name("ntfy", "tgz", _now())
     (base / "ntfy" / ".tmp.tgz").rename(final)
@@ -222,7 +251,7 @@ def _prune(target: str) -> None:
     d = Path(BACKUP_DIR) / target
     if not d.is_dir():
         return
-    files = [p.name for p in d.iterdir() if p.is_file() and p.name.startswith(f"{target}-")]
+    files = [p.name for p in d.iterdir() if p.is_file() and p.name.startswith(f"{target}-") and p.suffix != ".part"]
     for name in to_prune(files, BACKUP_KEEP):
         (d / name).unlink()
 

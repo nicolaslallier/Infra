@@ -81,10 +81,27 @@ class FakeContainer:
         self.started += 1
 
 
+class FakeOneShot:
+    def __init__(self, wait_exc=None):
+        self.wait_exc = wait_exc
+        self.removed = 0
+
+    def wait(self, timeout=None):
+        assert timeout
+        if self.wait_exc:
+            raise self.wait_exc
+        return {"StatusCode": 0}
+
+    def remove(self, force=False):
+        self.removed += 1
+
+
 class FakeClient:
     def __init__(self, containers, run=None):
         self._c = containers
         self.run_calls = []
+        self.oneshots = []
+        self.wait_exc = None
         self._run = run
         self.containers = self
 
@@ -96,6 +113,9 @@ class FakeClient:
         self.run_calls.append((image, command, kw))
         if self._run:
             self._run()
+        o = FakeOneShot(self.wait_exc)
+        self.oneshots.append(o)
+        return o
 
 
 def _neo4j_attrs():
@@ -151,10 +171,54 @@ def test_neo4j_success_names_volume_from_container():
         assert not list((Path(d) / "neo4j" / ".tmp").iterdir())
     image, _, kw = client.run_calls[0]
     assert image == "neo4j:2026.01-community"
-    assert "some_neo4j_vol" in kw["volumes"] and kw["remove"] is True
+    assert "some_neo4j_vol" in kw["volumes"] and kw["detach"] is True
+    assert "mode" not in kw["volumes"]["some_neo4j_vol"]  # must stay writable (database_lock)
+    assert all(o.removed == 1 for o in client.oneshots)
     for _, _, kw in client.run_calls:
         _no_compose_labels(kw)
     assert c.started == 1
+
+
+def test_neo4j_timeout_restarts_and_removes():
+    c = FakeContainer(_neo4j_attrs())
+    client = FakeClient({"neo4j": c})
+    client.wait_exc = TimeoutError("read timed out")
+    backup._docker = lambda: client
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+        try:
+            backup.dump_neo4j.fn()
+        except RuntimeError as e:
+            assert "timed out" in str(e)
+        else:
+            raise AssertionError("expected RuntimeError")
+    assert c.started == 1 and [o.removed for o in client.oneshots] == [1]
+
+
+def test_neo4j_no_databases_raises():
+    c = FakeContainer(_neo4j_attrs())
+    client = FakeClient({"neo4j": c})
+    backup._docker = lambda: client
+    old = backup.NEO4J_DATABASES
+    backup.NEO4J_DATABASES = ()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            backup.BACKUP_DIR = d
+            try:
+                backup.dump_neo4j.fn()
+            except RuntimeError:
+                pass
+            else:
+                raise AssertionError("expected RuntimeError")
+    finally:
+        backup.NEO4J_DATABASES = old
+    assert c.started == 1
+
+
+def test_to_prune_ignores_part():
+    names = [f"t/t-2026110{d}T013000Z.x" for d in (1, 2, 3)] + ["t/t-20261104T013000Z.x.part"]
+    out = backup.to_prune(names, 2)
+    assert out == ["t/t-20261101T013000Z.x"], out
 
 
 def test_ntfy_uses_mount_volume_and_no_labels():
