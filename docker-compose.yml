@@ -601,8 +601,14 @@ services:
       - --path.procfs=/host/proc
       - --path.sysfs=/host/sys
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+      # backup.prom, written by prefect-flows into infra-backups/metrics/.
+      # Until the first backup run creates metrics/, v1.9.1 logs an ERROR per
+      # scrape and sets node_textfile_scrape_error 1, but keeps serving every
+      # other metric (nothing alerts on that series).
+      - --collector.textfile.directory=/textfile/metrics
     volumes:
       - /:/host:ro
+      - infra-backups:/textfile:ro
     networks:
       - infra-net
     pid: host
@@ -924,6 +930,9 @@ services:
       EXTRA_PIP_PACKAGES: "docker boto3"
       PREFECT_API_URL: http://prefect-server:4200/api
       PREFECT_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?Set PREFECT_AUTH_STRING in .env (user:password)}
+      BACKUP_DIR: /backups
+      BACKUP_PG_USER: ${POSTGRES_USER}
+      BACKUP_KEEP: "3"
       # organize-inbox. Not PREFECT_*: Prefect reads that namespace as its
       # own settings.
       OLLAMA_URL: ${OLLAMA_URL:-http://ollama-proxy:11434}
@@ -952,6 +961,8 @@ services:
       # empty directory in its place. Mounting it at the same path on both
       # sides is what makes the nested `-v` agree. Keep the two identical.
       - /tmp/infra-ci:/tmp/infra-ci
+      # Backup flows write /backups/<target>/ and metrics/backup.prom.
+      - infra-backups:/backups
     # The socket is root-owned inside Docker Desktop's VM. If a check reports
     # permission denied on /var/run/docker.sock, `ls -l` it from inside this
     # container and add that gid here.
@@ -1030,4 +1041,8 @@ volumes:
   # creates it; a missing external volume fails the whole deploy, not just the
   # one vhost.
   darkangel-web:
+    external: true
+  # Backup archives and their textfile metrics. External so it outlives
+  # `docker compose down -v` / `make clean`; `make app-volumes` creates it.
+  infra-backups:
     external: true
