@@ -602,7 +602,7 @@ services:
       - --path.sysfs=/host/sys
       - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
       # backup.prom, written by prefect-flows into infra-backups/metrics/.
-      # Until the first backup run creates metrics/, v1.9.1 logs an ERROR per
+      # prefect-flows creates metrics/ when it starts; before that v1.9.1 logs an ERROR per
       # scrape and sets node_textfile_scrape_error 1, but keeps serving every
       # other metric (nothing alerts on that series).
       - --collector.textfile.directory=/textfile/metrics

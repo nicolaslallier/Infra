@@ -122,3 +122,60 @@ groups:
           summary: "{{ $labels.name }} was OOM-killed (mem_limit hit)"
         labels: {}
         isPaused: false
+
+      - uid: infra-backup-stale
+        title: Backup stale
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: time() - infra_backup_last_success_timestamp_seconds
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [93600]}
+        # OK on no data: a missing metric is the next rule's job.
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Backup of {{ $labels.target }} is more than 26h old"
+        labels: {}
+        isPaused: false
+
+      - uid: infra-backup-metric-missing
+        title: Backup metric missing
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              # absent() yields a series of value 1 only while the metric is
+              # gone; while it exists the query is empty, which is the OK case.
+              expr: absent(infra_backup_last_success_timestamp_seconds)
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 30m
+        annotations:
+          summary: "No backup has ever reported success (or backup.prom is unreadable)"
+        labels: {}
+        isPaused: false

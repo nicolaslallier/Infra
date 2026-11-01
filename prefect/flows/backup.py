@@ -1,0 +1,251 @@
+"""Nightly backup of postgres, neo4j and ntfy into the infra-backups volume.
+
+Layout under BACKUP_DIR (/backups): <target>/<target>-<UTC stamp>.<ext>, plus
+metrics/backup.prom for node-exporter's textfile collector. Heaven snapshots
+the volume; this flow only has to leave consistent files there.
+
+Containers are found by their compose labels (project infra). The one-shot
+containers this flow starts (neo4j dump, ntfy tar) carry NO com.docker.compose
+label: the deploy health gate counts every container of project infra and
+fails on exited ones.
+
+A dump is written to <name>.part and renamed on success, so a failed run never
+leaves a file that looks like a backup.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import zlib
+from collections import deque
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable, Iterator
+
+from prefect import flow, get_run_logger, task
+
+BACKUP_DIR = os.environ.get("BACKUP_DIR", "/backups")
+BACKUP_PG_USER = os.environ.get("BACKUP_PG_USER", "postgres")
+BACKUP_KEEP = int(os.environ.get("BACKUP_KEEP", "3"))
+METRIC = "infra_backup_last_success_timestamp_seconds"
+BACKUP_VOLUME = "infra-backups"
+NEO4J_DATABASES = ("neo4j", "system")
+TARGETS = ("postgres", "neo4j", "ntfy")
+
+
+# --- pure helpers ------------------------------------------------------------
+
+
+def dump_name(target: str, ext: str, now: datetime) -> str:
+    return f"{target}/{target}-{now.astimezone(timezone.utc):%Y%m%dT%H%M%SZ}.{ext}"
+
+
+def to_prune(names: list[str], keep: int) -> list[str]:
+    # the UTC stamp sorts lexically, so the newest are last
+    return sorted(names)[: max(len(names) - keep, 0)]
+
+
+def metrics_text(last_success: dict[str, float]) -> str:
+    lines = [
+        f"# HELP {METRIC} Unix time of the last successful backup of a target.",
+        f"# TYPE {METRIC} gauge",
+    ]
+    lines += [f'{METRIC}{{target="{t}"}} {v:.0f}' for t, v in sorted(last_success.items())]
+    return "\n".join(lines) + "\n"
+
+
+def read_metrics(path: Path) -> dict[str, float]:
+    try:
+        text = path.read_text()
+    except FileNotFoundError:
+        return {}
+    return {
+        m.group(1): float(m.group(2))
+        for m in re.finditer(rf'^{METRIC}\{{target="([^"]+)"\}} (\S+)$', text, re.M)
+    }
+
+
+def write_atomic(path: Path, chunks: Iterable[bytes]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_suffix(path.suffix + ".part")
+    try:
+        with open(part, "wb") as f:
+            for chunk in chunks:
+                f.write(chunk)
+        part.rename(path)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+
+
+# --- docker ------------------------------------------------------------------
+
+
+def _docker():
+    import docker  # lazy: the image installs it via EXTRA_PIP_PACKAGES
+
+    return docker.from_env()
+
+
+def _container(client, service: str):
+    found = client.containers.list(
+        filters={
+            "label": [
+                "com.docker.compose.project=infra",
+                f"com.docker.compose.service={service}",
+            ]
+        }
+    )
+    if not found:
+        raise RuntimeError(f"no running {service} container")
+    return found[0]
+
+
+def _volume(container, destination: str) -> str:
+    for m in container.attrs.get("Mounts", []):
+        if m.get("Destination") == destination and m.get("Name"):
+            return m["Name"]
+    raise RuntimeError(f"{container.attrs.get('Name', '?')}: no named volume at {destination}")
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _gzip(chunks: Iterable[bytes]) -> Iterator[bytes]:
+    z = zlib.compressobj(wbits=31)  # gzip container
+    for c in chunks:
+        yield z.compress(c)
+    yield z.flush()
+
+
+# --- tasks -------------------------------------------------------------------
+
+
+@task(name="dump-postgres")
+def dump_postgres() -> Path:
+    client = _docker()
+    container = _container(client, "postgres")
+    api = client.api
+    exec_id = api.exec_create(
+        container.id, ["pg_dumpall", "-U", BACKUP_PG_USER], user="postgres"
+    )["Id"]
+    stderr_tail: deque[bytes] = deque(maxlen=20)
+
+    def sql() -> Iterator[bytes]:
+        for out, err in api.exec_start(exec_id, stream=True, demux=True):
+            if err:
+                stderr_tail.append(err)
+            if out:
+                yield out
+        # raised inside the generator so write_atomic removes the .part
+        code = api.exec_inspect(exec_id)["ExitCode"]
+        if code != 0:
+            raise RuntimeError(
+                f"pg_dumpall exited {code}: {b''.join(stderr_tail).decode(errors='replace')[-500:]}"
+            )
+
+    path = Path(BACKUP_DIR) / dump_name("postgres", "sql.gz", _now())
+    write_atomic(path, _gzip(sql()))
+    return path
+
+
+@task(name="dump-neo4j")
+def dump_neo4j() -> Path:
+    # Neo4j Community has no online dump: stop it, dump, start it again (about
+    # a minute of outage). start() is in finally so a failed dump never leaves
+    # the graph down.
+    client = _docker()
+    container = _container(client, "neo4j")
+    image = container.attrs["Config"]["Image"]
+    data_volume = _volume(container, "/data")
+    base = Path(BACKUP_DIR)
+    tmp = base / "neo4j" / ".tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    for stale in tmp.iterdir():  # leftovers of an interrupted run
+        stale.unlink()
+    now = _now()
+    try:
+        container.stop(timeout=60)
+        for db in NEO4J_DATABASES:
+            client.containers.run(
+                image,
+                ["database", "dump", db, "--to-path=/backups/neo4j/.tmp"],
+                # bypass the image entrypoint, which drops to the neo4j user;
+                # that user cannot write the root-owned backup volume
+                entrypoint=["neo4j-admin"],
+                user="root",
+                volumes={
+                    data_volume: {"bind": "/data", "mode": "ro"},
+                    BACKUP_VOLUME: {"bind": "/backups"},
+                },
+                remove=True,
+            )
+    finally:
+        container.start()
+    result = None
+    for db in NEO4J_DATABASES:
+        target = "neo4j" if db == "neo4j" else "neo4j-system"
+        final = base / dump_name(target, "dump", now)
+        final.parent.mkdir(parents=True, exist_ok=True)
+        (tmp / f"{db}.dump").rename(final)
+        result = result or final
+    return result
+
+
+@task(name="dump-ntfy")
+def dump_ntfy() -> Path:
+    client = _docker()
+    container = _container(client, "ntfy")
+    src = _volume(container, "/var/lib/ntfy")
+    base = Path(BACKUP_DIR)
+    (base / "ntfy").mkdir(parents=True, exist_ok=True)
+    client.containers.run(
+        "alpine:3",
+        ["tar", "czf", "/backups/ntfy/.tmp.tgz", "-C", "/src", "."],
+        volumes={
+            src: {"bind": "/src", "mode": "ro"},
+            BACKUP_VOLUME: {"bind": "/backups"},
+        },
+        remove=True,
+    )
+    final = base / dump_name("ntfy", "tgz", _now())
+    (base / "ntfy" / ".tmp.tgz").rename(final)
+    return final
+
+
+# --- flow --------------------------------------------------------------------
+
+
+def _prune(target: str) -> None:
+    d = Path(BACKUP_DIR) / target
+    if not d.is_dir():
+        return
+    files = [p.name for p in d.iterdir() if p.is_file() and p.name.startswith(f"{target}-")]
+    for name in to_prune(files, BACKUP_KEEP):
+        (d / name).unlink()
+
+
+@flow(name="backup", log_prints=True)
+def backup() -> dict[str, str]:
+    log = get_run_logger()
+    prom = Path(BACKUP_DIR) / "metrics" / "backup.prom"
+    last = read_metrics(prom)  # a failed target keeps its previous time
+    results: dict[str, str] = {}
+    failed = []
+    for target, fn in zip(TARGETS, (dump_postgres, dump_neo4j, dump_ntfy)):
+        try:
+            path = fn()
+            last[target] = _now().timestamp()
+            results[target] = str(path)
+        except Exception as e:  # one failing target must not skip the others
+            log.error("backup of %s failed: %s", target, e)
+            results[target] = f"failed: {e}"
+            failed.append(target)
+    for target in (*TARGETS, "neo4j-system"):
+        _prune(target)
+    write_atomic(prom, [metrics_text(last).encode()])
+    if failed:
+        raise RuntimeError(f"backup failed for: {', '.join(failed)}")
+    return results

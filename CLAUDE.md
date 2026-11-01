@@ -645,7 +645,7 @@ Three things to know before changing any of it:
   is, so compose will not create it. A missing external volume fails the
   deploy of *this whole stack*, not just that one vhost -- `make app-volumes`,
   a prerequisite of `make up`, `make pull` and `make init`, is what guarantees
-  it exists.
+  it exists (it also ensures `infra-backups`, the backup flow's volume).
 - `/api/` has no `rewrite`, unlike `ea.conf` and `jarvis.conf`: DarkAngel's
   FastAPI router is mounted at `/api` itself, so the prefix is passed through.
   Stripping it here would 404 every API call.
@@ -812,6 +812,29 @@ The flows have plain-assert tests, the only tests in this repo:
 `uv run --no-project --python 3.12 --with prefect==3.8.7 python prefect/flows/test_organize_inbox.py`
 and the same for `prefect/flows/test_serve.py` and
 `prefect/flows/test_sort_mail.py`.
+
+#### `backup`
+
+At 01:30 America/Toronto it dumps postgres (`pg_dumpall` as `postgres`,
+gzipped), neo4j (`neo4j-admin database dump` of `neo4j` and `system`) and
+ntfy (tar of its volume) into the external volume `infra-backups`
+(`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
+`BACKUP_KEEP` (3) of each are kept. Heaven snapshots that volume (plan Task
+13); this flow only leaves consistent files there.
+
+- **Neo4j is stopped for the dump** (Community has no online dump): about a
+  minute of outage every night, and `start()` runs in `finally`.
+- **One-shot containers carry no `com.docker.compose.*` label.** The deploy
+  health gate counts every container labelled project `infra` and fails on
+  exited ones; the neo4j dump and ntfy tar run with `remove=True` and no
+  labels, and image and volume names are read from the running container.
+- **A dump is `.part` until it succeeds.** A non-zero `pg_dumpall` exit
+  removes the file. Targets run independently; the run goes red if any failed.
+- **Metric:** `backup.prom` under `metrics/` carries
+  `infra_backup_last_success_timestamp_seconds{target=...}` for node-exporter's
+  textfile collector (`prefect-flows` creates `metrics/` at start); a failed
+  target keeps its old time. Grafana rules `Backup stale` (over 26 h) and
+  `Backup metric missing` (absent for 30 m).
 
 ### Windows machines (`windows_exporter`)
 

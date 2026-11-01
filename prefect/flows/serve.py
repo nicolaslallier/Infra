@@ -12,12 +12,14 @@ it back -- the retry is the restart.
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 
 from prefect import serve
 from prefect.client.schemas.objects import ConcurrencyLimitConfig
 from prefect.schedules import Cron, Interval
 
+from backup import backup
 from organize_inbox import organize_inbox
 from pr_validation import pr_validation
 from sort_mail import sort_mail
@@ -29,8 +31,19 @@ from sort_mail import sort_mail
 ONE_AT_A_TIME = ConcurrencyLimitConfig(limit=1, collision_strategy="CANCEL_NEW")
 
 
+def ensure_backup_dirs(base: str | None = None) -> None:
+    # node-exporter's textfile collector logs an ERROR per scrape until this
+    # exists, so create it here rather than waiting for the first backup run.
+    os.makedirs(os.path.join(base or os.environ.get("BACKUP_DIR", "/backups"), "metrics"), exist_ok=True)
+
+
 def deployments() -> list:
     return [
+        backup.to_deployment(
+            name="nightly",
+            schedule=Cron("30 1 * * *", timezone="America/Toronto"),
+            concurrency_limit=ONE_AT_A_TIME,
+        ),
         pr_validation.to_deployment(
             name="nightly",
             schedule=Cron("0 3 * * *", timezone="America/Toronto"),
@@ -54,4 +67,5 @@ def deployments() -> list:
 
 
 if __name__ == "__main__":
+    ensure_backup_dirs()
     serve(*deployments())
