@@ -337,6 +337,12 @@ if [ "${SMTP_MYNETWORKS:-}" = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/
 	warnings+=("SMTP_MYNETWORKS is still the broad private-range default -- any client in those ranges can relay mail unauthenticated; pin it to 127.0.0.0/8,${infra_subnet:-<infra-net subnet>}")
 fi
 
+# --- grafana alert delivery (warning only) ----------------------------------
+# Same reasoning as the smtp relay: alerts are not a precondition for deploying.
+if [ -z "${GRAFANA_NTFY_TOKEN:-}" ] || [ "${GRAFANA_NTFY_TOKEN:-}" = "$PLACEHOLDER" ]; then
+	warnings+=("GRAFANA_NTFY_TOKEN is unset in $ENV_FILE -- Grafana alerts will fire but ntfy will refuse them; run 'make ntfy-provision app=grafana topic=alerts', then 'make vault-seed'")
+fi
+
 # --- the client secrets Keycloak has to generate first ----------------------
 for entry in "${POST_BOOT[@]}"; do
 	var=${entry%%:*}

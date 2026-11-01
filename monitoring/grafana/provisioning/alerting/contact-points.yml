@@ -1,0 +1,19 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: ntfy
+    receivers:
+      - uid: ntfy-alerts-infra
+        type: webhook
+        settings:
+          # template=grafana is ntfy's built-in Grafana-webhook template: it
+          # turns Grafana's JSON body into a title and message, so no
+          # per-message templating lives here.
+          url: http://ntfy/alerts-infra?template=grafana
+          httpMethod: POST
+          # ntfy runs auth-default-access: deny-all, so a token is required.
+          # Empty token = Grafana still starts, deliveries fail with 403
+          # (check-env warns); not worth failing a whole-stack redeploy.
+          authorization_scheme: Bearer
+          authorization_credentials: ${GRAFANA_NTFY_TOKEN}

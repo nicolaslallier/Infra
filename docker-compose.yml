@@ -485,6 +485,8 @@ services:
       GF_DATABASE_PASSWORD: ${GRAFANA_DB_PASSWORD}
       GF_DATABASE_SSL_MODE: disable
       GF_INSTALL_PLUGINS: ""
+      # Alert delivery token for ntfy; see monitoring/grafana/provisioning/alerting.
+      GRAFANA_NTFY_TOKEN: ${GRAFANA_NTFY_TOKEN:-}
     volumes:
       - ${INFRA_DIR:-.}/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     networks:
