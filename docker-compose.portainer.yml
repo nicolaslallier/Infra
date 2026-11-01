@@ -5,10 +5,10 @@ name: portainer
 
 services:
   portainer:
-    # 'lts' is Portainer's own long-term-support channel tag -- same
-    # moving-tag tradeoff as dns in docker-compose.yml, and the tag
-    # Portainer documents for anything that isn't a throwaway test.
-    image: portainer/portainer-ce:lts
+    # Pinned to the release `lts` pointed at when this was written. Portainer
+    # is the tool that repairs a broken stack, so it must not change under
+    # a redeploy; move to the next LTS by editing tag and digest together.
+    image: portainer/portainer-ce:2.45.0@sha256:511f3f06c96fe3b993ebeaafde311c1959cae73a7ef825dba6397d51b450dffa
     restart: unless-stopped
     # Read-write on purpose: Portainer *is* a Docker control plane, so it
     # needs to start/stop/exec containers, not just read their state. That
