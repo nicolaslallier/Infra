@@ -20,10 +20,9 @@ if [ -f .openbao.env ]; then
 fi
 export BAO_TOKEN="${BAO_TOKEN:-}"
 
-# The token goes in as the first line of stdin, never as an argument. Not
-# `-e BAO_TOKEN`: on this host neither `docker compose exec` nor `docker exec`
-# forwards a bare `-e VAR`. When stdin is a pipe it follows the token, so
+# shellcheck source=lib/bao.sh
+. "$(dirname "$0")/lib/bao.sh"
+# When stdin is a pipe it follows the token, so
 # `... | make vault-cli args="kv put -mount=infra x -"` still works. No TTY:
 # stdin is the token pipe, so interactive prompts (bao login) will not work.
-{ printf '%s\n' "$BAO_TOKEN"; [ -t 0 ] || cat; } \
-  | docker compose exec -T openbao sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' bao "$@"
+if [ -t 0 ]; then bao "$@"; else bao_in "$@"; fi
