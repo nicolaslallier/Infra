@@ -909,6 +909,13 @@ services:
       # (manual runs still work). Installed by the image's entrypoint at start.
       # ponytail: drop once a Prefect release pins sqlalchemy itself.
       EXTRA_PIP_PACKAGES: "sqlalchemy<2.1"
+      # Pool of 5 + 10 overflow is Prefect's default; a burst of concurrent
+      # requests above 5 opens and closes overflow connections every time
+      # (production: 2570 logins in 10 min, ~4/s). Measured locally under 30
+      # concurrent requests: ~35 new logins per burst by default, 0 once the
+      # pool (30) covers the burst. Max ~40 per engine, under max_connections.
+      PREFECT_SERVER_DATABASE_SQLALCHEMY_POOL_SIZE: "30"
+      PREFECT_SERVER_DATABASE_SQLALCHEMY_MAX_OVERFLOW: "10"
     networks:
       - infra-net
     depends_on:
