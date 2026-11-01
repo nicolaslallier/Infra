@@ -276,6 +276,13 @@ if [ -n "${PREFECT_AUTH_STRING:-}" ] && [ "$PREFECT_AUTH_STRING" != "$PLACEHOLDE
 	errors+=("PREFECT_AUTH_STRING must be user:password (e.g. \"admin:\$(openssl rand -hex 16)\")")
 fi
 
+# Half-configured NFS would silently leave the backups on the local disk (or
+# mount a bogus device): both keys or neither.
+if [ -n "${BACKUPS_NFS_ADDR:-}" ] && [ -z "${BACKUPS_NFS_EXPORT:-}" ]; then
+	errors+=("BACKUPS_NFS_ADDR is set but BACKUPS_NFS_EXPORT is empty in $ENV_FILE -- set both (NAS volume) or neither (local volume)")
+elif [ -z "${BACKUPS_NFS_ADDR:-}" ] && [ -n "${BACKUPS_NFS_EXPORT:-}" ]; then
+	errors+=("BACKUPS_NFS_EXPORT is set but BACKUPS_NFS_ADDR is empty in $ENV_FILE -- set both (NAS volume) or neither (local volume)")
+fi
 if [ -z "${LAN_IP:-}" ]; then
 	errors+=("LAN_IP is not set in $ENV_FILE")
 else

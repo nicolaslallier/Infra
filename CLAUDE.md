@@ -820,8 +820,21 @@ gzipped), OpenBao (raft snapshot, below), neo4j (`neo4j-admin database dump` of 
 ntfy (tar of its volume) into the external volume `infra-backups`
 (`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
 `BACKUP_KEEP` (3) of each are kept. Heaven is to snapshot that volume (not wired
-yet; until then the backups share the data's disk); this flow only leaves
-consistent files there.
+yet); this flow only leaves consistent files there.
+
+The volume can live on the NAS: set `BACKUPS_NFS_ADDR` and
+`BACKUPS_NFS_EXPORT` in `.env` (both or neither; `check-env` rejects one
+alone) and `scripts/portainer-volumes.sh` creates `infra-backups` with the
+`local` driver over NFSv4.1 (`soft,timeo=100,retrans=3`: a down NAS fails
+reads and writes instead of hanging `prefect-flows` and node-exporter; the
+backup alerts cover it). With both empty it is a plain local volume, so the
+backups then share the data's disk. The export must allow the laptop's address
+read-write (Docker Desktop's VM NATs through it), and the flow writes as root:
+use `no_root_squash`, or an export owned by the squashed uid. Driver options
+are immutable, so an existing local `infra-backups` makes `make app-volumes`
+fail with the one-time migration (remove `infra-prefect-flows-1` and
+`infra-node-exporter-1`, `docker volume rm infra-backups`, `make up`); at most
+a few nightly dumps are lost. The script reads only those two keys from `.env`.
 
 - **Neo4j is stopped for the dump** (Community has no online dump): about a
   minute of outage every night, and `start()` runs in `finally`.
@@ -1033,7 +1046,9 @@ Four things here are load-bearing.
   `openbao-data` volume can decrypt the vault offline.** That is the
   documented use of this seal type — chaining the vault to an existing source
   of trust — and here that source is the machine's own disk. Back the key up
-  somewhere the volume is not; lose it and the vault is unrecoverable, since
+  somewhere the volume is not (a copy is kept in the owner's password manager,
+  with its base64 and sha256 noted beside it; never in the repo, `.env` or the
+  vault); lose it and the vault is unrecoverable, since
   no recovery key unseals an auto-sealed vault (the recovery key in
   `.openbao.env` only regenerates a *root token*).
 - **The seal key is a file, not a `.env` value.** `.env` is handed to
