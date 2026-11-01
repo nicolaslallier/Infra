@@ -41,13 +41,15 @@ deploying: the flows' plain-assert tests; the `pr-validation` flow's checks,
 through `_run_all()` in `pr_validation.py` — the same function the nightly
 `run_checks` calls, so keep any new check in there; and cases asserting
 `check-env.sh` *rejects* broken `.env` files (after first asserting the
-unmutated one passes). It works on a throwaway copy of the working tree with a
-`ci-fake-env.sh` `.env`, never the real one, and unsets `DOCKER_HOST` because
-only the local daemon can bind-mount that copy — so Docker Desktop must be
-running on the machine `make test` runs on. The `prefect` and `fastapi`
-versions it tests against are read from the pinned `prefecthq/prefect` image
-(tag and `pip show`), so a Renovate bump moves them too; a floating fastapi
-breaks prefect's import. Beyond
+unmutated one passes). It works on a throwaway copy of exactly the files git
+lists (`tar --no-recursion`, so a nested worktree's real `.env` never comes
+along) under `~/.cache/infra-test`, with a `ci-fake-env.sh` `.env`. It pins
+`DOCKER_HOST` to the *local* daemon and drops `DOCKER_CONTEXT`, because only
+the local daemon can bind-mount that copy — so Docker Desktop must be running
+on the machine `make test` runs on. The `prefect` and `fastapi` versions it
+tests against are read from the pinned `prefecthq/prefect` image (tag, and
+`pip show` cached per image digest), so a Renovate bump moves them too; a
+floating fastapi breaks prefect's import. Beyond
 that, validate changes by actually running the stack (`make up`) and
 exercising it, per the checks below.
 

@@ -21,9 +21,10 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# shellcheck disable=SC1091
+set -a
 # shellcheck source=/dev/null  # .env is generated, not lintable source
-set -a; source .env; set +a
+source .env
+set +a
 
 : "${LAN_IP:?dns-provision.sh: LAN_IP not set in .env}"
 : "${DNS_ADMIN_PASSWORD:?dns-provision.sh: DNS_ADMIN_PASSWORD not set in .env}"

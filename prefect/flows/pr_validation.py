@@ -159,7 +159,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
             "command": [
                 "sh",
                 "-c",
-                "shellcheck -x -S warning scripts/*.sh postgres/initdb/*.sh",
+                "shellcheck -x --source-path=SCRIPTDIR -S warning scripts/*.sh postgres/initdb/*.sh",
             ],
             "working_dir": "/repo",
             "volumes": {workspace: ro("/repo")},

@@ -296,7 +296,8 @@ else
 		if [ "$LAN_IP" != "$infra_host" ]; then
 			errors+=("LAN_IP=$LAN_IP but DOCKER_HOST targets $infra_host")
 		fi
-	elif [ -z "${DOCKER_HOST:-}" ] && [ -n "$addrs" ] \
+	# A unix:// socket is a daemon on this machine, same as no DOCKER_HOST.
+	elif { [ -z "${DOCKER_HOST:-}" ] || [[ "$DOCKER_HOST" == unix://* ]]; } && [ -n "$addrs" ] \
 		&& ! printf '%s\n' "$addrs" | grep -qxF "$LAN_IP"; then
 		errors+=("LAN_IP=$LAN_IP is not an address on this host (have: $(echo $addrs))")
 	fi
