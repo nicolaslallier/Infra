@@ -35,14 +35,20 @@ services:
       ACCESS_TOKEN: ${GH_RUNNER_TOKEN_EA:?Set GH_RUNNER_TOKEN_EA in .runner.env (a PAT that administers runners on nicolaslallier/EA)}
     # On this host the name resolves to 127.0.0.1 (hosts file), which inside the
     # container is the container itself: Portainer's vhost would be "refused".
-    # Pin it to the LAN address nginx publishes 443 on.
+    # Pin it to the LAN address nginx publishes 443 on. Same for OpenBao's
+    # vhost, which EA's scripts/vault-render-env.sh reads at deploy time.
     extra_hosts:
       - "portainer.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+      - "vault.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
     # tmpfs, not a named volume: `restart` reuses the container, so only memory
     # is wiped between jobs. A volume would carry one job's files to the next.
     tmpfs:
       # exec: Docker mounts tmpfs noexec by default, and the job runs scripts it checked out.
       - /_work:exec
     volumes:
-      # The Infra CA, to verify Portainer's certificate (public cert, no key).
-      - ./certs/infra-ca.crt:/etc/ea/infra-ca.crt:ro
+      # The Infra CA, to verify Portainer's and OpenBao's certificates (public
+      # cert, no key). From the Mac the daemon is the laptop's, over SSH, and a
+      # relative path would be read on *that* host, where it does not exist:
+      # Docker would mount an empty directory. The Makefile exports the
+      # checkout's path as the laptop's Docker Desktop sees it.
+      - ${PORTAINER_INFRA_DIR:-.}/certs/infra-ca.crt:/etc/ea/infra-ca.crt:ro
