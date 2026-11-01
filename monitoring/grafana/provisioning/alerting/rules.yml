@@ -95,3 +95,30 @@ groups:
           summary: "{{ $labels.name }} restarted more than twice in 15m"
         labels: {}
         isPaused: false
+
+      - uid: infra-oom-killed
+        title: Container OOM-killed
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 900, to: 0}
+            datasourceUid: prometheus
+            model:
+              refId: A
+              expr: increase(container_oom_events_total{name=~"infra-.+"}[10m])
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "{{ $labels.name }} was OOM-killed (mem_limit hit)"
+        labels: {}
+        isPaused: false

@@ -327,7 +327,7 @@ import. Full rationale per check in `scripts/CLAUDE.md`.
 
 ### Runtime: Docker Desktop
 
-Docker Desktop for Mac (6 CPU / 12 GB / 100 GB, disk image on `/Volumes/Docker`). Details — `check-docker.sh` exit codes, `LAN_IP` semantics, Colima migration — live in `scripts/CLAUDE.md`.
+Docker Desktop on the deploy host, the Windows laptop (12 CPU / ~7.7 GiB VM; the old Mac setup was 6 CPU / 12 GB / 100 GB, disk image on `/Volumes/Docker`). `neo4j`, `keycloak`, `litellm`, `prometheus`, `obsidian` and `loki` carry `mem_limit:` ceilings sized ~1.5× each service's measured 14-day peak, deliberately not budgeted to sum under the VM; the Grafana rule `Container OOM-killed` fires if one is hit. Details — `check-docker.sh` exit codes, `LAN_IP` semantics, Colima migration — live in `scripts/CLAUDE.md`.
 
 ### Portainer-managed stack
 
