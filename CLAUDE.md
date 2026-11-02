@@ -100,6 +100,9 @@ never orphans another app that's still attached to it):
   on `:5672` (NGINX stream passthrough at `127.0.0.1:5672`; apps on
   `infra-net` use `rabbitmq:5672` directly) and management UI on `:15672`
   (`rabbitmq.infra.famillelallier.net`). Prometheus metrics on `:15692`.
+  `hostname: rabbitmq` is load-bearing: the database is keyed by node name
+  (`rabbit@<hostname>`), and an unpinned hostname changes on every deploy,
+  which silently resets every provisioned vhost and user.
   Per-app accounts: `make rabbitmq-provision app=<name>`
   (`scripts/provision-rabbitmq.sh`) makes vhost + user `<name>` (no tags,
   permissions on that vhost only) from `<APP>_AMQP_PASSWORD` (alphanumeric:
