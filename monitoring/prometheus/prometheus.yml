@@ -84,13 +84,23 @@ scrape_configs:
       - targets: ["ollama-proxy-laptop:11434"]
         labels: {host: laptop-dopbpc0j}
 
-  # Moria (github.com/nicolaslallier/Moria), the game server. Its stack stays
-  # off infra-net on purpose -- it is port-forwarded to the Internet -- so it
-  # publishes :9464 on the Docker host and is reached the way the laptop's
-  # windows_exporter is. Dashboard moria.json.
+  # Moria (github.com/nicolaslallier/Moria), the game server. moria-server
+  # joins infra-net under that alias (nginx/stream.d/moria.conf fronts :7777),
+  # so it is scraped by name like any other container. Dashboard moria.json.
   - job_name: moria
     static_configs:
-      - targets: ["host.docker.internal:9464"]
+      - targets: ["moria-server:9464"]
+
+  # Moria's message bus: per-queue depth and consumers in RabbitMQ's `moria`
+  # vhost. The default /metrics endpoint aggregates across queues, so this
+  # asks the detailed one for just the two families the dashboard charts.
+  - job_name: rabbitmq-moria
+    metrics_path: /metrics/detailed
+    params:
+      vhost: ["moria"]
+      family: ["queue_coarse_metrics", "queue_consumer_count"]
+    static_configs:
+      - targets: ["rabbitmq:15692"]
 
   # Windows machines, each running windows_exporter on :9182. The only job
   # whose targets are not containers on infra-net, so they live in a file
