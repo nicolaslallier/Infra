@@ -64,6 +64,7 @@ REQUIRED=(
 	EA_S3_SECRET_KEY
 	DARKANGEL_S3_SECRET_KEY
 	RABBITMQ_DEFAULT_PASS
+	MORIA_AMQP_PASSWORD
 	NEO4J_PASSWORD
 	JARVIS_OAUTH_COOKIE_SECRET
 	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
@@ -267,6 +268,13 @@ if [ -n "$sts" ] && [ "$sts" != "$PLACEHOLDER" ]; then
 	if [ -z "$sts_len" ] || [ "$sts_len" -lt 16 ]; then
 		errors+=("S3_STS_SIGNING_KEY is not padded standard base64 of at least 16 bytes -- SeaweedFS would start with STS silently off; generate one with \"openssl rand -base64 32\"")
 	fi
+fi
+
+# Moria embeds this in amqp://moria:<password>@rabbitmq:5672/moria, so a
+# reserved URL character would break the connection string, not the broker.
+if [ -n "${MORIA_AMQP_PASSWORD:-}" ] && [ "$MORIA_AMQP_PASSWORD" != "$PLACEHOLDER" ] \
+	&& ! [[ "$MORIA_AMQP_PASSWORD" =~ ^[A-Za-z0-9]+$ ]]; then
+	errors+=("MORIA_AMQP_PASSWORD must be letters and digits only (it goes into an amqp:// URL); generate one with \"openssl rand -hex 24\"")
 fi
 
 # Prefect's basic auth splits the string on its first ':'. Without one, every
