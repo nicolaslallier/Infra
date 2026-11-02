@@ -45,7 +45,7 @@
   "timezone": "browser",
   "title": "Moria",
   "uid": "moria-overview",
-  "version": 1,
+  "version": 2,
   "panels": [
     {
       "type": "row",
@@ -70,7 +70,7 @@
       "id": 2,
       "gridPos": {
         "h": 4,
-        "w": 4,
+        "w": 3,
         "x": 0,
         "y": 1
       },
@@ -132,7 +132,7 @@
     },
     {
       "type": "stat",
-      "title": "Pont NATS",
+      "title": "Bus RabbitMQ",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -141,7 +141,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 4,
+        "x": 3,
         "y": 1
       },
       "targets": [
@@ -198,7 +198,8 @@
         "colorMode": "background",
         "graphMode": "none",
         "textMode": "auto"
-      }
+      },
+      "description": "1 quand le serveur est connecté à RabbitMQ (vhost moria) et que l'inventaire répond."
     },
     {
       "type": "stat",
@@ -210,8 +211,8 @@
       "id": 4,
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 8,
+        "w": 3,
+        "x": 7,
         "y": 1
       },
       "targets": [
@@ -264,8 +265,8 @@
       "id": 5,
       "gridPos": {
         "h": 4,
-        "w": 4,
-        "x": 12,
+        "w": 3,
+        "x": 10,
         "y": 1
       },
       "targets": [
@@ -319,7 +320,7 @@
       "gridPos": {
         "h": 4,
         "w": 4,
-        "x": 16,
+        "x": 13,
         "y": 1
       },
       "targets": [
@@ -369,6 +370,65 @@
         "graphMode": "none",
         "textMode": "auto"
       }
+    },
+    {
+      "type": "stat",
+      "title": "Inventaire perdu (24 h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 23,
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 17,
+        "y": 1
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "increase(moria_inventory_dropped_total[24h]) or vector(0)",
+          "refId": "A",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "auto"
+      },
+      "description": "Mises à jour d'inventaire abandonnées par le serveur (file pleine ou bus coupé)."
     },
     {
       "type": "stat",
@@ -734,6 +794,171 @@
     },
     {
       "type": "row",
+      "title": "Bus RabbitMQ (vhost moria)",
+      "collapsed": false,
+      "panels": [],
+      "id": 24,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Messages en attente par file",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 25,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (queue) (rabbitmq_detailed_queue_messages_ready{vhost=\"moria\",queue!~\"amq\\\\.gen-.*\"} + rabbitmq_detailed_queue_messages_unacked{vhost=\"moria\",queue!~\"amq\\\\.gen-.*\"})",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rabbitmq_detailed_queue_messages_ready{vhost=\"moria\",queue=~\"amq\\\\.gen-.*\"} + rabbitmq_detailed_queue_messages_unacked{vhost=\"moria\",queue=~\"amq\\\\.gen-.*\"})",
+          "legendFormat": "réponses au serveur",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "Une file qui grossit = son consommateur ne suit plus (dwarf-ai ou inventory)."
+    },
+    {
+      "type": "timeseries",
+      "title": "Consommateurs par file",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 26,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (queue) (rabbitmq_detailed_queue_consumers{vhost=\"moria\",queue!~\"amq\\\\.gen-.*\"})",
+          "legendFormat": "{{queue}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rabbitmq_detailed_queue_consumers{vhost=\"moria\",queue=~\"amq\\\\.gen-.*\"})",
+          "legendFormat": "réponses au serveur",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "description": "0 sur dwarf-ai ou inventory = le service correspondant est arrêté ou déconnecté."
+    },
+    {
+      "type": "timeseries",
+      "title": "Inventaire perdu / s",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "id": 27,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(moria_inventory_dropped_total[$__rate_interval])",
+          "legendFormat": "abandonnées",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "type": "row",
       "title": "Conteneurs",
       "collapsed": false,
       "panels": [],
@@ -742,7 +967,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 32
+        "y": 42
       }
     },
     {
@@ -757,7 +982,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 33
+        "y": 43
       },
       "targets": [
         {
@@ -801,7 +1026,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 33
+        "y": 43
       },
       "targets": [
         {
@@ -845,7 +1070,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 33
+        "y": 43
       },
       "targets": [
         {
@@ -896,7 +1121,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 51
       }
     },
     {
@@ -911,7 +1136,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 42
+        "y": 52
       },
       "targets": [
         {
@@ -953,7 +1178,7 @@
         "h": 14,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 59
       },
       "targets": [
         {
