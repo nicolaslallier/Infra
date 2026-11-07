@@ -1,0 +1,76 @@
+pub fn session_name(s: &str) -> Result<&str, String> {
+    let b = s.as_bytes();
+    let ok_char = |c: &u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+    let valid = (2..=32).contains(&b.len())
+        && ok_char(&b[0])
+        && ok_char(&b[b.len() - 1])
+        && b.iter().all(|c| ok_char(c) || *c == b'-');
+    if valid {
+        Ok(s)
+    } else {
+        Err(format!(
+            "nom de session invalide '{s}' (2-32 car., a-z 0-9 -, ni début ni fin par -)"
+        ))
+    }
+}
+
+pub fn repo_slug(url: &str) -> Result<String, String> {
+    let rest = ["https://github.com/", "git@github.com:"]
+        .iter()
+        .find_map(|p| url.strip_prefix(p))
+        .unwrap_or(url);
+    let rest = rest.strip_suffix(".git").unwrap_or(rest);
+    let part_ok = |p: &str| {
+        !p.is_empty()
+            && p.bytes()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+    };
+    match rest.split_once('/') {
+        Some((o, r)) if part_ok(o) && part_ok(r) => Ok(format!("{o}/{r}")),
+        _ => Err(format!(
+            "dépôt GitHub invalide '{url}' (attendu owner/repo)"
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn names_ok() {
+        assert_eq!(session_name("jarvis"), Ok("jarvis"));
+        assert!(session_name(&"a".repeat(32)).is_ok());
+    }
+
+    #[test]
+    fn names_refused() {
+        for n in ["Jarvis", "a", "a_b", "-ab", "ab-", "a..b", ""] {
+            assert!(session_name(n).is_err(), "{n}");
+        }
+        assert!(session_name(&"a".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn slugs_ok() {
+        for u in [
+            "https://github.com/o/r",
+            "https://github.com/o/r.git",
+            "git@github.com:o/r.git",
+            "o/r",
+        ] {
+            assert_eq!(repo_slug(u).as_deref(), Ok("o/r"), "{u}");
+        }
+    }
+
+    #[test]
+    fn slugs_refused() {
+        for u in [
+            "https://gitlab.com/o/r",
+            "https://github.com/o",
+            "https://github.com/o/r/extra",
+        ] {
+            assert!(repo_slug(u).is_err(), "{u}");
+        }
+    }
+}
