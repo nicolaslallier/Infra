@@ -236,7 +236,7 @@
       },
       "targets": [
         {
-          "expr": "max(100 - avg by (instance) (rate(windows_cpu_time_total{mode=\"idle\", instance=~\"$instance\"}[5m])) * 100)",
+          "expr": "max(100 - avg by (instance) (rate(windows_cpu_time_seconds_total{mode=\"idle\", instance=~\"$instance\"}[5m])) * 100)",
           "legendFormat": "cpu",
           "refId": "A"
         }
@@ -549,7 +549,7 @@
       },
       "targets": [
         {
-          "expr": "100 - avg by (instance) (rate(windows_cpu_time_total{mode=\"idle\", instance=~\"$instance\"}[5m])) * 100",
+          "expr": "100 - avg by (instance) (rate(windows_cpu_time_seconds_total{mode=\"idle\", instance=~\"$instance\"}[5m])) * 100",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -599,7 +599,7 @@
       },
       "targets": [
         {
-          "expr": "avg by (instance, mode) (rate(windows_cpu_time_total{mode!=\"idle\", instance=~\"$instance\"}[5m])) * 100",
+          "expr": "avg by (instance, mode) (rate(windows_cpu_time_seconds_total{mode!=\"idle\", instance=~\"$instance\"}[5m])) * 100",
           "legendFormat": "{{instance}} {{mode}}",
           "refId": "A"
         }
@@ -927,7 +927,7 @@
           "refId": "A"
         },
         {
-          "expr": "windows_memory_commit_limit{instance=~\"$instance\"}",
+          "expr": "windows_memory_commit_limit_bytes{instance=~\"$instance\"}",
           "legendFormat": "{{instance}} limit",
           "refId": "B"
         }
@@ -979,7 +979,7 @@
       },
       "targets": [
         {
-          "expr": "100 * (1 - windows_os_paging_free_bytes{instance=~\"$instance\"} / windows_os_paging_limit_bytes{instance=~\"$instance\"})",
+          "expr": "100 * windows_memory_committed_bytes{instance=~\"$instance\"} / windows_memory_commit_limit_bytes{instance=~\"$instance\"} or 100 * (1 - windows_os_paging_free_bytes{instance=~\"$instance\"} / windows_os_paging_limit_bytes{instance=~\"$instance\"})",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
@@ -1511,7 +1511,7 @@
       },
       "targets": [
         {
-          "expr": "time() - (windows_system_boot_time_timestamp_seconds{instance=~\"$instance\"} or windows_system_system_up_time{instance=~\"$instance\"})",
+          "expr": "time() - (windows_system_boot_time_timestamp{instance=~\"$instance\"} or windows_system_boot_time_timestamp_seconds{instance=~\"$instance\"} or windows_system_system_up_time{instance=~\"$instance\"})",
           "legendFormat": "{{instance}}",
           "refId": "A"
         }
