@@ -973,10 +973,19 @@ déployé par `make up`.
   `/work` : `target/`, `node_modules/`, `.venv/`, `.git/hooks` (un hook
   restauré s'exécuterait au prochain `git`). **La restauration ne se fait que
   dans un volume vide** : le bucket a jusqu'à un intervalle de retard, et
-  restaurer sur un volume intact reviendrait en arrière. Après coup,
-  l'entrypoint exige que l'`origin` de `/work` soit `REPO_URL`, sinon il
-  refuse de démarrer : une session supprimée puis recréée sous le même nom
-  avec un autre dépôt ne reprend pas l'ancien. Le jeton d'abonnement Claude
+  restaurer sur un volume intact reviendrait en arrière. Une restauration
+  interrompue n'est pas prise pour des données intactes : un marqueur
+  `restoring-work`/`restoring-claude` sur le volume d'état, retiré seulement
+  après succès, fait reprendre la copie au démarrage suivant, et tant qu'il
+  existe `sync.sh push` refuse de pousser (un `rclone sync` depuis un arbre
+  à moitié restauré effacerait les objets distants pas encore copiés). Un
+  `docker stop` pendant le démarrage sort sans rien pousser. Une fois la
+  restauration finie, l'entrypoint exige que l'`origin` de `/work` soit
+  `REPO_URL`, sinon il refuse de démarrer : une session supprimée puis
+  recréée sous le même nom avec un autre dépôt ne reprend pas l'ancien. Le
+  préfixe S3 de ce nom peut alors être la seule bonne copie de l'ancien
+  travail : le vérifier (`rclone ls devbox:devbox/<nom>/work`) avant d'y
+  supprimer quoi que ce soit ; le plus sûr est un autre nom. Le jeton d'abonnement Claude
   vit dans le bucket (`claude/.credentials.json`). Aucune identité git n'est
   préconfigurée : `git config --global user.name/user.email` une fois dans la
   session (sur le volume d'état; perdu au `delete`).
@@ -1034,7 +1043,11 @@ déployé par `make up`.
   4. `make dev-image`.
   5. `make dev-up` : exige `infra-net` (`make init` ou `make net` d'abord);
      crée `dev-net`. Un `dev-net` créé avant le sous-réseau fixe doit être
-     supprimé d'abord (`make dev-down`, sessions arrêtées).
+     supprimé d'abord (`make dev-down`). Les conteneurs de session, même
+     arrêtés, gardent une référence à l'ancien réseau et ne reprendront
+     probablement pas (`devbox resume`) : les supprimer (`devbox delete`)
+     puis les recréer (`devbox create`, même nom et même dépôt) ; leur état
+     revient du bucket.
   6. `make up`, pour recréer `nginx` avec le port `:2222`.
   7. Écrire `config.toml` (voir le README, « Sessions de dev »).
   8. `cargo build --release --manifest-path dev/cli/Cargo.toml`.
