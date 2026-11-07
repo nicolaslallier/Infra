@@ -269,9 +269,14 @@ runners-status: ## Per repo: the container here, and what GitHub has registered
 # Portainer stacks made by the devbox CLI. See CLAUDE.md "Dev sessions".
 DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
 
+# The key file is baked into the gateway image: refuse a private key anywhere
+# in it, and any non-comment line that is not a public key (ssh-/ecdsa-/sk-).
 dev-up: check-env ## Build and start the dev-session egress proxy and SSH gateway
-	@grep -qE '^(ssh-|ecdsa-|sk-)' dev/gateway/authorized_keys || { \
-		echo "make dev-up: dev/gateway/authorized_keys has no key -- add your ~/.ssh/id_*.pub line(s)" >&2; exit 1; }
+	@rc=0; awk '/PRIVATE KEY/ { priv = 1 } /^[[:space:]]*(#|$$)/ { next } \
+		{ n++; if ($$0 !~ /^(ssh-|ecdsa-|sk-)/) bad = 1 } \
+		END { exit priv ? 2 : (n > 0 && !bad) ? 0 : 1 }' dev/gateway/authorized_keys || rc=$$?; \
+	[ "$$rc" != 2 ] || { echo "make dev-up: dev/gateway/authorized_keys holds a PRIVATE key -- only the .pub line goes there" >&2; exit 1; }; \
+	[ "$$rc" = 0 ] || { echo "make dev-up: dev/gateway/authorized_keys has no key, or a line that is not one -- add your ~/.ssh/id_*.pub line(s)" >&2; exit 1; }
 	$(DEV_COMPOSE) up -d --build
 
 dev-down: ## Stop the dev-session proxy and gateway (sessions lose SSH and egress)
