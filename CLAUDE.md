@@ -601,6 +601,9 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 7687 → NGINX's `stream{}` block (`nginx/stream.d/neo4j.conf`),
   a raw TCP passthrough proxy to `neo4j:7687` (Bolt), bound to
   `127.0.0.1:7687` the same way.
+- Port 2222 → NGINX's `stream{}` block (`nginx/stream.d/devssh.conf`), to
+  `dev-gateway:22`, bound to `${LAN_IP}` (never `0.0.0.0`): dev-session SSH
+  has to reach other LAN machines (see "Dev sessions").
 **`portainer` is the one deliberate exception.** It publishes 9443 (UI,
 TLS), 9000 (UI, plain HTTP) and 8000 (Edge-agent tunnel) itself, from
 `docker-compose.portainer.yml`, bound to `${LAN_IP}` — never `0.0.0.0`,
@@ -908,9 +911,54 @@ postgres dump holds every app's data, so nothing is world-readable.
 
 ### Dev sessions
 
-Claude Code sessions in containers, one per git repo. The full section is
-written in Task 7. For now: every session uses the same S3 identity `devbox`
-(bucket `devbox`, one prefix per session, `DEVBOX_S3_SECRET_KEY`).
+Claude Code in containers, one per GitHub repo, reached over SSH from the
+LAN. Usage is in the README ("Dev sessions"). Pieces: the `devbox` CLI
+(`dev/cli`, Rust, runs on the owner's Mac/PC), one Portainer stack per
+session (`dev/session.compose.yml`, stack `dev-<name>`, image
+`devbox-session:1` from `dev/image`, built on the daemon by `make dev-image`),
+and the plumbing in `docker-compose.dev.yml` (project `dev`, `make dev-up`):
+`dev-egress` (squid) and `dev-gateway` (sshd). Neither project is part of the
+`infra` stack, so `make up` never recreates a session.
+
+- **SSH is a `ProxyJump`.** nginx (`stream.d/devssh.conf`) passes
+  `${LAN_IP}:2222` to `dev-gateway:22`, user `jump`, which forwards only to
+  port 2222 (`PermitOpen *:2222`) and has no shell; each session runs its own
+  unprivileged sshd on 2222. The CLI writes the `Host dev-<name>` block into
+  `~/.ssh/config`. The owner's keys are in `dev/gateway/authorized_keys`,
+  baked into the gateway image: edit it, then `make dev-up`.
+- **The only way out is the proxy.** Sessions are on `dev-net`
+  (`internal: true`: no route anywhere) and get `HTTP(S)_PROXY=dev-egress:3128`.
+  squid allows `s3:8333`, then refuses every private range, then allows the
+  domain list in `dev/egress/squid.conf` (Anthropic, GitHub, crates.io,
+  npm, PyPI). The `-n` on its `dstdomain` ACLs is load-bearing: without it
+  squid reverse-resolves an IP-literal request, and an attacker's own PTR
+  record (`x.github.com`) would pass the list. `scripts/dev-isolation-check.sh
+  <name>` asserts all of this against a running session.
+- **No bind mounts in `docker-compose.dev.yml`**: configs are `COPY`'d into
+  the images, because `make dev-up` runs compose over the ssh `DOCKER_HOST`,
+  which sends the build context but not files to mount.
+- **State is in the `devbox` bucket**, `devbox/<name>/{work,claude}`, pushed
+  every 60 s and on stop (`stop_grace_period: 120s`; a crash loses at most a
+  minute). `target/`, `node_modules/`, `.venv/` are not synced. A session
+  that starts with an empty `/work` restores from the bucket, so
+  `devbox delete x` then `devbox create x` gets its work and its Claude
+  login back. `~/.claude` holds the subscription credentials
+  (`CLAUDE_CONFIG_DIR`), so Claude, and the bucket, can read them.
+- **Ceiling: one S3 identity for every session** (`devbox`,
+  `DEVBOX_S3_SECRET_KEY`). A compromised session can read every other
+  session's prefix, credentials included, and write it, e.g. a
+  `.git/hooks/*` or a `~/.claude` hook that runs when that session next
+  restores. The remedy is one identity per session (`devbox/<name>/*`),
+  minted by the CLI at create.
+- **The GitHub token is the real guard rail**, not the container: it is
+  scoped by the owner to one repo, and Claude may merge to `main`, which on
+  a repo with a self-hosted runner runs code on the host. `devbox create`
+  refuses a repo whose `main` is unprotected. The token is in the stack env
+  (so Portainer and `docker inspect` show it), never printed by the CLI.
+- **The Portainer API key stays on the owner's machine**, in the CLI's
+  `config.toml`; nothing in a session can reach Portainer or the socket.
+- `max_active` (4) and `mem_limit` (1536m) exist because the daemon is the
+  laptop's ~7.7 GiB VM, already carrying the stack.
 
 ### Windows machines (`windows_exporter`)
 

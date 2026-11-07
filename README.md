@@ -1109,6 +1109,56 @@ to do with it.
   Android (F-Droid build) its own connection, but iOS then gets delayed
   delivery.
 
+## Dev sessions
+
+Claude Code in a container per GitHub repo, over SSH, with egress limited to
+Anthropic, GitHub and the package registries. Design and caveats: CLAUDE.md
+"Dev sessions".
+
+Once, on the stack:
+
+```bash
+# your public key(s) into dev/gateway/authorized_keys, commit, then:
+make dev-image                      # builds devbox-session:1 from main
+make dev-up                         # egress proxy + SSH gateway
+# DEVBOX_S3_SECRET_KEY in the vault (openssl rand -hex 24), make vault-env, then:
+make s3-provision app=devbox versioned=1
+```
+
+Once, on each Mac/PC: `cargo install --path dev/cli`, then write
+`config.toml` in the OS config dir (`devbox` prints the path in its error
+when it is missing; macOS: `~/Library/Application Support/net.famillelallier.devbox/`,
+Windows: `%APPDATA%\famillelallier\devbox\config\`):
+
+```toml
+portainer_url = "https://192.168.2.10:9443"
+api_key = "ptr_..."            # Portainer -> My account -> Access tokens
+endpoint_id = 3                # make stack-status / Portainer's environment id
+insecure_tls = true            # Portainer's certificate is self-signed
+ssh_host = "192.168.2.10"      # LAN_IP
+pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
+s3_secret_key = "..."          # DEVBOX_S3_SECRET_KEY
+# catalogs = ["anthropics/claude-plugins-official", "me/my-plugins"]
+# max_active = 4
+# mem_limit = "1536m"
+```
+
+Then:
+
+```bash
+devbox create jarvis --repo nicolaslallier/Jarvis   # asks for a token scoped to that repo, then plugins
+ssh dev-jarvis                                     # first time: run `claude` and log in
+devbox list
+devbox stop jarvis      # pushes /work and ~/.claude to the bucket first
+devbox resume jarvis
+devbox delete jarvis    # keeps the bucket copy; create restores from it
+```
+
+The token is a fine-grained PAT on that one repository (Contents and Pull
+requests read/write is enough to branch, push, open and merge PRs); `create`
+refuses a repo whose `main` is not protected. `scripts/dev-isolation-check.sh
+<name>` checks a session's network box.
+
 ## Connecting an application repo
 
 1. Add a database + role for the app: put its name in `APP_DATABASES` in
