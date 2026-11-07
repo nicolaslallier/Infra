@@ -20,8 +20,11 @@ for u in https://api.anthropic.com https://github.com https://static.crates.io \
 done
 r="$(code http://s3:8333)"; [[ "$r" != 000 && "$r" != 403 ]] && ok "s3:8333 reachable ($r)" || ko "s3:8333 reachable" "$r"
 # Refused by squid (403), or not even resolvable/connectable (000).
-r="$(tunnel https://example.com)"; [[ "$r" != 200 ]] && ok "https://example.com refused ($r)" || ko "https://example.com refused" "$r"
-for u in http://example.com http://192.168.2.35:11434 http://postgres:5432 http://nginx; do
+# 140.82.112.3 is a github.com address: an IP literal must not pass by rDNS.
+for u in https://example.com https://140.82.112.3; do
+  r="$(tunnel -k "$u")"; [[ "$r" != 200 ]] && ok "$u refused ($r)" || ko "$u refused" "$r"
+done
+for u in http://example.com http://140.82.112.3 http://192.168.2.35:11434 http://postgres:5432 http://nginx; do
   r="$(code "$u")"; [[ "$r" == 403 || "$r" == 000 ]] && ok "$u refused ($r)" || ko "$u refused" "$r"
 done
 r="$(code --noproxy '*' https://github.com)"; [[ "$r" == 000 ]] && ok "direct egress blocked" || ko "direct egress blocked" "$r"
