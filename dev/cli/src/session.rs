@@ -99,6 +99,22 @@ pub fn ssh_config_including(config: &str) -> Option<String> {
     Some(if config.is_empty() { format!("{INCLUDE}\n") } else { format!("{INCLUDE}\n\n{config}") })
 }
 
+/// Replace an ~/.ssh file atomically (temp file + rename), so a crash or a
+/// full disk never leaves the owner's ssh config truncated. A symlink (dotfiles
+/// manager) is followed and kept; an existing file keeps its mode.
+pub fn write_file(p: &std::path::Path, content: &str) -> Result<(), String> {
+    let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let err = |e: std::io::Error| format!("{}: {e}", p.display());
+    let mut tmp = tempfile::NamedTempFile::new_in(p.parent().ok_or("no parent directory")?).map_err(err)?;
+    std::io::Write::write_all(&mut tmp, content.as_bytes()).map_err(err)?;
+    tmp.as_file().sync_all().map_err(err)?;
+    if let Ok(m) = std::fs::metadata(&p) {
+        tmp.as_file().set_permissions(m.permissions()).map_err(err)?;
+    }
+    tmp.persist(&p).map_err(|e| err(e.error))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +194,25 @@ mod tests {
         let c = ssh_config_including("Host *\n    User me\n").unwrap();
         assert!(c.starts_with("Include devbox.conf\n\nHost *"), "{c}");
         assert_eq!(ssh_config_including(&c), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_keeps_link_and_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().join("real");
+        std::fs::write(&real, "old").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let link = d.path().join("config");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        write_file(&link, "new").unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
+        assert_eq!(std::fs::metadata(&real).unwrap().permissions().mode() & 0o777, 0o640);
+        let fresh = d.path().join("fresh");
+        write_file(&fresh, "x").unwrap();
+        assert_eq!(std::fs::read_to_string(&fresh).unwrap(), "x");
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 3, "temp file left behind");
     }
 }

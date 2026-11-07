@@ -141,10 +141,10 @@ fn create(cfg: &config::Config, name: &str, repo: Option<String>, mut plugins: V
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let conf = dir.join("devbox.conf");
     let current = std::fs::read_to_string(&conf).unwrap_or_default();
-    std::fs::write(&conf, session::devbox_conf_with(&current, &session::ssh_config_entry(cfg, name), name)).map_err(|e| format!("{}: {e}", conf.display()))?;
+    session::write_file(&conf, &session::devbox_conf_with(&current, &session::ssh_config_entry(cfg, name), name))?;
     let main_conf = dir.join("config");
     if let Some(updated) = session::ssh_config_including(&std::fs::read_to_string(&main_conf).unwrap_or_default()) {
-        std::fs::write(&main_conf, updated).map_err(|e| format!("{}: {e}", main_conf.display()))?;
+        session::write_file(&main_conf, &updated)?;
         println!("Added `Include devbox.conf` at the top of {}.", main_conf.display());
     }
     println!("\n  ssh dev-{name}\n\nThe first start clones the repo (or restores it from the bucket) and installs plugins: give it a minute.");
@@ -236,7 +236,7 @@ fn delete(cfg: &config::Config, name: &str, yes: bool) -> Result<(), String> {
     if let Ok(dir) = ssh_dir() {
         let conf = dir.join("devbox.conf");
         if let Ok(current) = std::fs::read_to_string(&conf) {
-            let _ = std::fs::write(&conf, session::devbox_conf_without(&current, name));
+            let _ = session::write_file(&conf, &session::devbox_conf_without(&current, name));
         }
         // A recreated session has a new host key: forget the old one.
         let _ = std::process::Command::new("ssh-keygen").args(["-R", &format!("[dev-{name}]:2222")]).output();

@@ -3,8 +3,10 @@
 # allow-listed domains and s3:8333 answer, and a refused name is never even
 # resolved; LAN, infra-net, the Docker host and direct egress are out of reach.
 # Usage: scripts/dev-isolation-check.sh <session>   (container dev-<session>)
+# DEV_EGRESS names the proxy container (default dev-egress), for a throwaway copy.
 set -euo pipefail
 c="dev-${1:?usage: dev-isolation-check.sh <session>}"
+egress="${DEV_EGRESS:-dev-egress}"
 fail=0
 ok() { printf 'OK  %s\n' "$1"; }
 ko() { printf 'KO  %s (got %s)\n' "$1" "$2"; fail=1; }
@@ -27,11 +29,15 @@ reached() { # <label> <expect: tunnel|http> <curl args...>
     http) read -r _ code err <<<"$r"; [[ "$code" != 000 && "$err" == - ]] ;;
   esac && ok "$label reachable" || ko "$label reachable" "$r"
 }
-refused() { # <label> <curl args...>: squid said no, or nothing answered at all
+# Squid's own access denial only: ERR_CONNECT_FAIL, ERR_ZERO_SIZE_OBJECT and
+# the like mean squid let the request through and tried the destination.
+refused() { # <label> <curl args...>
   local label=$1; shift; local r; r="$(probe "$@")"
-  read -r conn code err <<<"$r"
-  [[ "$err" == ERR_* || ( "$conn" == 000 && "$code" == 000 ) || ( "$conn" != 000 && "$conn" != 200 ) ]] \
-    && ok "$label refused ($r)" || ko "$label refused" "$r"
+  [[ "$r" == *" ERR_ACCESS_DENIED" ]] && ok "$label refused ($r)" || ko "$label refused" "$r"
+}
+unreachable() { # <label> <curl args...>: nothing answered at all
+  local label=$1; shift; local r; r="$(probe "$@")"
+  [[ "$r" == "000 000 "* ]] && ok "$label unreachable" || ko "$label unreachable" "$r"
 }
 
 # HTTPS: squid's answer to CONNECT (200 = tunnelled), not the site's status --
@@ -55,8 +61,12 @@ refused "http://s3:8888 (filer)" http://s3:8888
 refused "http://s3:9333 (master)" http://s3:9333
 refused "CONNECT s3:8333" -p http://s3:8333
 refused "http://host.docker.internal" http://host.docker.internal
+refused "http://127.0.0.1 (loopback)" http://127.0.0.1/
+refused "http://[::1] (IPv6 loopback)" -g 'http://[::1]/'
+refused "http://[fd00::1] (IPv6 ULA)" -g 'http://[fd00::1]/'
+refused "http://100.64.0.1 (CGNAT)" http://100.64.0.1/
 for u in https://github.com http://host.docker.internal http://192.168.65.254 http://172.17.0.1; do
-  refused "direct $u (no proxy)" --noproxy '*' "$u"
+  unreachable "direct $u (no proxy)" --noproxy '*' "$u"
 done
 
 # The session itself resolves nothing outside dev-net.
@@ -65,7 +75,7 @@ docker exec "$c" getent hosts example.com >/dev/null 2>&1 && ko "no DNS in the s
 # A refused name is never looked up by squid (no DNS exfiltration).
 leak="leakcheck$RANDOM$RANDOM.example.org"
 probe "http://$leak/" >/dev/null; probe "https://$leak/" >/dev/null
-docker exec dev-egress wget -qO- http://127.0.0.1:3128/squid-internal-mgr/ipcache 2>/dev/null | grep -q "$leak" \
+docker exec "$egress" wget -qO- http://127.0.0.1:3128/squid-internal-mgr/ipcache 2>/dev/null | grep -q "$leak" \
   && ko "refused names are not resolved" "$leak in squid's ipcache" || ok "refused names are not resolved"
 
 docker exec "$c" test ! -e /var/run/docker.sock && ok "no docker socket" || ko "no docker socket" present
