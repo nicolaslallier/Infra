@@ -1115,53 +1115,53 @@ Claude Code in a container per GitHub repo, over SSH, with egress limited to
 Anthropic, GitHub and the package registries. Design and caveats: CLAUDE.md
 "Dev sessions".
 
-Once, on the stack. **The vault key comes first, before this change is
-merged:** `check-env` requires `DEVBOX_S3_SECRET_KEY`, and the merge itself
-deploys, rendering `.env` from the vault.
+Once, on the stack (after this is merged):
 
 ```bash
-read -rs K && printf '%s' "$K" | make vault-cli args="kv patch -mount=infra env DEVBOX_S3_SECRET_KEY=-"; unset K
-#   (K from: openssl rand -hex 24)  -- then merge; after the deploy:
-make vault-env
-make s3-provision app=devbox versioned=1
 # your public key(s) into dev/gateway/authorized_keys, commit, then:
-make dev-image                      # builds devbox-session:1 from main
+make dev-image                      # builds devbox-session:1 from main (FORCE=1 rebuilds)
 make dev-up                         # egress proxy + SSH gateway
 ```
 
+Nothing else: `devbox create` makes the `devbox` bucket and each session's
+S3 identity itself.
+
 Once, on each Mac/PC: `cargo install --path dev/cli`, then write
-`config.toml` in the OS config dir (`devbox` prints the path in its error
+`config.toml` in the OS config dir (`devbox` names the path in its error
 when it is missing; macOS: `~/Library/Application Support/net.famillelallier.devbox/`,
-Windows: `%APPDATA%\famillelallier\devbox\config\`):
+Windows: `%APPDATA%\famillelallier\devbox\config\`), mode 600:
 
 ```toml
-portainer_url = "https://192.168.2.10:9443"
+portainer_url = "https://portainer.infra.famillelallier.net"
+ca_cert = "/Users/me/OpenCode/Infra/certs/infra-ca.crt"   # a copy of the stack's CA
 api_key = "ptr_..."            # Portainer -> My account -> Access tokens
-endpoint_id = 3                # make stack-status / Portainer's environment id
-insecure_tls = true            # Portainer's certificate is self-signed
+endpoint_id = 3                # Portainer's environment id
 ssh_host = "192.168.2.10"      # LAN_IP
 pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
-s3_secret_key = "..."          # DEVBOX_S3_SECRET_KEY
+# extra_pubkeys = ["ssh-ed25519 AAAA... me@windows-pc"]   # your other machines
 # catalogs = ["anthropics/claude-plugins-official", "me/my-plugins"]
 # max_active = 4
 # mem_limit = "1536m"
+# cpus = "2"
 ```
 
 Then:
 
 ```bash
-devbox create jarvis --repo nicolaslallier/Jarvis   # asks for a token scoped to that repo, then plugins
-ssh dev-jarvis                                     # first time: run `claude` and log in
+devbox create jarvis --repo nicolaslallier/Jarvis   # asks for the token, then plugins
+ssh dev-jarvis                                     # lands in tmux; first time: run `claude` and log in
 devbox list
-devbox stop jarvis      # pushes /work and ~/.claude to the bucket first
+devbox stop jarvis      # pushes /work and Claude's state to the bucket first
 devbox resume jarvis
-devbox delete jarvis    # keeps the bucket copy; create restores from it
+devbox token jarvis     # a new token when the old one expires
+devbox delete jarvis    # keeps the bucket copy; create (same repo) restores from it
 ```
 
-The token is a fine-grained PAT on that one repository (Contents and Pull
-requests read/write is enough to branch, push, open and merge PRs); `create`
-refuses a repo whose `main` is not protected. `scripts/dev-isolation-check.sh
-<name>` checks a session's network box.
+The token is a fine-grained PAT on that one repository with Contents and
+Pull requests read/write, and **not** Administration; `create` refuses a
+repo whose default branch is not protected. `scripts/dev-isolation-check.sh
+<name>` checks a session's network box; `make dev-test` runs the CLI tests
+and the image/state checks on this machine's Docker.
 
 ## Connecting an application repo
 

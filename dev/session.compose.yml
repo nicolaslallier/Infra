@@ -12,8 +12,14 @@ services:
     image: devbox-session:1
     pull_policy: never
     restart: unless-stopped
+    # The daemon's VM also carries the whole infra stack: a session is the
+    # first thing the OOM killer takes, and it cannot take every core or fork
+    # without bound.
     mem_limit: ${MEM_LIMIT:-1536m}
-    # The entrypoint pushes /work and ~/.claude to the bucket on SIGTERM.
+    cpus: ${CPUS:-2}
+    pids_limit: 1024
+    oom_score_adj: 1000
+    # The entrypoint pushes /work and Claude's state to the bucket on SIGTERM.
     stop_grace_period: 120s
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -23,7 +29,9 @@ services:
       GH_TOKEN: ${GH_TOKEN:?}
       MARKETPLACES: ${MARKETPLACES:-}
       PLUGINS: ${PLUGINS:-}
-      SSH_PUBKEY: ${SSH_PUBKEY:?}
+      SSH_PUBKEYS: ${SSH_PUBKEYS:?}
+      # This session's own identity, scoped to devbox/<session>/*.
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?}
       # Both spellings: curl/cargo read only lowercase http_proxy.
       HTTP_PROXY: http://dev-egress:3128
@@ -33,11 +41,14 @@ services:
       NO_PROXY: ""
     volumes:
       - work:/work
+      - state:/home/dev/state
     networks: [dev-net]
 
 volumes:
   work:
     name: dev-${SESSION}-work
+  state:
+    name: dev-${SESSION}-state
 
 networks:
   dev-net:

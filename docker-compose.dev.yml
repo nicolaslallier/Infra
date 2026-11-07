@@ -13,16 +13,38 @@ services:
     image: dev-egress:1
     container_name: dev-egress
     restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/run/squid, /var/cache/squid, /var/log/squid, /tmp]
+    cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    # dev-out: the Internet. infra-net: only for s3:8333 (squid.conf).
-    networks: [dev-net, dev-out, infra-net]
+    mem_limit: 256m
+    healthcheck:
+      # The cache manager, allowed from localhost only (squid.conf).
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3128/squid-internal-mgr/info"]
+      interval: 30s
+      timeout: 5s
+    # infra-net is not internal: it is both the route out and the way to
+    # s3:8333 (squid.conf decides which).
+    networks: [dev-net, infra-net]
 
   dev-gateway:
     build: dev/gateway
     image: dev-gateway:1
     container_name: dev-gateway
     restart: unless-stopped
+    read_only: true
+    tmpfs: [/run, /tmp, /var/empty]
+    # sshd's privilege separation, and nothing else.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, SYS_CHROOT, NET_BIND_SERVICE, KILL]
     security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    healthcheck:
+      # Not a TCP probe: sshd penalises connections that never authenticate.
+      # busybox pgrep -x reads the retitled argv ("sshd: ... [listener]").
+      test: ["CMD", "pgrep", "sshd"]
+      interval: 30s
+      timeout: 5s
     volumes:
       - gateway-keys:/etc/ssh/keys
     # infra-net: so nginx reaches it. dev-net: so it reaches the sessions.
@@ -36,6 +58,5 @@ networks:
   dev-net:
     name: dev-net
     internal: true
-  dev-out:
   infra-net:
     external: true

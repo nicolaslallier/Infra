@@ -196,6 +196,7 @@ dependencies = [
  "clap",
  "dialoguer",
  "directories",
+ "getrandom 0.2.17",
  "reqwest",
  "serde",
  "serde_json",

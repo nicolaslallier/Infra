@@ -4,11 +4,17 @@ Port 22
 HostKey /etc/ssh/keys/ssh_host_ed25519_key
 AuthorizedKeysFile /etc/ssh/authorized_keys/%u
 AllowUsers jump
+# Logs the fingerprint of the key that logged in. (The client address is
+# nginx's: sshd cannot read the PROXY protocol.)
+LogLevel VERBOSE
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
 # Only -W/-L to port 2222 (the sessions' sshd). PermitOpen takes '*' only as
-# a whole host field, so this is "any host, port 2222".
+# a whole host field, so this is "any host, port 2222" -- any LAN or
+# Internet host too, since the gateway is on infra-net. Accepted: only the
+# owner's keys get here, and they could open such a tunnel from their own
+# machine anyway.
 AllowTcpForwarding local
 PermitOpen *:2222
 AllowAgentForwarding no
