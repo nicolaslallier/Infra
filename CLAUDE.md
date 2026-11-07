@@ -906,6 +906,15 @@ postgres dump holds every app's data, so nothing is world-readable.
   target keeps its old time. Grafana rules `Backup stale` (over 26 h) and
   `Backup metric missing` (absent for 30 m).
 
+### Sessions de dev
+
+Claude Code session containers (`docker-compose.dev.yml`) sync `/work` and
+`~/.claude` to the versioned bucket `devbox` (`devbox/<SESSION>/...`) as S3
+identity `devbox`, secret `DEVBOX_S3_SECRET_KEY`; provision once with
+`make s3-provision app=devbox versioned=1`. **The identity is shared by every
+session**: a compromised session can read or overwrite the other sessions'
+prefixes. Ceiling accepted for now; remedy is one identity per session.
+
 ### Windows machines (`windows_exporter`)
 
 Job `windows` in `monitoring/prometheus/prometheus.yml`, dashboard
