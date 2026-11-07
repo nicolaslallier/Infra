@@ -19,12 +19,15 @@ RUN apt-get update \
 # The base image ships user "node" at uid 1000; replace it with "dev".
 RUN userdel -r node \
  && useradd -m -u 1000 -s /bin/bash dev \
- && mkdir /work && chown dev:dev /work
+ && mkdir /work /home/dev/.state && chown dev:dev /work /home/dev/.state
 
 COPY --chmod=0755 entrypoint.sh sync.sh /usr/local/bin/
 
 USER dev
-ENV HOME=/home/dev PATH=/home/dev/.cargo/bin:$PATH
+# The state volume (dev-<session>-state): Claude keeps .claude.json inside
+# CLAUDE_CONFIG_DIR when it is set, and git its global config in GIT_CONFIG_GLOBAL.
+ENV HOME=/home/dev PATH=/home/dev/.cargo/bin:$PATH \
+    CLAUDE_CONFIG_DIR=/home/dev/.state/claude GIT_CONFIG_GLOBAL=/home/dev/.state/gitconfig
 RUN curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal -c clippy
 WORKDIR /work
 EXPOSE 2222

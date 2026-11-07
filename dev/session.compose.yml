@@ -8,7 +8,7 @@ services:
     image: devbox-session:1
     pull_policy: never # built on the daemon by `make dev-image`
     mem_limit: ${MEM_LIMIT:-1536m}
-    stop_grace_period: 120s # entrypoint pushes /work and ~/.claude to S3 on SIGTERM
+    stop_grace_period: 120s # entrypoint pushes /work and the Claude state to S3 on SIGTERM
     restart: unless-stopped
     read_only: false
     cap_drop: [ALL]
@@ -29,11 +29,15 @@ services:
       no_proxy: ""
     volumes:
       - work:/work
+      # SSH host key, Claude state, git identity: survive a recreate.
+      - state:/home/dev/.state
     networks: [dev-net]
 
 volumes:
   work:
     name: dev-${SESSION:?}-work
+  state:
+    name: dev-${SESSION:?}-state
 
 networks:
   dev-net:
