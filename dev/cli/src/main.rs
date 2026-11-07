@@ -1,5 +1,6 @@
 //! devbox: Claude Code dev sessions, one Portainer stack each.
 //! See CLAUDE.md "Dev sessions" in the Infra repo.
+mod catalog;
 mod config;
 mod validate;
 
