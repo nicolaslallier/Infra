@@ -1,0 +1,20 @@
+# Jump host only: `ssh -J jump@<LAN_IP>:2222 dev@dev-<session>` (the devbox
+# CLI writes that as ProxyJump in ~/.ssh/config).
+Port 22
+HostKey /etc/ssh/keys/ssh_host_ed25519_key
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+AllowUsers jump
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+# Only -W/-L to port 2222 (the sessions' sshd). PermitOpen takes '*' only as
+# a whole host field, so this is "any host, port 2222".
+AllowTcpForwarding local
+PermitOpen *:2222
+AllowAgentForwarding no
+AllowStreamLocalForwarding no
+GatewayPorts no
+X11Forwarding no
+PermitTunnel no
+PermitTTY no
+ForceCommand /bin/false

@@ -16,7 +16,7 @@ SHELL := bash
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
 	runner-shell runner-env check-runner-env \
 	runner-ea-up runner-ea-down runner-ea-logs \
-	dev-image
+	dev-image dev-up dev-down dev-logs dev-status
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -298,6 +298,25 @@ runner-ea-down: check-runner-env ## Stop the EA runner (not mid-job: that deploy
 
 runner-ea-logs: check-runner-env ## Tail the EA runner's logs
 	$(RUNNER_EA_COMPOSE) logs -f
+
+# Dev-session plumbing (docker-compose.dev.yml): egress proxy + SSH gateway,
+# its own compose project like the runner. The sessions themselves are
+# Portainer stacks made by the devbox CLI. See CLAUDE.md "Dev sessions".
+DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
+
+dev-up: check-env ## Build and start the dev-session egress proxy and SSH gateway
+	@grep -q '^ssh-' dev/gateway/authorized_keys || { \
+		echo "make dev-up: dev/gateway/authorized_keys has no key -- add your ~/.ssh/id_*.pub line(s)" >&2; exit 1; }
+	$(DEV_COMPOSE) up -d --build
+
+dev-down: ## Stop the dev-session proxy and gateway (sessions lose SSH and egress)
+	$(DEV_COMPOSE) down
+
+dev-logs: ## Tail the dev-session proxy and gateway logs
+	$(DEV_COMPOSE) logs -f
+
+dev-status: ## Dev plumbing and session containers on the daemon
+	@docker ps -a --filter name=^dev- --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 
 ##@ App provisioning
 provision-app: check-env ## Add an app DB/role (app=<name>)
