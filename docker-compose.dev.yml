@@ -10,7 +10,7 @@
 services:
   dev-egress:
     container_name: dev-egress
-    image: ubuntu/squid:6.13-25.04_beta@sha256:3de2e64f0ca6efdac3e98557607dc0f23050037f3885016d5d5bfcf9950501b8
+    image: ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
     restart: unless-stopped
     volumes:
       - ${DEV_DIR:-./dev}/egress/squid.conf:/etc/squid/squid.conf:ro

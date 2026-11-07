@@ -416,9 +416,10 @@ clean: ## Delete the stack and its volumes (CONFIRM=1 required)
 # containers themselves are driven by the devbox CLI, not from here.
 DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
 
-dev-up: check-env ## Start dev-egress and dev-gateway (needs a real key in dev/gateway/authorized_keys)
-	@grep -qEv '^[[:space:]]*(#|$$)' dev/gateway/authorized_keys || { \
-		echo "make: dev/gateway/authorized_keys holds no public key -- put your SSH public key in it" >&2; exit 1; }
+dev-up: check-env ## Start dev-egress and dev-gateway (needs your key in dev/gateway/authorized_keys, untracked)
+	@f=$${DEV_AUTHORIZED_KEYS:-dev/gateway/authorized_keys}; \
+	test -f "$$f" && grep -qEv '^[[:space:]]*(#|$$)' "$$f" || { \
+		echo "make: $$f is missing or holds no public key -- copy dev/gateway/authorized_keys.example to dev/gateway/authorized_keys and put your SSH public key in it" >&2; exit 1; }
 	@docker network inspect infra-net >/dev/null 2>&1 || { echo "make: infra-net missing -- run 'make net'" >&2; exit 1; }
 	$(DEV_COMPOSE) up -d --build
 
@@ -431,4 +432,4 @@ dev-logs: ## Tail the egress proxy and gateway logs
 dev-status: ## Dev infrastructure containers and the sessions on dev-net
 	@$(DEV_COMPOSE) ps
 	@echo; echo "Sessions on dev-net:"
-	@docker ps --filter network=dev-net --format '{{.Names}}\t{{.Status}}' | grep -v '^dev-egress\|^dev-gateway' || true
+	@docker ps --filter network=dev-net --format '{{.Names}}\t{{.Status}}' | grep -Ev '^dev-(egress|gateway)' || true

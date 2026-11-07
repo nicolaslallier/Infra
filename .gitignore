@@ -14,3 +14,4 @@ openbao/seal.key
 Claude outputs/
 *.env
 __pycache__/
+dev/gateway/authorized_keys

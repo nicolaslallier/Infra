@@ -1,0 +1,4 @@
+# EXAMPLE -- copy this file to dev/gateway/authorized_keys (gitignored) and put
+# the owner's SSH public key on a line (e.g. the contents of ~/.ssh/id_ed25519.pub).
+# `make dev-up` refuses while that file is missing or holds no non-comment line.
+# Public keys only; never a private key.

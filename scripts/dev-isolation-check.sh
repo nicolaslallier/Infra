@@ -26,20 +26,36 @@ for u in https://api.anthropic.com https://github.com https://static.crates.io \
   [ "$(status "$u")" = 200 ] && ok "reachable via proxy: $u" || ko "not reachable via proxy: $u"
 done
 
-# s3 is plain http: any answer from SeaweedFS (even 403) beats a proxy refusal,
-# so insist on not-000 and not squid's own 403 page (X-Squid-Error).
-hdr=$(run curl -s -o /dev/null -m 15 -D - http://s3:8333/ || true)
+# headers <url> [curl args]: response headers (proxy's CONNECT reply for https).
+headers() { local u=$1; shift; run curl -s -o /dev/null -m 15 -D - "$@" "$u" || true; }
+
+# s3 is plain http: any answer from SeaweedFS (even 403) beats a proxy refusal.
+hdr=$(headers http://s3:8333/)
 echo "$hdr" | grep -q '^HTTP' && ! echo "$hdr" | grep -qi '^X-Squid-Error' \
   && ok "reachable via proxy: http://s3:8333" || ko "not reachable via proxy: http://s3:8333"
 
-for u in https://example.com http://192.168.2.35:11434 http://postgres:5432 http://nginx \
-         http://s3:9333 http://dev-egress:3128; do
-  [ "$(status "$u")" = 403 ] && ok "refused (403): $u" || ko "NOT refused: $u"
+# Refused means squid itself said 403 (X-Squid-Error), not an origin's 403.
+# The port-80/443 targets are the ones that reach the private_dst rule; the
+# others fall to Safe_ports or deny all first.
+for u in https://example.com http://192.168.2.35:11434 http://postgres:5432 \
+         http://s3:9333 http://dev-egress:3128 \
+         http://192.168.2.35/ http://s3/ http://nginx/ https://192.168.2.35/ \
+         http://127.0.0.1/ 'http://[::1]/'; do
+  hdr=$(headers "$u" -g)
+  echo "$hdr" | grep -q ' 403' && echo "$hdr" | grep -qi '^X-Squid-Error' \
+    && ok "refused by proxy (403): $u" || ko "NOT refused by proxy: $u"
 done
+
+# Plain-http s3 without the proxy: no route, so this must fail.
+if run curl -s -o /dev/null -m 8 --noproxy '*' http://s3:8333/; then
+  ko "direct http://s3:8333 works without proxy"
+else ok "direct s3 without proxy fails"; fi
 
 if run curl -s -o /dev/null -m 8 --noproxy '*' https://github.com; then
   ko "direct access without proxy works"
 else ok "direct access without proxy fails"; fi
 
-run test -e /var/run/docker.sock && ko "/var/run/docker.sock present" || ok "no docker.sock"
+# Positive "absent" answer: a failing `docker exec` must not read as "no socket".
+[ "$(run sh -c 'test -e /var/run/docker.sock && echo present || echo absent')" = absent ] \
+  && ok "no docker.sock" || ko "/var/run/docker.sock present (or docker exec failed)"
 echo "all isolation checks passed for $c"

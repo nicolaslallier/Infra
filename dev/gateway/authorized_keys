@@ -1,3 +1,0 @@
-# PLACEHOLDER -- replace this line with the owner's SSH public key
-# (e.g. the contents of ~/.ssh/id_ed25519.pub). `make dev-up` refuses while
-# this file holds no non-comment line. Public keys only; never a private key.

@@ -8,11 +8,12 @@ AuthorizedKeysFile /etc/ssh/authorized_keys/%u
 # The key file is a read-only bind mount owned by whoever runs `make dev-up`.
 StrictModes no
 AllowUsers jump
-# OpenSSH PermitOpen has no host wildcard (dev-*:2222 denies everything), so the
-# host part is open and the port is the limit: only sshd of a session (2222)
-# and nginx's own 2222 listener answer there on dev-net/infra-net.
+# OpenSSH PermitOpen has no host wildcard (dev-*:2222 denies everything). The
+# gateway sits on infra-net and so can reach ANY host on port 2222 there; the
+# only gate is the owner's key.
 PermitOpen *:2222
 AllowTcpForwarding local
+AllowStreamLocalForwarding no
 AllowAgentForwarding no
 GatewayPorts no
 X11Forwarding no
