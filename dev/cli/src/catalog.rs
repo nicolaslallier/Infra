@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -11,14 +11,7 @@ pub struct Plugin {
 #[derive(Deserialize)]
 struct Marketplace {
     name: String,
-    plugins: Vec<Entry>,
-}
-
-#[derive(Deserialize)]
-struct Entry {
-    name: String,
-    #[serde(default)]
-    description: Option<String>,
+    plugins: Vec<serde_json::Value>,
 }
 
 // ids end up in env var lists and shell-ish contexts: only [A-Za-z0-9._-].
@@ -38,19 +31,32 @@ pub fn parse_marketplace(json: &str) -> Result<Vec<Plugin>, String> {
     let m: Marketplace =
         serde_json::from_str(json).map_err(|e| format!("marketplace.json invalide: {e}"))?;
     if !safe_name(&m.name) {
-        return Ok(vec![]);
+        return Err(format!("nom de marketplace non sûr: {:?}", m.name));
     }
     Ok(m.plugins
-        .into_iter()
-        .filter(|p| safe_name(&p.name))
-        .map(|p| Plugin {
-            id: format!("{}@{}", p.name, m.name),
-            description: clean_description(p.description.as_deref().unwrap_or("")),
+        .iter()
+        .filter_map(|p| {
+            let name = p.get("name")?.as_str().filter(|n| safe_name(n))?;
+            let desc = p.get("description").and_then(|d| d.as_str()).unwrap_or("");
+            Some(Plugin {
+                id: format!("{name}@{}", m.name),
+                description: clean_description(desc),
+            })
         })
         .collect())
 }
 
-fn fetch_one(slug: &str, dir: &PathBuf) -> Result<Vec<Plugin>, String> {
+const MAX_JSON: u64 = 5 * 1024 * 1024;
+
+// Removes the clone directory on every exit path, panics included.
+struct TempDir(PathBuf);
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn fetch_one(slug: &str, dir: &Path) -> Result<Vec<Plugin>, String> {
     let st = Command::new("git")
         .args(["clone", "--depth", "1", "--quiet"])
         .arg(format!("https://github.com/{slug}"))
@@ -61,8 +67,13 @@ fn fetch_one(slug: &str, dir: &PathBuf) -> Result<Vec<Plugin>, String> {
     if !st.success() {
         return Err("git clone a échoué".into());
     }
-    let json = std::fs::read_to_string(dir.join(".claude-plugin").join("marketplace.json"))
-        .map_err(|e| format!("marketplace.json illisible: {e}"))?;
+    let file = dir.join(".claude-plugin").join("marketplace.json");
+    let md = std::fs::symlink_metadata(&file).map_err(|e| format!("marketplace.json: {e}"))?;
+    if !md.is_file() || md.len() >= MAX_JSON {
+        return Err("marketplace.json n'est pas un fichier régulier de moins de 5 Mo".into());
+    }
+    let json =
+        std::fs::read_to_string(&file).map_err(|e| format!("marketplace.json illisible: {e}"))?;
     parse_marketplace(&json)
 }
 
@@ -78,8 +89,9 @@ pub fn fetch_all(catalogs: &[String]) -> Result<Vec<Plugin>, String> {
         };
         let dir = std::env::temp_dir().join(format!("devbox-catalog-{}-{i}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let res = fetch_one(&slug, &dir);
-        let _ = std::fs::remove_dir_all(&dir);
+        let guard = TempDir(dir);
+        let res = fetch_one(&slug, &guard.0);
+        drop(guard);
         match res {
             Ok(ps) => {
                 for p in ps {
@@ -141,8 +153,28 @@ mod tests {
     fn unsafe_marketplace_name_yields_nothing() {
         for n in ["m,x", "m x", "m@x", "m;x", "m/x", ""] {
             let json = format!(r#"{{"name":"{n}","plugins":[{{"name":"p"}}]}}"#);
-            assert!(parse_marketplace(&json).unwrap().is_empty(), "{n}");
+            assert!(parse_marketplace(&json).is_err(), "{n}");
         }
+    }
+
+    #[test]
+    fn malformed_entries_skipped() {
+        let json =
+            r#"{"name":"m","plugins":[1,{"name":5},{"name":"ok"},{"name":"p2","description":7}]}"#;
+        let ps = parse_marketplace(json).unwrap();
+        assert_eq!(
+            ps,
+            vec![
+                Plugin {
+                    id: "ok@m".into(),
+                    description: "".into()
+                },
+                Plugin {
+                    id: "p2@m".into(),
+                    description: "".into()
+                },
+            ]
+        );
     }
 
     #[test]
