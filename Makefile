@@ -15,7 +15,8 @@ SHELL := bash
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
 	runner-shell runner-env check-runner-env \
-	runner-ea-up runner-ea-down runner-ea-logs
+	runner-ea-up runner-ea-down runner-ea-logs \
+	dev-image
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -71,6 +72,9 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist (via Po
 OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
 app-images: ## Build the images the stack references but cannot pull (via Portainer's API)
 	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) ./scripts/portainer-images.sh
+
+dev-image: ## Build the dev-session image devbox-session:1 on the daemon (DEV_IMAGE_REF=<git ref>, default main)
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/portainer-images.sh dev
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)

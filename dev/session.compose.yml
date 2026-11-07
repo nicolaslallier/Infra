@@ -1,0 +1,44 @@
+# One Claude Code dev session. The devbox CLI (dev/cli) creates one Portainer
+# stack "dev-<session>" from this file, with the values below as stack env;
+# nothing else deploys it. See CLAUDE.md "Dev sessions".
+#
+# The session sits on dev-net only (internal: no route out). Its one way out
+# is the dev-egress proxy (allow-listed domains + s3), its one way in the
+# dev-gateway SSH jump host. No ports, no host mounts, no Docker socket.
+services:
+  session:
+    container_name: dev-${SESSION:?}
+    hostname: dev-${SESSION}
+    image: devbox-session:1
+    pull_policy: never
+    restart: unless-stopped
+    mem_limit: ${MEM_LIMIT:-1536m}
+    # The entrypoint pushes /work and ~/.claude to the bucket on SIGTERM.
+    stop_grace_period: 120s
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      SESSION: ${SESSION}
+      REPO_URL: ${REPO_URL:?}
+      GH_TOKEN: ${GH_TOKEN:?}
+      MARKETPLACES: ${MARKETPLACES:-}
+      PLUGINS: ${PLUGINS:-}
+      SSH_PUBKEY: ${SSH_PUBKEY:?}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+      # Both spellings: curl/cargo read only lowercase http_proxy.
+      HTTP_PROXY: http://dev-egress:3128
+      HTTPS_PROXY: http://dev-egress:3128
+      http_proxy: http://dev-egress:3128
+      https_proxy: http://dev-egress:3128
+      NO_PROXY: ""
+    volumes:
+      - work:/work
+    networks: [dev-net]
+
+volumes:
+  work:
+    name: dev-${SESSION}-work
+
+networks:
+  dev-net:
+    external: true

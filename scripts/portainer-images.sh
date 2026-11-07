@@ -26,5 +26,12 @@ build() { # <tag> <git-url#ref>
   ok "id $(jq -r '.Id[7:19]' <<<"$img"), $(jq -r '(.Size / 1048576 | floor)' <<<"$img") MB, created $(jq -r .Created <<<"$img")"
 }
 
+# `make dev-image`: only the dev-session image, from the Infra repo on GitHub
+# (DEV_IMAGE_REF, default main -- so dev/image must be merged first).
+if [ "${1:-}" = dev ]; then
+  build "devbox-session:1" "https://github.com/nicolaslallier/Infra.git#${DEV_IMAGE_REF:-main}:dev/image"
+  exit 0
+fi
+
 : "${OLLAMA_PROXY_REF:?}"
 build "infra-ollama-proxy:${OLLAMA_PROXY_REF:0:7}" "https://github.com/nicolaslallier/ollama-metrics.git#$OLLAMA_PROXY_REF"
