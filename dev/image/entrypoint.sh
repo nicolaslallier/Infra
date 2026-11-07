@@ -6,6 +6,14 @@ set -euo pipefail
 # into it, see the Dockerfile): host key, Claude state, git identity.
 STATE=/home/dev/.state
 
+# Until sshd is up, a stop pushes NOTHING: the trees may be half restored.
+# Long steps run in the background (bg) so that `wait` lets this trap fire.
+child=
+# shellcheck disable=SC2329 # invoked by the trap
+early_term() { [ -z "$child" ] || kill "$child" 2>/dev/null || true; echo "stopped during startup: nothing pushed" >&2; exit 143; }
+trap early_term TERM INT
+bg() { "$@" & child=$!; wait "$child"; child=; }
+
 mkdir -p ~/.ssh ~/.config/rclone "$CLAUDE_CONFIG_DIR"
 chmod 700 ~/.ssh "$STATE"
 printf '%s\n' "$SSH_PUBKEY" > ~/.ssh/authorized_keys
@@ -33,31 +41,42 @@ saved() {
   printf '%s' "$out"
 }
 # Restore only into an EMPTY volume: S3 lags the volume by up to a sync
-# interval, so restoring over an intact one would roll work back.
-if [ -z "$(ls -A /work)" ]; then
-  s="$(saved work)"
-  if [ -n "$s" ]; then
-    sync.sh restore work
+# interval, so restoring over an intact one would roll work back. A marker on
+# the state volume, removed only once the restore succeeded, means "not
+# restored yet" whatever the directory holds: the copy (idempotent, never
+# deletes local files) runs again, and sync.sh refuses to push meanwhile.
+# restore <work|claude> <dir>: sets nothing_saved when S3 had nothing. Never
+# call it in a condition: that would switch off set -e inside it.
+nothing_saved=
+restore() {
+  local m="$STATE/restoring-$1" s
+  nothing_saved=
+  if [ -e "$m" ]; then
+    echo "resuming the interrupted restore of $2" >&2
+  elif [ -z "$(ls -A "$2")" ]; then
+    s="$(saved "$1")"
+    [ -n "$s" ] || { nothing_saved=1; return 0; }
+    : > "$m"
   else
-    echo "cloning $REPO_URL" >&2
-    gh repo clone "$REPO_URL" /work
+    echo "$2 already holds data: not restored from S3" >&2
+    return 0
   fi
-else
-  echo "/work already holds data: not restored from S3" >&2
+  bg sync.sh restore "$1"
+  rm -f "$m"
+}
+restore work /work
+if [ -n "$nothing_saved" ]; then
+  echo "cloning $REPO_URL" >&2
+  bg gh repo clone "$REPO_URL" /work
 fi
-if [ -z "$(ls -A "$CLAUDE_CONFIG_DIR")" ]; then
-  s="$(saved claude)"
-  [ -z "$s" ] || sync.sh restore claude
-else
-  echo "Claude state already on the volume: not restored from S3" >&2
-fi
+restore claude "$CLAUDE_CONFIG_DIR"
 
 # A session deleted and recreated under its name with another repo must not
 # carry on with the old one's /work.
 norm() { local u="${1,,}"; u="${u%/}"; u="${u%.git}"; u="${u#https://}"; u="${u#git@}"; printf '%s' "${u/github.com:/github.com/}"; }
 origin="$(git -C /work remote get-url origin 2>/dev/null || true)"
 if [ "$(norm "$origin")" != "$(norm "$REPO_URL")" ]; then
-  echo "/work's origin is '${origin:-none}', not $REPO_URL: refusing to start. Delete the volume dev-$SESSION-work (and the S3 prefix devbox/$SESSION) or use another session name." >&2
+  echo "/work's origin is '${origin:-none}', not $REPO_URL: refusing to start. Use another session name, or delete the volume dev-$SESSION-work. The S3 prefix devbox/$SESSION/work may hold the only good copy of that work: check it (rclone ls) before deleting anything there." >&2
   exit 1
 fi
 

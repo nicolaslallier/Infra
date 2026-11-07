@@ -15,6 +15,11 @@ usage() { echo "usage: sync.sh push [work|all] | restore work|claude | loop" >&2
 case "${1:-}" in
   push)
     exec 9>/tmp/devbox-sync.lock; flock 9 # loop and SIGTERM push never overlap
+    # The entrypoint's restore markers: pushing a half-restored tree would
+    # delete the remote objects not restored yet.
+    for m in /home/dev/.state/restoring-*; do
+      [ ! -e "$m" ] || { echo "sync: restore unfinished ($m), not pushing" >&2; exit 1; }
+    done
     # Both halves are attempted even if one fails; the exit status reports it.
     rc=0
     rclone sync /work "$R/work" "${EXCL[@]}" || rc=$?
