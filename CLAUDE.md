@@ -470,19 +470,26 @@ the whole design follows from. Portainer publishes its API on
 ingress to either — the same reason `prefect/flows/pr_validation.py` exists rather than a
 GitHub Actions job. The runner has to be on this LAN.
 
-Five things here are load-bearing.
+Several things here are load-bearing.
 
 - **The runners are their own Portainer stack (`runners`)**, like Portainer
   itself and for the same reason: every `make up` force-recreates every
   container in `infra`, and a runner recreated mid-job is a job that never
   reports. `make runners-up` drives it through `scripts/runners-stack.sh`
-  (needs `PORTAINER_API_KEY`, `PORTAINER_PINNEDPUBKEY` and `INFRA_HOST` or
-  `PORTAINER_URL` in `.portainer.env`). **Portainer reads the compose from
+  (needs `PORTAINER_API_KEY` and `PORTAINER_PINNEDPUBKEY` in `.portainer.env`;
+  `INFRA_HOST` comes from the Makefile, `PORTAINER_URL` optionally overrides). **Portainer reads the compose from
   GitHub main**, so merge before `make runners-up`. The env it sends is
   `.runner.env` (five PATs) plus `INFRA_DIR`, never `.env`: that file is the
   stack's whole secret set.
 - **One fine-grained PAT per repo** (`GH_RUNNER_TOKEN_<NAME>`, Administration:
-  read and write on that repo only), so a leaked token reaches one repo.
+  read and write on that repo only). This limits the damage only as long as no
+  socket-holding runner is compromised: any job on `darkangel`, `heaven` or
+  `infra` holds `/var/run/docker.sock`, so it can `docker inspect`/`exec` into
+  the other runners and read all five tokens (admin on all five repos, on top
+  of root on the daemon) and tamper with the `ea` and `moria` runners. That is
+  the accepted ceiling. Follow-ups: darkangel could use its own
+  `PORTAINER_DIRECT` mode and drop the socket; heaven's `scripts/ci-deploy.sh`
+  uses `docker run`, so it needs a rewrite or keeps the socket.
   A missing one fails `runners-up` by name rather than starting four of five.
 - **Privileges differ per runner.** The Docker socket (root on the daemon) is
   mounted only on `darkangel`, `heaven` and `infra`, whose deploys need it;
@@ -492,7 +499,11 @@ Five things here are load-bearing.
   five labels may trigger on `pull_request`/`pull_request_target`; PR checks
   (`test.yml`) run GitHub-hosted. `main` in each repo is meant to be guarded
   by a PR-required ruleset (`main-protection`, no bypass actors), applied
-  repo by repo with the owner's go-ahead, Infra last.
+  repo by repo with the owner's go-ahead, Infra last: apply infra only after
+  `test` has run green on a real PR (`github-harden.sh --apply` refuses while a
+  required check has no successful run on the default branch). Escape hatch if
+  `test` goes red and blocks every Infra PR: repo Settings → Rules → Rulesets →
+  disable `main-protection`.
 - **The deploy acts on the *host* checkout, not the runner's.** Portainer
   takes `docker-compose.yml` from GitHub main but every bind mount from the
   checkout at `INFRA_CHECKOUT` (see "Portainer-managed stack"), so that
@@ -529,7 +540,7 @@ Five things here are load-bearing.
 
 The `runners-*` targets are the whole management surface, and two behaviours
 are load-bearing. **`runners-status` reports both sides, per repo** — the
-container on this daemon *and* `GET /repos/<repo>/actions/runners` — because
+container on the Docker host (`DOCKER_HOST`) *and* `GET /repos/<repo>/actions/runners` — because
 the runners are `EPHEMERAL` and the two routinely disagree: they de-register
 after every job, so a healthy container is no evidence GitHub has a runner for
 the next deploy, and a job matching no labels queues silently instead of
@@ -542,7 +553,9 @@ recreate all five runners, and refuse while *any* runner has a job (exit 3;
 `FORCE=1` overrides): recreating mid-job kills it and the run never reports.
 `runners-restart` is `runners-up`. `runners-pull` re-pulls the image, whose
 tag moves on purpose (GitHub retires old runner versions server-side). Only
-`runners-logs` is local: compose against the local daemon.
+`runners-logs` is not a Portainer call: compose against the Docker host
+(`DOCKER_HOST`; from the Mac that is the deploy host over ssh, not a local
+daemon), as is the container half of `runners-status`.
 
 `INFRA_CHECKOUT` and `INFRA_HOST` come from repository variables
 (Settings → Secrets and variables → Actions → Variables) and fall back to the
@@ -561,7 +574,7 @@ is not worth one. Deploys are serialised by a `concurrency` group and never
 cancelled in flight, since a cancelled job leaves Portainer mid-redeploy.
 
 **The security note, which is the part to read before changing any of this.**
-This repo is public and the `infra` runner holds `/var/run/docker.sock` — root on the
+This repo is public and the `darkangel`, `heaven` and `infra` runners hold `/var/run/docker.sock` — root on the
 Docker daemon, the same power Portainer's UI has. Two consequences:
 
 - **Never add a `pull_request` or `pull_request_target` trigger to a workflow

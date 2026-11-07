@@ -4,7 +4,8 @@
 # Without --apply: print the wanted ruleset/settings and the diff against what
 # GitHub has now (GET only). With --apply: write them, one repo per run, after
 # checking every required check exists as a job of a pull_request workflow
-# (a required check that never reports blocks every merge). Never prompts,
+# and has already succeeded on the default branch (a required check that never
+# reports blocks every merge). Never prompts,
 # never reads the runner PATs: it uses your own `gh` login.
 # Old rulesets (`Main`, `Protect Main`) are listed, never touched.
 set -uo pipefail
@@ -113,6 +114,21 @@ verify_checks() {
   return $rc
 }
 
+# verify_green <name> <repo>: every required context has a successful check run
+# on the latest commit of the default branch. A required check that has never
+# passed there (Infra's `test` before it has run for real) would block every PR,
+# and the ruleset has no bypass. Read-only.
+verify_green() {
+  local br runs c rc=0
+  br="$(gh api "repos/$2" | jq -r '.default_branch // "main"')" || return 1
+  runs="$(gh api "repos/$2/commits/$br/check-runs?per_page=100")" || { echo "cannot read check runs of $2@$br" >&2; return 1; }
+  while IFS= read -r c; do
+    jq -e --arg c "$c" '[.check_runs[]|select(.name==$c and .conclusion=="success")]|length>0' <<<"$runs" >/dev/null \
+      || { echo "required check '$c' has no successful run on $br of $2: run it green on a real PR first (it would block every PR, and the ruleset has no bypass)" >&2; rc=1; }
+  done < <(checks_for "$1")
+  return $rc
+}
+
 # normalise: only the fields we set, rules sorted, so desired and current compare.
 norm='{name,target,enforcement,bypass_actors,conditions,
   rules:(.rules|map({type}+(if .parameters then {parameters} else {} end))|sort_by(.type))}'
@@ -167,6 +183,7 @@ main() {
   if [ "$apply" = 1 ]; then
     verify_checks "$name" "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
     merge_ok "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
+    verify_green "$name" "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
     done_steps=()
     step "ruleset $RULESET_NAME" apply_ruleset "$name" "$repo" "$rid" || return 1
     step "fork-pr-contributor-approval" put "$repo" actions/permissions/fork-pr-contributor-approval "$FORK" || return 1
@@ -199,6 +216,8 @@ main() {
   jq -r '.patterns_allowed[]|"  "+.' <<<"$sel"
   echo "## required checks"
   verify_checks "$name" "$repo" && echo "  all found" || echo "  --apply would REFUSE"
+  echo "## required checks green on the default branch"
+  verify_green "$name" "$repo" && echo "  all green" || echo "  --apply would REFUSE"
   return 0
 }
 

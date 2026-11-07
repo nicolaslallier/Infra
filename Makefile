@@ -237,20 +237,20 @@ runners-env: ## Write .runner.env from five per-repo GitHub PATs (FORCE=1 replac
 # up/down/pull/restart are redeploys of all five runners through Portainer;
 # scripts/runners-stack.sh refuses while any job runs (exit 3), FORCE=1 means it.
 runners-up: ## Create/redeploy the runners stack via Portainer (refuses mid-job; FORCE=1)
-	@./scripts/runners-stack.sh up
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/runners-stack.sh up
 
 runners-down: ## Stop the runners stack (refuses mid-job; FORCE=1)
-	@./scripts/runners-stack.sh down
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/runners-stack.sh down
 
 # The image tag moves on purpose (GitHub retires old runner versions), so this
 # is the fix for a runner the service stopped accepting, not housekeeping.
 runners-pull: ## Re-pull the runner image and redeploy (refuses mid-job; FORCE=1)
-	@./scripts/runners-stack.sh pull
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/runners-stack.sh pull
 
 runners-restart: ## Redeploy the runners stack (same as runners-up)
-	@./scripts/runners-stack.sh up
+	@INFRA_HOST=$(INFRA_HOST) ./scripts/runners-stack.sh up
 
-runners-logs: ## Tail the five runners' logs (local daemon)
+runners-logs: ## Tail the five runners' logs (on the Docker host, DOCKER_HOST)
 	@test -f .runner.env || { echo "make: .runner.env not found -- run 'make runners-env'" >&2; exit 1; }
 	$(RUNNERS_COMPOSE) logs -f
 

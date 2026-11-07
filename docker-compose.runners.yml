@@ -22,14 +22,15 @@ x-runner: &runner
   # refuses to talk to. Unlike every other image in this repo, which is
   # digest-pinned.
   image: myoung34/github-runner:ubuntu-noble
-  restart: unless-stopped
   # Deliberately not on infra-net. A runner needs outbound HTTPS to GitHub and
   # nothing else.
+  restart: unless-stopped
   environment: &runner-env
     RUNNER_SCOPE: repo
     # De-register after every job; `restart: unless-stopped` then brings up a
-    # freshly registered one. No job inherits a working tree, a container or
-    # an env var another job left behind.
+    # freshly registered one. For ea and moria (tmpfs work dir) no job inherits
+    # a working tree. The socket runners (darkangel, heaven, infra) keep /_work
+    # in a named volume and their jobs can leave containers behind.
     EPHEMERAL: "true"
 
 services:

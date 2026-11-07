@@ -161,6 +161,10 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 	echo "== runners Makefile targets"
 	if ! grep -qE '^runner(-ea)?-' Makefile; then pass "no runner-* / runner-ea-* targets"; else fail "no runner-* / runner-ea-* targets" "$(grep -nE '^runner(-ea)?-' Makefile)"; fi
 	if out="$(make -n runners-up FORCE=1 2>&1)" && grep -q 'scripts/runners-stack.sh up' <<<"$out"; then pass "make runners-up calls runners-stack.sh up"; else fail "make runners-up calls runners-stack.sh up" "$out"; fi
+	if grep -q 'INFRA_HOST=' <<<"$(make -n runners-up FORCE=1 2>&1)"; then pass "make runners-up passes INFRA_HOST"; else fail "make runners-up passes INFRA_HOST"; fi
+	fe="$ws/.fe-sb"; mkdir -p "$fe"; cp "$ws/.env.example" "$fe/"; : >"$fe/.runner.env"
+	if ! out="$(bash "$ws/scripts/ci-fake-env.sh" "$fe" 2>&1)" && grep -qF .runner.env <<<"$out"; then pass "ci-fake-env refuses to overwrite .runner.env"; else fail "ci-fake-env refuses to overwrite .runner.env" "$out"; fi
+	rm -rf "$fe"
 	for f in docker-compose.runner.yml docker-compose.runner-ea.yml; do
 		if [ ! -e "$f" ]; then pass "$f is gone"; else fail "$f is gone"; fi
 	done
@@ -243,6 +247,7 @@ while [ $# -gt 0 ]; do
   case "$1" in -X) m="$2"; shift ;; -H) shift ;; --input) body="$(cat)"; shift ;; *) path="$1" ;; esac
   shift
 done
+path="${path%%\?*}"
 printf '%s %s %s\n' "$m" "$path" "$body" >>"$LOG"
 if [ "$m" != GET ]; then
   n=$(( $(cat "$LOG.n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$LOG.n"
@@ -260,6 +265,9 @@ FAKE
 	R=repos_nicolaslallier_Infra
 	echo '[{"id":7,"name":"Main","enforcement":"active"}]' >"$fx/${R}_rulesets"
 	echo '{"allow_squash_merge":true,"allow_rebase_merge":false}' >"$fx/$R"
+	cr() { printf '{"check_runs":[%s]}' "$(for c in "$@"; do printf '{"name":"%s","conclusion":"success"},' "$c"; done | sed 's/,$//')"; }
+	cr test >"$fx/${R}_commits_main_check-runs"
+	cr 'build (ubuntu-latest, target/release/moria-client, moria-client-linux)' 'build (windows-latest, target/release/moria-client.exe, moria-client-windows.exe)' 'build (macos-latest, target/release/moria-client, moria-client-macos)' >"$fx/repos_nicolaslallier_Moria_commits_main_check-runs"
 	hg() { (cd "$hb" && rm -f "$hb/log.n" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash "$hs" "$@" 2>&1); }
 
 	: >"$hb/log"; out="$(hg infra)"; code=$?
@@ -281,6 +289,22 @@ FAKE
 	if grep -q '^PUT repos/nicolaslallier/Infra/rulesets/9 {' "$hb/log" && ! grep -q '^POST ' "$hb/log" && ! grep -q 'rulesets/7' "$hb/log"; then
 		pass "github-harden --apply twice: PUT by id, no duplicate, #7 untouched"
 	else fail "github-harden --apply twice: PUT by id" "$(cat "$hb/log")"; fi
+
+	# A required check that never succeeded on main refuses --apply (nothing written); the dry run still reports it.
+	echo '{"check_runs":[{"name":"test","conclusion":"failure"}]}' >"$fx/${R}_commits_main_check-runs"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF "'test' has no successful run" <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden --apply: check never green on main refused, named, nothing written"
+	else fail "github-harden --apply: check never green on main refused" "exit $code: $out"; fi
+	: >"$hb/log"; out="$(hg infra)"; code=$?
+	if [ "$code" = 0 ] && grep -qF 'would REFUSE' <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden dry run: reports a check never green, writes nothing"
+	else fail "github-harden dry run: reports a check never green" "exit $code: $out"; fi
+	cr test >"$fx/${R}_commits_main_check-runs"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" = 0 ] && grep -q '^PUT repos/nicolaslallier/Infra/rulesets/9 {' "$hb/log"; then
+		pass "github-harden --apply: accepted once every check succeeded on main"
+	else fail "github-harden --apply: accepted once green" "exit $code: $out"; fi
 
 	# Third-party actions: derived from the workflows' `uses:`, GitHub-owned and local refs ignored.
 	M=repos_nicolaslallier_Moria; MW=${M}_contents_.github_workflows

@@ -563,7 +563,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
 | `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (five self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
-| `make runners-logs` | Tail the five runners' logs |
+| `make runners-logs` | Tail the five runners' logs (on the Docker host) |
 | `make runners-status` | Per repo: running here, and registered at GitHub with its label? |
 | `make runners-env` | Write `.runner.env` from five per-repo PATs, checking each first (`FORCE=1` replaces it) |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
@@ -903,11 +903,14 @@ Setup is five tokens, a `make`, and one settings change:
 
 ```bash
 # 1. one fine-grained PAT per repo, Administration: read and write on that
-#    repo only (GitHub -> Settings -> Developer settings; minted in the web UI)
+#    repo only (GitHub -> Settings -> Developer settings; minted in the web UI).
+#    Caveat: a compromised job on darkangel, heaven or infra (they hold the
+#    Docker socket) can read all five tokens off the other runners.
 make runners-env        # paste the five; writes .runner.env, mode 600
 
-# 2. .portainer.env needs PORTAINER_API_KEY, PORTAINER_PINNEDPUBKEY and
-#    INFRA_HOST (or PORTAINER_URL); then deploy the stack
+# 2. .portainer.env needs PORTAINER_API_KEY and PORTAINER_PINNEDPUBKEY
+#    (INFRA_HOST comes from the Makefile; PORTAINER_URL optionally overrides);
+#    then deploy the stack
 make runners-up
 make runners-status     # per repo: the container here, and what GitHub has
 make runners-logs       # until "Listening for Jobs"
@@ -928,8 +931,12 @@ Branch protection and Actions settings for the five repos come from
 `scripts/github-harden.sh <darkangel|ea|heaven|infra|moria>`: a dry run by
 default (prints the `main-protection` ruleset and the diff against GitHub,
 writes nothing). `--apply` is manual and per repo, with your own `gh` login,
-and **Infra last**; it refuses if a required check is not a job of an
-unfiltered `pull_request` workflow, since that would block every merge. Old
+and **Infra last, only after `test` has run green on a real PR** (the Infra
+ruleset requires it and has no bypass). It refuses if a required check is not
+a job of an unfiltered `pull_request` workflow, or has no successful run on the
+latest commit of the default branch, since either would block every merge. If
+Infra PRs are ever stuck on a red `test`, disable the ruleset at repo
+Settings → Rules → Rulesets → `main-protection`. Old
 rulesets (`Main`, `Protect Main`) are listed and left alone.
 
 Then check it is listed at **Settings → Actions → Runners**, and set
