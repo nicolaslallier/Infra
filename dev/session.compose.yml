@@ -1,0 +1,36 @@
+# One Claude Code session container. Driven by the devbox CLI, not by `make up`:
+#   SESSION=<name> REPO_URL=... SSH_PUBKEY=... S3_SECRET_KEY=... \
+#     docker compose -p dev-<name> -f dev/session.compose.yml up -d
+# dev-net is created elsewhere (external), internal, egress only via dev-egress.
+services:
+  session:
+    container_name: dev-${SESSION:?}
+    image: devbox-session:1
+    pull_policy: never # built on the daemon by `make dev-image`
+    mem_limit: ${MEM_LIMIT:-1536m}
+    stop_grace_period: 120s # entrypoint pushes /work and ~/.claude to S3 on SIGTERM
+    restart: unless-stopped
+    read_only: false
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      SESSION: ${SESSION:?}
+      REPO_URL: ${REPO_URL:?}
+      GH_TOKEN: ${GH_TOKEN:-}
+      PLUGINS: ${PLUGINS:-}
+      SSH_PUBKEY: ${SSH_PUBKEY:?}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?}
+      HTTP_PROXY: http://dev-egress:3128
+      HTTPS_PROXY: http://dev-egress:3128
+      NO_PROXY: ""
+    volumes:
+      - work:/work
+    networks: [dev-net]
+
+volumes:
+  work:
+    name: dev-${SESSION:?}-work
+
+networks:
+  dev-net:
+    external: true

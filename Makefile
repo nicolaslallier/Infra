@@ -7,7 +7,7 @@ SHELL := bash
 # depends on that: vault-render writes the .env that check-env then reads.
 .NOTPARALLEL:
 
-.PHONY: help test init net certs seal-key app-images up down restart logs ps status pull config \
+.PHONY: help test init net certs seal-key app-images dev-image up down restart logs ps status pull config \
 	shell psql provision-app provision-monitoring-role hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision rabbitmq-provision \
@@ -71,6 +71,9 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist (via Po
 OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
 app-images: ## Build the images the stack references but cannot pull (via Portainer's API)
 	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) ./scripts/portainer-images.sh
+
+dev-image: ## Build the Claude Code session image devbox-session:1 on the daemon (not part of up/init)
+	@docker build -t devbox-session:1 dev/image
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
