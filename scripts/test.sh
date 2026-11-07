@@ -213,6 +213,77 @@ FAKE
 	out="$(cd "$sb" && FAKE_BUSY=none PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
 	if [ "$code" = 0 ]; then pass "runner-status --busy: all idle -> exit 0"; else fail "runner-status --busy: all idle -> exit 0" "exit $code: $out"; fi
 
+	echo "== github-harden.sh (fake gh, no write ever)"
+	hs="$ws/scripts/github-harden.sh"
+	# shellcheck disable=SC1090
+	rj() { (. "$hs"; ruleset_json "$1"); }
+	if [ -f "$hs" ] \
+		&& rj infra | jq -e '.name=="main-protection" and .target=="branch" and .enforcement=="active" and .bypass_actors==[]
+			and .conditions.ref_name.include==["~DEFAULT_BRANCH"]
+			and ([.rules[].type]|sort)==["deletion","non_fast_forward","pull_request","required_linear_history","required_status_checks"]
+			and (.rules[]|select(.type=="pull_request").parameters.required_approving_review_count)==0
+			and (.rules[]|select(.type=="required_status_checks").parameters
+				| .strict_required_status_checks_policy==true and ([.required_status_checks[].context]==["test"]))' >/dev/null \
+		&& [ "$(rj darkangel | jq '[.rules[]|select(.type=="required_status_checks").parameters.required_status_checks[]]|length')" = 3 ]; then
+		pass "ruleset_json: infra/darkangel shape"
+	else
+		fail "ruleset_json: infra/darkangel shape"
+	fi
+	out="$(bash "$hs" nope 2>&1)"; code=$?
+	if [ "$code" -ne 0 ]; then pass "github-harden nope -> usage error"; else fail "github-harden nope -> usage error" "$out"; fi
+
+	hb="$ws/.harden-sb"; mkdir -p "$hb/bin" "$hb/fix"
+	cat >"$hb/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+# Records every call in $LOG; GETs answer from $FIX/<path with / as _>, else 404.
+# Bodies sent with --input - are recorded after the call line.
+shift # api
+m=GET; path=""; body=""
+while [ $# -gt 0 ]; do
+  case "$1" in -X) m="$2"; shift ;; -H) shift ;; --input) body="$(cat)"; shift ;; *) path="$1" ;; esac
+  shift
+done
+printf '%s %s %s\n' "$m" "$path" "$body" >>"$LOG"
+[ "$m" = GET ] || exit 0
+f="$FIX/$(tr / _ <<<"$path")"
+[ -f "$f" ] && cat "$f" || { echo "HTTP 404" >&2; exit 1; }
+FAKE
+	chmod +x "$hb/bin/gh"
+	fx="$hb/fix"; W=repos_nicolaslallier_Infra_contents_.github_workflows
+	echo '[{"name":"test.yml","type":"file"},{"name":"deploy.yml","type":"file"}]' >"$fx/$W"
+	printf 'name: test\non:\n  pull_request:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n' >"$fx/${W}_test.yml"
+	printf 'name: deploy\non:\n  push:\n    branches: [main]\njobs:\n  deploy:\n    runs-on: [self-hosted, infra]\n' >"$fx/${W}_deploy.yml"
+	R=repos_nicolaslallier_Infra
+	echo '[{"id":7,"name":"Main","enforcement":"active"}]' >"$fx/${R}_rulesets"
+	hg() { (cd "$hb" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash "$hs" "$@" 2>&1); }
+
+	: >"$hb/log"; out="$(hg infra)"; code=$?
+	if [ "$code" = 0 ] && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log" && grep -qF 'Main' <<<"$out" && grep -qF 'would POST' <<<"$out"; then
+		pass "github-harden dry run: lists old ruleset, writes nothing"
+	else fail "github-harden dry run: lists old ruleset, writes nothing" "exit $code: $out"; fi
+
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" = 0 ] && grep -q '^POST repos/nicolaslallier/Infra/rulesets {' "$hb/log" \
+		&& ! grep -q '^PUT repos/nicolaslallier/Infra/rulesets' "$hb/log" \
+		&& grep -q '^PUT repos/nicolaslallier/Infra/actions/permissions/fork-pr-contributor-approval {"approval_policy":"all_external_contributors"}' "$hb/log" \
+		&& grep -q '^PUT repos/nicolaslallier/Infra/actions/permissions {"enabled":true,"allowed_actions":"selected"}' "$hb/log" \
+		&& grep -q '^PUT repos/nicolaslallier/Infra/actions/permissions/selected-actions {"github_owned_allowed":true,"verified_allowed":true,"patterns_allowed":\[\]}' "$hb/log"; then
+		pass "github-harden --apply: POST ruleset + three PUT settings, old ruleset untouched"
+	else fail "github-harden --apply: POST ruleset + three PUT settings" "exit $code: $out"$'\n'"$(cat "$hb/log")"; fi
+
+	echo '[{"id":7,"name":"Main","enforcement":"active"},{"id":9,"name":"main-protection","enforcement":"active"}]' >"$fx/${R}_rulesets"
+	: >"$hb/log"; hg --apply infra >/dev/null
+	if grep -q '^PUT repos/nicolaslallier/Infra/rulesets/9 {' "$hb/log" && ! grep -q '^POST ' "$hb/log" && ! grep -q 'rulesets/7' "$hb/log"; then
+		pass "github-harden --apply twice: PUT by id, no duplicate, #7 untouched"
+	else fail "github-harden --apply twice: PUT by id" "$(cat "$hb/log")"; fi
+
+	# A required check that is no job (here: the workflow renamed it) refuses before any write.
+	sed -i.sed 's/^  test:/  tests:/' "$fx/${W}_test.yml"; rm -f "$fx/${W}_test.yml.sed"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF "'test'" <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden --apply: missing check refused, named, nothing written"
+	else fail "github-harden --apply: missing check refused" "exit $code: $out"; fi
+
 	echo "== check-env rejects broken .env files"
 	if [ ! -f "$ws/.baseline-ok" ]; then
 		# Already a failure above; every case would be rejected for that reason.

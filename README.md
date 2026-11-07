@@ -924,6 +924,14 @@ all five runners, so they refuse while any job is running;
 warn and continue. `make runners-pull` is the fix for a runner GitHub has
 stopped accepting (the image tag moves on purpose).
 
+Branch protection and Actions settings for the five repos come from
+`scripts/github-harden.sh <darkangel|ea|heaven|infra|moria>`: a dry run by
+default (prints the `main-protection` ruleset and the diff against GitHub,
+writes nothing). `--apply` is manual and per repo, with your own `gh` login,
+and **Infra last**; it refuses if a required check is not a job of an
+unfiltered `pull_request` workflow, since that would block every merge. Old
+rulesets (`Main`, `Protect Main`) are listed and left alone.
+
 Then check it is listed at **Settings → Actions → Runners**, and set
 **Settings → Actions → General → "Fork pull request workflows from outside
 collaborators"** to *Require approval for all outside collaborators*.
