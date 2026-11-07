@@ -107,19 +107,19 @@ esac
 if [ "$cmd" = up ] || [ "$cmd" = pull ]; then
   # shellcheck source=lib/runners.sh
   . scripts/lib/runners.sh
-  [ -f .runner.env ] || die ".runner.env not found (run 'make runner-env')"
+  [ -f .runner.env ] || die ".runner.env not found (run 'make runners-env')"
   for e in "${RUNNERS[@]}"; do
     v="$(runner_token_var "${e%%:*}")"
     val="$(sed -n "s/^$v=//p" .runner.env | tail -n 1)"
     if [ -z "$val" ] || [ "$val" = change-me ]; then
-      die "$v is missing, empty or change-me in .runner.env (run 'make runner-env FORCE=1')"
+      die "$v is missing, empty or change-me in .runner.env (run 'make runners-env FORCE=1')"
     fi
   done
   [ -s certs/infra-ca.crt ] || die "certs/infra-ca.crt not found (EA's runner mounts it; run 'make init' or ./scripts/gen-certs.sh)"
   check_idle
 fi
 if [ "$cmd" = down ]; then
-  [ -f .runner.env ] || die ".runner.env not found (run 'make runner-env')"
+  [ -f .runner.env ] || die ".runner.env not found (run 'make runners-env')"
   check_idle
 fi
 

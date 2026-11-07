@@ -145,6 +145,13 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 	echo "== runners-stack selftest"
 	if out="$(cd "$ws" && bash scripts/runners-stack.sh selftest 2>&1)"; then pass "runners-stack.sh selftest"; else fail "runners-stack.sh selftest" "$out"; fi
 
+	echo "== runners Makefile targets"
+	if ! grep -qE '^runner(-ea)?-' Makefile; then pass "no runner-* / runner-ea-* targets"; else fail "no runner-* / runner-ea-* targets" "$(grep -nE '^runner(-ea)?-' Makefile)"; fi
+	if out="$(make -n runners-up FORCE=1 2>&1)" && grep -q 'scripts/runners-stack.sh up' <<<"$out"; then pass "make runners-up calls runners-stack.sh up"; else fail "make runners-up calls runners-stack.sh up" "$out"; fi
+	for f in docker-compose.runner.yml docker-compose.runner-ea.yml; do
+		if [ ! -e "$f" ]; then pass "$f is gone"; else fail "$f is gone"; fi
+	done
+
 	echo "== runner scripts (fake curl)"
 	# Sandbox with just the scripts; a fake curl answers per token / repo.
 	sb="$ws/.runner-sb"; mkdir -p "$sb/scripts/lib" "$sb/bin"

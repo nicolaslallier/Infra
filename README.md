@@ -562,12 +562,10 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make runner-up` / `make runner-down` | Start / stop the self-hosted CI runner that deploys on a push to `main` (its own compose project, `docker-compose.runner.yml`) |
-| `make runner-restart` / `make runner-logs` | Restart the runner / tail its logs |
-| `make runner-status` | Is it running here, and does GitHub have it registered with the `infra` label? |
-| `make runner-pull` | Re-pull the runner image and recreate it (the tag moves; GitHub retires old versions) |
-| `make runner-shell` | Open a shell in the running runner |
-| `make runner-env` | Write `.runner.env` from a GitHub PAT, checking first that it may administer runners (`FORCE=1` replaces it) |
+| `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (five self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
+| `make runners-logs` | Tail the five runners' logs |
+| `make runners-status` | Per repo: running here, and registered at GitHub with its label? |
+| `make runners-env` | Write `.runner.env` from five per-repo PATs, checking each first (`FORCE=1` replaces it) |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -895,39 +893,36 @@ container, `dns` included, so it costs a brief LAN DNS outage.
 
 It runs on a **self-hosted runner**, and has to: Portainer's API is on
 `${LAN_IP}:9443` and otherwise only on `infra-net`, with no public ingress,
-so a GitHub-hosted runner cannot reach it. The runner is its own compose
-project — outside the stack it deploys, for the same reason Portainer is.
+so a GitHub-hosted runner cannot reach it. There are five runners
+(`darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo), together a
+Portainer stack `runners` of their own — outside `infra`, so a `make up` never
+recreates a runner mid-job. Portainer reads `docker-compose.runners.yml` from
+GitHub main: merge before `make runners-up`.
 
-Setup is a token, a `make`, and one settings change:
+Setup is five tokens, a `make`, and one settings change:
 
 ```bash
-# 1. a PAT that may register runners on this repo:
-#    GitHub -> Settings -> Developer settings -> Personal access tokens
-#    (classic, 'repo' scope; or fine-grained with Administration: RW here)
-#    Minting it is a web-UI step -- GitHub has no API that issues a PAT.
-make runner-env         # paste it; writes .runner.env, mode 600
+# 1. one fine-grained PAT per repo, Administration: read and write on that
+#    repo only (GitHub -> Settings -> Developer settings; minted in the web UI)
+make runners-env        # paste the five; writes .runner.env, mode 600
 
-# 2. start it; it registers itself with the label 'infra'
-make runner-up
-make runner-status      # the container here, and what GitHub has registered
-make runner-logs        # until "Listening for Jobs"
+# 2. .portainer.env needs PORTAINER_API_KEY, PORTAINER_PINNEDPUBKEY and
+#    INFRA_HOST (or PORTAINER_URL); then deploy the stack
+make runners-up
+make runners-status     # per repo: the container here, and what GitHub has
+make runners-logs       # until "Listening for Jobs"
 ```
 
-`make runner-status` is worth preferring over the browser, because it
-answers the question that actually bites: the runner is `EPHEMERAL`, so it
-de-registers after every job and re-registers on restart, and a container
-that is up says nothing about whether GitHub still has a runner to hand the
-next deploy to. GitHub does not report the gap — a job whose labels match
-nothing queues silently rather than failing — so the two sides have to be
-read together.
+`make runners-status` answers the question that bites: the runners are
+`EPHEMERAL`, so each de-registers after a job, and a container that is up says
+nothing about whether GitHub still has a runner for the next one. A job whose
+labels match nothing queues silently rather than failing.
 
-`runner-down`, `-restart` and `-pull` refuse while a job is running, since
-recreating the container mid-job leaves that workflow run with no result;
-`FORCE=1 make runner-down` overrides. If GitHub cannot be reached to ask,
-they warn and continue rather than trapping you with a runner you cannot
-stop. `make runner-pull` is the fix for a runner GitHub has stopped
-accepting: the image tag moves on purpose, because pinning a digest ages
-into a version the service refuses.
+`runners-up`, `-down`, `-pull` and `-restart` are stack redeploys that recreate
+all five runners, so they refuse while any job is running;
+`FORCE=1 make runners-down` overrides. If GitHub cannot be reached to ask they
+warn and continue. `make runners-pull` is the fix for a runner GitHub has
+stopped accepting (the image tag moves on purpose).
 
 Then check it is listed at **Settings → Actions → Runners**, and set
 **Settings → Actions → General → "Fork pull request workflows from outside
@@ -945,11 +940,12 @@ The runner's own `actions/checkout` tree only supplies the script; the
 deployed bind mounts come from the host checkout, and confusing the two is
 the failure mode the drift guard catches.
 
-Two things worth knowing before relying on it. The runner holds
+Two things worth knowing before relying on it. The `infra` runner
+(like `darkangel` and `heaven`; `ea` and `moria` get none) holds
 `/var/run/docker.sock` — root on this daemon, the same power Portainer's UI
-has — so **merging to main is now enough to run code on the host**; branch
-protection is what keeps that set small. And **no workflow on the `infra`
-label may ever trigger on `pull_request`**: this repo is public, and a fork's
+has — so **merging to main is now enough to run code on the host**; a
+PR-required `main` ruleset is what keeps that set small. And **no workflow on
+a self-hosted label may ever trigger on `pull_request`**: this repo is public, and a fork's
 PR brings its own workflow file. `CLAUDE.md` ("CI: deploying on a push to
 main") has the rest, including why the checkout is mounted at the same path
 on both sides and why `DOCKER_HOST` is set to the socket.

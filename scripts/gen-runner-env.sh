@@ -17,7 +17,7 @@
 # 403 from a container that then restarts forever -- `make runners-up` itself
 # reports success. The endpoint asked here is the one
 # scripts/runner-status.sh already uses, so a token that passes this check is
-# also a token that makes `make runner-status` work. All five are checked
+# also a token that makes `make runners-status` work. All five are checked
 # before anything is written: a file with four good tokens and one bad one
 # would leave four runners up and the fifth silently absent.
 #
@@ -40,7 +40,7 @@ FORCE="${1:-}"
 
 if [ -f "$ENV_FILE" ] && [ "$FORCE" != "--force" ]; then
   echo "gen-runner-env.sh: $ENV_FILE already exists, leaving it alone (--force to replace)."
-  echo "  'make runner-status' says whether the tokens in it still work."
+  echo "  'make runners-status' says whether the tokens in it still work."
   exit 0
 fi
 
@@ -112,11 +112,11 @@ for entry in "${RUNNERS[@]}"; do
       ;;
     no-curl|unreachable|000)
       echo "gen-runner-env.sh: could not check the token for $repo with GitHub (${code}) -- writing it unverified." >&2
-      echo "  'make runner-status' is the same question, asked again later." >&2
+      echo "  'make runners-status' is the same question, asked again later." >&2
       ;;
     *)
       echo "gen-runner-env.sh: unexpected answer from GitHub for $repo (HTTP $code) -- writing the token unverified." >&2
-      echo "  Confirm with 'make runner-status' once the runners are up." >&2
+      echo "  Confirm with 'make runners-status' once the runners are up." >&2
       ;;
   esac
   lines+="${var}=${token}"$'\n'
@@ -138,4 +138,4 @@ chmod 600 "$ENV_FILE"
 echo "gen-runner-env.sh: wrote $ENV_FILE (mode 600)."
 echo
 echo "  Next:  make runners-up      # registers one runner per repo"
-echo "         make runner-status   # the containers here, and GitHub's view of them"
+echo "         make runners-status   # the containers here, and GitHub's view of them"

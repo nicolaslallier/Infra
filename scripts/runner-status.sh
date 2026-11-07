@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 . scripts/lib/runners.sh
 
 [ -f .runner.env ] || {
-  echo "runner-status: .runner.env not found -- see 'make runner-env'" >&2
+  echo "runner-status: .runner.env not found -- see 'make runners-env'" >&2
   exit 1
 }
 # shellcheck disable=SC1091
@@ -175,8 +175,8 @@ MSG
     cat <<'MSG'
 
   Mint a replacement at https://github.com/settings/tokens, then:
-      make runner-env FORCE=1     # checks the new tokens before writing them
-      make runner-restart
+      make runners-env FORCE=1     # checks the new tokens before writing them
+      make runners-restart
 MSG
   elif [ "$gh_state" != ok ]; then
     echo "  unknown: ${gh_why}"
