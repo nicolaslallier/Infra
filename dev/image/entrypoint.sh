@@ -19,9 +19,10 @@ secret_access_key = $S3_SECRET_KEY
 CONF
 chmod 600 ~/.config/rclone/rclone.conf
 
-# lsf exits 0 with no output for an absent prefix; any error (S3 down, bucket
-# missing) must stop here, or a fresh clone would later be pushed over saved work.
-saved="$(rclone lsf --max-depth 1 "devbox:devbox/$SESSION/work")"
+# An absent prefix is empty (rclone exits 0 or 3); any other error (S3 down)
+# must stop here, or a fresh clone would later be pushed over saved work.
+rc=0; saved="$(rclone lsf --max-depth 1 "devbox:devbox/$SESSION/work")" || rc=$?
+[ "$rc" -eq 0 ] || [ "$rc" -eq 3 ] || { echo "S3 unreachable (rclone exit $rc)" >&2; exit 1; }
 if [ -n "$saved" ]; then
   sync.sh restore
 else
@@ -34,11 +35,16 @@ if [ -n "${GH_TOKEN:-}" ]; then
   gh auth setup-git
 fi
 
+# MARKETPLACES: owner/repo catalogs; PLUGINS: plugin@marketplace. A failure is a warning.
+IFS=',' read -ra markets <<< "${MARKETPLACES:-}"
+for m in "${markets[@]}"; do
+  [ -n "$m" ] || continue
+  claude plugin marketplace add "$m" || echo "warning: marketplace $m failed" >&2
+done
 IFS=',' read -ra plugins <<< "${PLUGINS:-}"
 for p in "${plugins[@]}"; do
   [ -n "$p" ] || continue
-  claude plugin marketplace add "${p#*@}" && claude plugin install "$p" \
-    || echo "warning: plugin $p failed to install" >&2
+  claude plugin install "$p" || echo "warning: plugin $p failed to install" >&2
 done
 
 sync.sh loop & loop=$!

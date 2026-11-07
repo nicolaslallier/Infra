@@ -18,11 +18,15 @@ services:
       REPO_URL: ${REPO_URL:?}
       GH_TOKEN: ${GH_TOKEN:-}
       PLUGINS: ${PLUGINS:-}
+      MARKETPLACES: ${MARKETPLACES:-}
       SSH_PUBKEY: ${SSH_PUBKEY:?}
       S3_SECRET_KEY: ${S3_SECRET_KEY:?}
       HTTP_PROXY: http://dev-egress:3128
       HTTPS_PROXY: http://dev-egress:3128
-      NO_PROXY: ""
+      NO_PROXY: "" # empty on purpose: s3:8333 goes through dev-egress too
+      http_proxy: http://dev-egress:3128
+      https_proxy: http://dev-egress:3128
+      no_proxy: ""
     volumes:
       - work:/work
     networks: [dev-net]
