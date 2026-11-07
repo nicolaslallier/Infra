@@ -1,0 +1,40 @@
+# Shared infrastructure for the Claude Code dev sessions (project `dev`):
+# an egress proxy and an SSH jump host. Its own project, like Portainer and the
+# runner, so a `make up` of the infra stack never recreates it. Nothing here
+# publishes a port: nginx fronts SSH (nginx/stream.d/devssh.conf).
+#
+# dev-net is `internal`: session containers have no route out, except to the
+# two services below. dev-egress is the only one with Internet access (dev-out),
+# and it is on infra-net solely to reach s3:8333 (squid.conf allows nothing else
+# private). Session containers are on dev-net only, never on infra-net.
+services:
+  dev-egress:
+    container_name: dev-egress
+    image: ubuntu/squid:6.13-25.04_beta@sha256:3de2e64f0ca6efdac3e98557607dc0f23050037f3885016d5d5bfcf9950501b8
+    restart: unless-stopped
+    volumes:
+      - ${DEV_DIR:-./dev}/egress/squid.conf:/etc/squid/squid.conf:ro
+    networks: [dev-net, dev-out, infra-net]
+
+  dev-gateway:
+    container_name: dev-gateway
+    build: ${DEV_DIR:-./dev}/gateway
+    image: dev-gateway:1
+    restart: unless-stopped
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, SYS_CHROOT, CHOWN, DAC_OVERRIDE, KILL]
+    volumes:
+      - ${DEV_AUTHORIZED_KEYS:-./dev/gateway/authorized_keys}:/etc/ssh/authorized_keys/jump:ro
+      - gateway-hostkeys:/etc/ssh/hostkeys
+    networks: [dev-net, infra-net]
+
+volumes:
+  gateway-hostkeys:
+
+networks:
+  dev-net:
+    name: dev-net
+    internal: true
+  dev-out:
+  infra-net:
+    external: true

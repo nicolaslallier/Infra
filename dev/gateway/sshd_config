@@ -1,0 +1,21 @@
+# Jump host: key-only, no shell, may only open a TCP forward to a session's sshd.
+Port 22
+HostKey /etc/ssh/hostkeys/ed25519
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+# The key file is a read-only bind mount owned by whoever runs `make dev-up`.
+StrictModes no
+AllowUsers jump
+# OpenSSH PermitOpen has no host wildcard (dev-*:2222 denies everything), so the
+# host part is open and the port is the limit: only sshd of a session (2222)
+# and nginx's own 2222 listener answer there on dev-net/infra-net.
+PermitOpen *:2222
+AllowTcpForwarding local
+AllowAgentForwarding no
+GatewayPorts no
+X11Forwarding no
+PermitTTY no
+PermitTunnel no
+ForceCommand /bin/false

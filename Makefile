@@ -409,3 +409,26 @@ clean: ## Delete the stack and its volumes (CONFIRM=1 required)
 	@test "$(CONFIRM)" = "1" || { echo "usage: make clean CONFIRM=1" >&2; exit 1; }
 	./scripts/portainer-stack.sh delete
 	docker compose down -v
+
+##@ Dev sessions
+# Egress proxy + SSH jump host for the Claude Code session containers, their own
+# compose project (like the runner) so `make up` never recreates them. Session
+# containers themselves are driven by the devbox CLI, not from here.
+DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
+
+dev-up: check-env ## Start dev-egress and dev-gateway (needs a real key in dev/gateway/authorized_keys)
+	@grep -qEv '^[[:space:]]*(#|$$)' dev/gateway/authorized_keys || { \
+		echo "make: dev/gateway/authorized_keys holds no public key -- put your SSH public key in it" >&2; exit 1; }
+	@docker network inspect infra-net >/dev/null 2>&1 || { echo "make: infra-net missing -- run 'make net'" >&2; exit 1; }
+	$(DEV_COMPOSE) up -d --build
+
+dev-down: ## Stop dev-egress and dev-gateway (sessions lose their proxy; they keep running)
+	$(DEV_COMPOSE) down
+
+dev-logs: ## Tail the egress proxy and gateway logs
+	$(DEV_COMPOSE) logs -f
+
+dev-status: ## Dev infrastructure containers and the sessions on dev-net
+	@$(DEV_COMPOSE) ps
+	@echo; echo "Sessions on dev-net:"
+	@docker ps --filter network=dev-net --format '{{.Names}}\t{{.Status}}' | grep -v '^dev-egress\|^dev-gateway' || true
