@@ -142,6 +142,9 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		fail "missing PAT is rejected, naming GH_RUNNER_TOKEN_MORIA" "$out"
 	fi
 
+	echo "== runners-stack selftest"
+	if out="$(cd "$ws" && bash scripts/runners-stack.sh selftest 2>&1)"; then pass "runners-stack.sh selftest"; else fail "runners-stack.sh selftest" "$out"; fi
+
 	echo "== runner scripts (fake curl)"
 	# Sandbox with just the scripts; a fake curl answers per token / repo.
 	sb="$ws/.runner-sb"; mkdir -p "$sb/scripts/lib" "$sb/bin"
