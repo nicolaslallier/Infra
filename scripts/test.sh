@@ -244,7 +244,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 printf '%s %s %s\n' "$m" "$path" "$body" >>"$LOG"
-[ "$m" = GET ] || exit 0
+if [ "$m" != GET ]; then
+  n=$(( $(cat "$LOG.n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$LOG.n"
+  [ "$n" = "${FAKE_FAIL_NTH:-}" ] && { echo "HTTP 500" >&2; exit 1; }
+  exit 0
+fi
 f="$FIX/$(tr / _ <<<"$path")"
 [ -f "$f" ] && cat "$f" || { echo "HTTP 404" >&2; exit 1; }
 FAKE
@@ -255,7 +259,8 @@ FAKE
 	printf 'name: deploy\non:\n  push:\n    branches: [main]\njobs:\n  deploy:\n    runs-on: [self-hosted, infra]\n' >"$fx/${W}_deploy.yml"
 	R=repos_nicolaslallier_Infra
 	echo '[{"id":7,"name":"Main","enforcement":"active"}]' >"$fx/${R}_rulesets"
-	hg() { (cd "$hb" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash "$hs" "$@" 2>&1); }
+	echo '{"allow_squash_merge":true,"allow_rebase_merge":false}' >"$fx/$R"
+	hg() { (cd "$hb" && rm -f "$hb/log.n" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash "$hs" "$@" 2>&1); }
 
 	: >"$hb/log"; out="$(hg infra)"; code=$?
 	if [ "$code" = 0 ] && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log" && grep -qF 'Main' <<<"$out" && grep -qF 'would POST' <<<"$out"; then
@@ -276,6 +281,44 @@ FAKE
 	if grep -q '^PUT repos/nicolaslallier/Infra/rulesets/9 {' "$hb/log" && ! grep -q '^POST ' "$hb/log" && ! grep -q 'rulesets/7' "$hb/log"; then
 		pass "github-harden --apply twice: PUT by id, no duplicate, #7 untouched"
 	else fail "github-harden --apply twice: PUT by id" "$(cat "$hb/log")"; fi
+
+	# Third-party actions: derived from the workflows' `uses:`, GitHub-owned and local refs ignored.
+	M=repos_nicolaslallier_Moria; MW=${M}_contents_.github_workflows
+	echo '[{"name":"client.yml","type":"file"}]' >"$fx/$MW"
+	printf 'name: client\non:\n  pull_request:\n    branches: [main]\njobs:\n  build:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest, macos-latest]\n    runs-on: ${{ matrix.os }}\n    steps:\n      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n      - uses: "Swatinem/rust-cache@v2"\n      - uses: ./.github/actions/x\n      - uses: foo/bar/sub@v1 # c\n      - uses: docker://alpine:3\n' >"$fx/${MW}_client.yml"
+	echo '[]' >"$fx/${M}_rulesets"; echo '{"allow_rebase_merge":true}' >"$fx/$M"
+	: >"$hb/log"; hg --apply moria >/dev/null
+	want='{"github_owned_allowed":true,"verified_allowed":true,"patterns_allowed":["Swatinem/rust-cache@*","dtolnay/rust-toolchain@*","foo/bar/sub@*"]}'
+	if grep -qF "PUT repos/nicolaslallier/Moria/actions/permissions/selected-actions $want" "$hb/log"; then
+		pass "github-harden: patterns_allowed derived from uses: (owner/repo[/sub]@*, byte-sorted)"
+	else fail "github-harden: patterns_allowed derived from uses:" "$(cat "$hb/log")"; fi
+	# bash 3.2-safe: build the fixtures for the filter test
+	H=repos_nicolaslallier_Heaven; HW=${H}_contents_.github_workflows
+	echo '[{"name":"ci.yml","type":"file"},{"name":"docker.yml","type":"file"},{"name":"ign.yml","type":"file"}]' >"$fx/$HW"
+	printf 'on:\n  push:\n    paths: [x]\n  pull_request:\njobs:\n  test:\n    strategy:\n      matrix:\n        v: [1]\n' >"$fx/${HW}_ci.yml"
+	printf 'on:\n  pull_request:\n    paths:\n      - a\njobs:\n  image:\n    runs-on: x\n' >"$fx/${HW}_docker.yml"
+	printf 'on:\n  pull_request:\n    paths-ignore:\n      - a\njobs:\n  ignored:\n    runs-on: x\n' >"$fx/${HW}_ign.yml"
+	out="$(cd "$hb" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash -c '. "$1"; workflow_jobs nicolaslallier/Heaven' _ "$hs" 2>&1)"
+	if [ "$out" = "$(printf 'ok\ttest\t1\nfiltered\timage\t0\nfiltered\tignored\t0')" ]; then
+		pass "workflow_jobs: matrix accepted, paths and paths-ignore filtered, push paths ignored"
+	else fail "workflow_jobs: paths/paths-ignore/matrix" "$out"; fi
+
+	# required_linear_history needs squash or rebase merging.
+	echo '{"allow_squash_merge":false,"allow_rebase_merge":false,"allow_merge_commit":true}' >"$fx/$R"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF allow_squash_merge <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden --apply: merge-commit-only repo refused, nothing written"
+	else fail "github-harden --apply: merge-commit-only repo refused" "exit $code: $out"; fi
+	echo '{"allow_squash_merge":true}' >"$fx/$R"
+
+	# A failing third write reports what was and was not applied.
+	: >"$hb/log"; out="$(FAKE_FAIL_NTH=3 hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF 'applied: ruleset main-protection' <<<"$out" \
+		&& grep -qF 'FAILED: actions/permissions' <<<"$out" \
+		&& grep -qF 'applied before the failure: ruleset main-protection fork-pr-contributor-approval' <<<"$out" \
+		&& grep -qF 'NOT applied: actions/permissions, selected-actions' <<<"$out"; then
+		pass "github-harden --apply: failure on write 3 lists applied and pending steps"
+	else fail "github-harden --apply: partial failure report" "exit $code: $out"; fi
 
 	# A required check that is no job (here: the workflow renamed it) refuses before any write.
 	sed -i.sed 's/^  test:/  tests:/' "$fx/${W}_test.yml"; rm -f "$fx/${W}_test.yml.sed"

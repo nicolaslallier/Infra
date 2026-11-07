@@ -62,7 +62,7 @@ workflow_jobs() {
       inon && /pull_request(_target)?[:,\] ]|pull_request$/ { pr = 1 }
       inon && /^  pull_request:/ { blk = 1; next }
       inon && blk && /^  [^ ]/ { blk = 0 }
-      inon && blk && /^    paths:/ { filtered = 1 }
+      inon && blk && /^    paths(-ignore)?:/ { filtered = 1 }
       /^jobs:/ { jobs = 1; next }
       jobs && /^  [A-Za-z0-9_-]+:[ ]*$/ { flush(); id = $1; sub(":", "", id); name = id; mat = 0; next }
       jobs && /^    name:/ { n = $0; sub(/^    name:[ ]*/, "", n); gsub(/^["\x27]|["\x27]$/, "", n); name = n }
@@ -70,6 +70,25 @@ workflow_jobs() {
       function flush() { if (id != "") out[++k] = name "\t" mat }
       END { flush(); if (pr) for (i = 1; i <= k; i++) print (filtered ? "filtered" : "ok") "\t" out[i] }'
   done
+}
+
+# used_actions <repo> -> the allow-list patterns the repo's workflows need:
+# every non-GitHub-owned action as owner/repo[/sub]@*, sorted, unique. Local
+# (./) and docker:// refs and actions/*, github/* need nothing.
+used_actions() {
+  local repo="$1" files f
+  files="$(gh api "repos/$repo/contents/.github/workflows" | jq -r '.[]|select(.type=="file")|.name')" || return 1
+  for f in $files; do
+    gh api "repos/$repo/contents/.github/workflows/$f" -H "Accept: application/vnd.github.raw" || return 1
+  done | sed -nE 's/^[[:space:]-]*uses:[[:space:]]*["'"'"']?([^[:space:]"'"'"'#]+).*/\1/p' \
+    | { grep -vE '^(\./|docker://|actions/|github/)' || true; } | sed -E 's/@.*$//; s/$/@*/' | LC_ALL=C sort -u
+}
+
+# selected_json <repo> -> selected-actions body with the derived patterns.
+selected_json() {
+  local pats
+  pats="$(used_actions "$1")" || return 1
+  printf '%s\n' "$pats" | jq -R 'select(length>0)' | jq -sc '{github_owned_allowed:true, verified_allowed:true, patterns_allowed:.}'
 }
 
 # verify_checks <name> <repo>: every required context is a job of an unfiltered
@@ -98,15 +117,42 @@ verify_checks() {
 norm='{name,target,enforcement,bypass_actors,conditions,
   rules:(.rules|map({type}+(if .parameters then {parameters} else {} end))|sort_by(.type))}'
 
-SEL='{"github_owned_allowed":true,"verified_allowed":true,"patterns_allowed":[]}'
 PERM='{"enabled":true,"allowed_actions":"selected"}'
 FORK='{"approval_policy":"all_external_contributors"}'
 
 # put <repo> <path> <json>
 put() { printf '%s' "$3" | gh api -X PUT "repos/$1/$2" --input - >/dev/null; }
 
+# merge_ok <repo>: required_linear_history needs squash or rebase merging.
+merge_ok() {
+  gh api "repos/$1" | jq -e '.allow_squash_merge==true or .allow_rebase_merge==true' >/dev/null && return 0
+  echo "repos/$1: neither allow_squash_merge nor allow_rebase_merge is true; required_linear_history would make every PR unmergeable" >&2
+  return 1
+}
+
+apply_ruleset() { # <name> <repo> <id or empty>
+  if [ -n "$3" ]; then ruleset_json "$1" | gh api -X PUT "repos/$2/rulesets/$3" --input - >/dev/null
+  else ruleset_json "$1" | gh api -X POST "repos/$2/rulesets" --input - >/dev/null; fi
+}
+
+# step <label> <cmd...>: run one write, report it, and on failure say what
+# was and was not applied.
+ALL_STEPS=("ruleset $RULESET_NAME" fork-pr-contributor-approval actions/permissions selected-actions)
+step() {
+  local label="$1"; shift
+  if "$@"; then done_steps+=("$label"); echo "applied: $label"; return 0; fi
+  local s left=""
+  echo "FAILED: $label" >&2
+  echo "applied before the failure: ${done_steps[*]:-nothing}" >&2
+  for s in "${ALL_STEPS[@]}"; do
+    case " ${done_steps[*]:-} " in *" $s "*) ;; *) left="$left, $s" ;; esac
+  done
+  echo "NOT applied: ${left#, }" >&2
+  return 1
+}
+
 main() {
-  local apply=0 name repo rid rs
+  local apply=0 name repo rid rs done_steps
   [ "${1:-}" = --apply ] && { apply=1; shift; }
   if [ "$#" -ne 1 ]; then echo "usage: github-harden.sh [--apply] <darkangel|ea|heaven|infra|moria>" >&2; return 2; fi
   name="$1"
@@ -115,17 +161,18 @@ main() {
   rs="$(gh api "repos/$repo/rulesets")" || { echo "cannot list rulesets of $repo" >&2; return 1; }
   rid="$(jq -r --arg n "$RULESET_NAME" '[.[]|select(.name==$n)|.id][0] // empty' <<<"$rs")"
 
+  local sel
+  sel="$(selected_json "$repo")" || { echo "cannot derive allowed actions of $repo" >&2; return 1; }
+
   if [ "$apply" = 1 ]; then
     verify_checks "$name" "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
-    if [ -n "$rid" ]; then
-      ruleset_json "$name" | gh api -X PUT "repos/$repo/rulesets/$rid" --input - >/dev/null || return 1
-    else
-      ruleset_json "$name" | gh api -X POST "repos/$repo/rulesets" --input - >/dev/null || return 1
-    fi
-    put "$repo" actions/permissions/fork-pr-contributor-approval "$FORK" || return 1
-    put "$repo" actions/permissions "$PERM" || return 1
-    put "$repo" actions/permissions/selected-actions "$SEL" || return 1
-    if [ -n "$rid" ]; then echo "applied to $repo (ruleset #$rid updated)"; else echo "applied to $repo (ruleset created)"; fi
+    merge_ok "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
+    done_steps=()
+    step "ruleset $RULESET_NAME" apply_ruleset "$name" "$repo" "$rid" || return 1
+    step "fork-pr-contributor-approval" put "$repo" actions/permissions/fork-pr-contributor-approval "$FORK" || return 1
+    step "actions/permissions" put "$repo" actions/permissions "$PERM" || return 1
+    step "selected-actions" put "$repo" actions/permissions/selected-actions "$sel" || return 1
+    echo "applied to $repo"
     return 0
   fi
 
@@ -140,12 +187,16 @@ main() {
     echo "  $RULESET_NAME does not exist: --apply would POST it"
   fi
   local p want
-  for p in "actions/permissions/fork-pr-contributor-approval:$FORK" "actions/permissions:$PERM" "actions/permissions/selected-actions:$SEL"; do
+  for p in "actions/permissions/fork-pr-contributor-approval:$FORK" "actions/permissions:$PERM" "actions/permissions/selected-actions:$sel"; do
     want="${p#*:}"
     echo "## ${p%%:*} diff (< current, > desired)"
     diff <(gh api "repos/$repo/${p%%:*}" 2>/dev/null | jq -S --argjson w "$want" 'with_entries(select(.key as $k | $w|has($k)))') \
          <(jq -S . <<<"$want") && echo "  none"
   done
+  echo "## merge methods"
+  merge_ok "$repo" && echo "  squash or rebase merge enabled"
+  echo "## allowed third-party actions (patterns_allowed)"
+  jq -r '.patterns_allowed[]|"  "+.' <<<"$sel"
   echo "## required checks"
   verify_checks "$name" "$repo" && echo "  all found" || echo "  --apply would REFUSE"
   return 0
