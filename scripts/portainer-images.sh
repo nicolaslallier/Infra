@@ -2,7 +2,7 @@
 # Build the images the stack references but cannot pull, through Portainer's
 # API (see lib/portainer-api.sh): the daemon clones and builds the git ref
 # itself, so nothing is built or sent from this machine. A tag already on the
-# daemon is not rebuilt. Needs OLLAMA_PROXY_REF (the Makefile sets it).
+# daemon is not rebuilt unless FORCE is set. Needs OLLAMA_PROXY_REF (the Makefile sets it).
 set -euo pipefail
 # shellcheck source=lib/portainer-api.sh
 . "$(dirname "$0")/lib/portainer-api.sh"
@@ -10,7 +10,7 @@ set -euo pipefail
 build() { # <tag> <git-url#ref>
   local tag="$1" remote="$2" img out
   printf '\n\033[1mImage %s\033[0m\n' "$tag"
-  if img="$(api GET "$d/images/$tag/json" 2>/dev/null)"; then
+  if [ -z "${FORCE:-}" ] && img="$(api GET "$d/images/$tag/json" 2>/dev/null)"; then
     ok "already on the daemon, not rebuilt"
   else
     ok "not found, building from $remote"
@@ -25,6 +25,13 @@ build() { # <tag> <git-url#ref>
   fi
   ok "id $(jq -r '.Id[7:19]' <<<"$img"), $(jq -r '(.Size / 1048576 | floor)' <<<"$img") MB, created $(jq -r .Created <<<"$img")"
 }
+
+# `make dev-image`: only the dev-session image, from the Infra repo on GitHub
+# (DEV_IMAGE_REF, default main -- so dev/image must be merged first).
+if [ "${1:-}" = dev ]; then
+  build "devbox-session:1" "https://github.com/nicolaslallier/Infra.git#${DEV_IMAGE_REF:-main}:dev/image"
+  exit 0
+fi
 
 : "${OLLAMA_PROXY_REF:?}"
 build "infra-ollama-proxy:${OLLAMA_PROXY_REF:0:7}" "https://github.com/nicolaslallier/ollama-metrics.git#$OLLAMA_PROXY_REF"

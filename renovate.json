@@ -1,20 +1,48 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "docker:pinDigests"],
-  "enabledManagers": ["docker-compose"],
+  "extends": [
+    "config:recommended",
+    "docker:pinDigests"
+  ],
+  "enabledManagers": [
+    "docker-compose",
+    "dockerfile"
+  ],
   "docker-compose": {
-    "managerFilePatterns": ["/(^|/)docker-compose[^/]*\\.ya?ml$/"]
+    "managerFilePatterns": [
+      "/(^|/)docker-compose[^/]*\\.ya?ml$/"
+    ]
   },
-  "schedule": ["before 6am on saturday"],
+  "schedule": [
+    "before 6am on saturday"
+  ],
   "prConcurrentLimit": 3,
   "automerge": false,
-  "ignoreDeps": ["infra-ollama-proxy", "myoung34/github-runner"],
+  "ignoreDeps": [
+    "infra-ollama-proxy",
+    "myoung34/github-runner",
+    "devbox-session",
+    "dev-egress",
+    "dev-gateway"
+  ],
   "packageRules": [
     {
       "description": "Store-format images (pgvector, neo4j, openbao, seaweedfs) are bumped across majors by hand, never by Renovate; neo4j's yearly calendar version (2026.x to 2027.x) counts as a major.",
-      "matchPackageNames": ["pgvector/pgvector", "neo4j", "openbao/openbao", "chrislusf/seaweedfs"],
-      "matchUpdateTypes": ["major"],
+      "matchPackageNames": [
+        "pgvector/pgvector",
+        "neo4j",
+        "openbao/openbao",
+        "chrislusf/seaweedfs"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
       "enabled": false
     }
-  ]
+  ],
+  "dockerfile": {
+    "managerFilePatterns": [
+      "/(^|/)dev/[^/]+/Dockerfile$/"
+    ]
+  }
 }

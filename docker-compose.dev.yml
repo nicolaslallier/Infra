@@ -1,0 +1,62 @@
+# Dev-session plumbing, its own compose project ("dev"): the egress proxy and
+# the SSH gateway. The sessions themselves are one Portainer stack each
+# (dev/session.compose.yml, created by the devbox CLI). See CLAUDE.md
+# "Dev sessions". Driven by `make dev-up` / -down / -logs / -status.
+#
+# No bind mounts: configs are baked into the images, so this works over the
+# ssh DOCKER_HOST the Makefile sets (the build context is sent; files are not).
+name: dev
+
+services:
+  dev-egress:
+    build: dev/egress
+    image: dev-egress:1
+    container_name: dev-egress
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/run/squid, /var/cache/squid, /var/log/squid, /tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    healthcheck:
+      # The cache manager, allowed from localhost only (squid.conf).
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3128/squid-internal-mgr/info"]
+      interval: 30s
+      timeout: 5s
+    # infra-net is not internal: it is both the route out and the way to
+    # s3:8333 (squid.conf decides which).
+    networks: [dev-net, infra-net]
+
+  dev-gateway:
+    build: dev/gateway
+    image: dev-gateway:1
+    container_name: dev-gateway
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/run, /tmp, /var/empty]
+    # sshd's privilege separation, and nothing else.
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, SYS_CHROOT, NET_BIND_SERVICE, KILL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 128m
+    healthcheck:
+      # Not a TCP probe: sshd penalises connections that never authenticate.
+      # busybox pgrep -x reads the retitled argv ("sshd: ... [listener]").
+      test: ["CMD", "pgrep", "sshd"]
+      interval: 30s
+      timeout: 5s
+    volumes:
+      - gateway-keys:/etc/ssh/keys
+    # infra-net: so nginx reaches it. dev-net: so it reaches the sessions.
+    networks: [dev-net, infra-net]
+
+volumes:
+  gateway-keys:
+
+networks:
+  # internal: no route out of it. Fixed name: sessions join it as external.
+  dev-net:
+    name: dev-net
+    internal: true
+  infra-net:
+    external: true

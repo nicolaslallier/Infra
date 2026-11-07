@@ -1,0 +1,8 @@
+# Interactive SSH logins land in a tmux session that outlives the connection:
+# a dropped link (Wi-Fi, sleep, nginx recreated by `make up`) must not kill a
+# running `claude`. Reconnecting re-attaches. Commands (`ssh dev-x cmd`) and
+# scp/sftp are not interactive and are left alone. If tmux cannot start (an
+# unknown TERM), the plain shell carries on rather than closing the login.
+if [ -n "${SSH_TTY:-}" ] && [ -z "${TMUX:-}" ] && command -v tmux >/dev/null; then
+  tmux new-session -A -s main && exit
+fi

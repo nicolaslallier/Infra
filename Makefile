@@ -15,7 +15,8 @@ SHELL := bash
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
 	runner-shell runner-env check-runner-env \
-	runner-ea-up runner-ea-down runner-ea-logs
+	runner-ea-up runner-ea-down runner-ea-logs \
+	dev-image dev-up dev-down dev-logs dev-status dev-test
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -71,6 +72,9 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist (via Po
 OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
 app-images: ## Build the images the stack references but cannot pull (via Portainer's API)
 	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) ./scripts/portainer-images.sh
+
+dev-image: ## Build the dev-session image devbox-session:1 on the daemon from main (DEV_IMAGE_REF=<ref>; FORCE=1 rebuilds an existing tag)
+	@INFRA_HOST=$(INFRA_HOST) FORCE=$(FORCE) ./scripts/portainer-images.sh dev
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
@@ -297,6 +301,34 @@ runner-ea-down: check-runner-env ## Stop the EA runner (not mid-job: that deploy
 
 runner-ea-logs: check-runner-env ## Tail the EA runner's logs
 	$(RUNNER_EA_COMPOSE) logs -f
+
+# Dev-session plumbing (docker-compose.dev.yml): egress proxy + SSH gateway,
+# its own compose project like the runner. The sessions themselves are
+# Portainer stacks made by the devbox CLI. See CLAUDE.md "Dev sessions".
+DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
+
+dev-up: check-env ## Build and start the dev-session egress proxy and SSH gateway
+	@grep -qE '^(ssh-|ecdsa-|sk-)' dev/gateway/authorized_keys || { \
+		echo "make dev-up: dev/gateway/authorized_keys has no key -- add your ~/.ssh/id_*.pub line(s)" >&2; exit 1; }
+	$(DEV_COMPOSE) up -d --build
+
+dev-down: ## Stop the dev-session proxy and gateway (sessions lose SSH and egress)
+	$(DEV_COMPOSE) down
+
+dev-logs: ## Tail the dev-session proxy and gateway logs
+	$(DEV_COMPOSE) logs -f
+
+# Builds the image and runs the session/image checks on THIS machine's
+# daemon (they need to bind-mount nothing, but must not touch the live one),
+# plus the CLI's unit tests.
+dev-test: ## Dev sessions: CLI unit tests, then image and state checks on the local daemon
+	cargo test --manifest-path dev/cli/Cargo.toml
+	DOCKER_HOST= docker build -q -t devbox-session:1 dev/image
+	DOCKER_HOST= ./scripts/dev-image-check.sh
+	DOCKER_HOST= ./scripts/dev-session-check.sh
+
+dev-status: ## Dev plumbing and session containers on the daemon
+	@docker ps -a --filter name=^dev- --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 
 ##@ App provisioning
 provision-app: check-env ## Add an app DB/role (app=<name>)
