@@ -35,6 +35,31 @@ env_json() { # <env-file> <infra-dir>
     + [{name: "INFRA_DIR", value: $dir}]' <"$1"
 }
 
+# Request bodies. The env (five PATs) arrives on stdin: jq --argjson would put
+# it on jq's command line, readable by anyone via ps.
+create_body() { # stdin: env json
+  jq --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" \
+    '{Name: $name, RepositoryURL: $url, RepositoryReferenceName: $ref,
+      ComposeFile: "docker-compose.runners.yml", RepositoryAuthentication: false, Env: .}'
+}
+redeploy_body() { # <true|false: re-pull images>; stdin: env json
+  jq --arg ref "$REF" --argjson pull "$1" \
+    '{RepositoryReferenceName: $ref, RepositoryAuthentication: false, Env: .,
+      Prune: false, RepullImageAndRedeploy: $pull}'
+}
+
+# Recreating or stopping the runners mid-job kills the job. One busy runner
+# out of the five is enough, they are handled together.
+check_idle() {
+  local rc=0
+  bash scripts/runner-status.sh --busy || rc=$?
+  case "$rc" in
+    0) ;;
+    3) [ "${FORCE:-}" = 1 ] || die "a runner is running a job; wait for it, or FORCE=1 to go ahead anyway" ;;
+    *) die "scripts/runner-status.sh --busy failed (exit $rc)" ;;
+  esac
+}
+
 # ponytail: copy of portainer-stack.sh (daemon_dir); share it if the two drift.
 # A checkout path as Docker Desktop's daemon sees it. WSL's /mnt/c exists
 # only inside the distro; the daemon (and so Portainer's compose) sees that
@@ -61,6 +86,11 @@ selftest() {
     'PORTAINER_API_KEY=x' 'INFRA_DIR=/stale' '  GH_RUNNER_TOKEN_INDENTED=no' >"$tmp/env"
   got="$(env_json "$tmp/env" /repo | jq -c .)"
   rm -rf "$tmp"
+  local cb rb
+  cb="$(printf '%s' "$got" | create_body | jq -c '[.Name, .ComposeFile, (.Env | length), (.Env | map(.name) | index("INFRA_DIR"))]')"
+  [ "$cb" = '["runners","docker-compose.runners.yml",6,5]' ] || die "selftest: create_body: $cb"
+  rb="$(printf '%s' "$got" | redeploy_body true | jq -c '[.RepullImageAndRedeploy, (.Env | length), .Env[0].value]')"
+  [ "$rb" = '[true,6,"a"]' ] || die "selftest: redeploy_body: $rb"
   want='[{"name":"GH_RUNNER_TOKEN_DARKANGEL","value":"a"},{"name":"GH_RUNNER_TOKEN_EA","value":"b"},{"name":"GH_RUNNER_TOKEN_HEAVEN","value":"c"},{"name":"GH_RUNNER_TOKEN_INFRA","value":"d"},{"name":"GH_RUNNER_TOKEN_MORIA","value":"e"},{"name":"INFRA_DIR","value":"/repo"}]'
   [ "$got" = "$want" ] || die "selftest: env_json\n  got:  $got\n  want: $want"
   echo "runners-stack.sh: selftest ok"
@@ -86,15 +116,11 @@ if [ "$cmd" = up ] || [ "$cmd" = pull ]; then
     fi
   done
   [ -s certs/infra-ca.crt ] || die "certs/infra-ca.crt not found (EA's runner mounts it; run 'make init' or ./scripts/gen-certs.sh)"
-  # Recreating the runners mid-job kills the job. One busy runner out of the
-  # five is enough, they are recreated together.
-  rc=0
-  bash scripts/runner-status.sh --busy || rc=$?
-  case "$rc" in
-    0) ;;
-    3) [ "${FORCE:-}" = 1 ] || die "a runner is running a job; wait for it, or FORCE=1 to recreate anyway" ;;
-    *) die "scripts/runner-status.sh --busy failed (exit $rc)" ;;
-  esac
+  check_idle
+fi
+if [ "$cmd" = down ]; then
+  [ -f .runner.env ] || die ".runner.env not found (run 'make runner-env')"
+  check_idle
 fi
 
 # shellcheck source=lib/portainer-api.sh
@@ -112,18 +138,14 @@ case "$cmd" in
     env="$(env_json .runner.env "$(daemon_dir "${PORTAINER_INFRA_DIR:-$PWD}")")"
     if [ -z "$sid" ]; then
       [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make runners-up' first"
-      body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --argjson env "$env" \
-        '{Name: $name, RepositoryURL: $url, RepositoryReferenceName: $ref,
-          ComposeFile: "docker-compose.runners.yml", RepositoryAuthentication: false, Env: $env}')"
+      body="$(printf '%s' "$env" | create_body)"
       api POST "/stacks/create/standalone/repository?endpointId=$eid" "$body" >/dev/null
       echo "runners-stack.sh: created stack '$STACK' from $REPO_URL ($REF)"
     else
       if [ "$(jq -r .Status <<<"$stack")" = 2 ]; then
         api POST "/stacks/$sid/start?endpointId=$eid" >/dev/null
       fi
-      body="$(jq -n --arg ref "$REF" --argjson env "$env" --argjson pull "$([ "$cmd" = pull ] && echo true || echo false)" \
-        '{RepositoryReferenceName: $ref, RepositoryAuthentication: false, Env: $env,
-          Prune: false, RepullImageAndRedeploy: $pull}')"
+      body="$(printf '%s' "$env" | redeploy_body "$([ "$cmd" = pull ] && echo true || echo false)")"
       api PUT "/stacks/$sid/git/redeploy?endpointId=$eid" "$body" >/dev/null
       echo "runners-stack.sh: redeployed stack '$STACK'"
     fi
