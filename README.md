@@ -1151,6 +1151,41 @@ to do with it.
    collected automatically via the Docker socket — no app changes needed
    for Loki.
 
+## Sessions de dev
+
+`devbox` (`dev/cli`) crée des conteneurs Claude Code isolés, un par session,
+joignables en SSH. Les étapes de mise en place et le modèle de sécurité sont
+dans `CLAUDE.md` (« Sessions de dev (devbox) »).
+
+Build : `cargo build --release --manifest-path dev/cli/Cargo.toml`. Config
+(`config.toml` dans le dossier de configuration de l'OS, par exemple
+`~/Library/Application Support/net.famillelallier.devbox/` sur macOS) :
+
+```toml
+portainer_url = "https://192.168.2.10:9443"
+api_key = "ptr_..."            # clé API Portainer
+endpoint_id = 2
+insecure_tls = true            # certificat auto-signé de Portainer
+ssh_host = "192.168.2.10"      # LAN_IP
+ssh_port = 2222
+pubkey_path = "/home/me/.ssh/id_ed25519.pub"
+s3_secret_key = "..."          # DEVBOX_S3_SECRET_KEY
+```
+
+```bash
+devbox create jarvis --repo https://github.com/o/r   # jeton GitHub demandé (ou DEVBOX_GH_TOKEN)
+ssh dev-jarvis                                       # puis `claude`; première connexion : login
+devbox list
+devbox stop jarvis
+devbox resume jarvis
+devbox delete jarvis                                 # le bucket garde l'état
+```
+
+Au premier `claude`, connecte-toi avec ton abonnement; le jeton est
+sauvegardé dans le bucket et resservira après un `resume` ou un `create` du
+même nom. `--plugin nom@marketplace` (répétable) évite la sélection
+interactive des plugins.
+
 ## Layout
 
 ```

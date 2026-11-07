@@ -906,14 +906,82 @@ postgres dump holds every app's data, so nothing is world-readable.
   target keeps its old time. Grafana rules `Backup stale` (over 26 h) and
   `Backup metric missing` (absent for 30 m).
 
-### Sessions de dev
+### Sessions de dev (devbox)
 
-Claude Code session containers (`docker-compose.dev.yml`) sync `/work` and
-`~/.claude` to the versioned bucket `devbox` (`devbox/<SESSION>/...`) as S3
-identity `devbox`, secret `DEVBOX_S3_SECRET_KEY`; provision once with
-`make s3-provision app=devbox versioned=1`. **The identity is shared by every
-session**: a compromised session can read or overwrite the other sessions'
-prefixes. Ceiling accepted for now; remedy is one identity per session.
+Des conteneurs Claude Code, un par session, pilotés depuis la machine du
+propriétaire par un CLI Rust (`dev/cli`, `devbox create|list|stop|resume|delete`;
+config `config.toml` dans le dossier de configuration de l'OS). Rien n'est
+déployé par `make up`.
+
+- **Une pile Portainer par session.** `dev-<nom>` (conteneur `dev-<nom>`,
+  volume `dev-<nom>-work`), créée par le CLI via l'API de Portainer depuis
+  `dev/session.compose.yml`. Le socle partagé est `docker-compose.dev.yml`
+  (projet `dev` : `dev-egress`, squid, et `dev-gateway`, sshd), piloté par
+  `make dev-up/-down/-logs/-status` : un projet à part, comme Portainer et le
+  runner, pour qu'un `make up` ne le recrée pas. L'image est construite sur le
+  daemon par `make dev-image` (comme `ollama-proxy` : `pull_policy: never`).
+- **Isolation.** `dev-net` est `internal: true` : un conteneur de session n'a
+  aucune route. Les deux seules sorties sont `dev-egress` (liste blanche de
+  domaines, refus des plages privées, IPv6 et CGNAT même si un nom autorisé y
+  résout, et `s3:8333` seulement) et la passerelle SSH. Les sessions ne sont
+  jamais sur `infra-net`. `scripts/dev-isolation-check.sh <session>` le
+  prouve de l'intérieur du conteneur (sites autorisés joignables, cibles
+  privées refusées par squid, pas de sortie sans proxy, pas de `docker.sock`).
+  Il ne prouve pas ce que le proxy autorise déjà : un domaine de la liste
+  blanche est un canal d'exfiltration (GitHub accepte n'importe quel dépôt),
+  et rien n'y est testé sur l'isolement entre sessions.
+- **Chemin SSH.** Flux `nginx` `:2222` lié à `${LAN_IP}` (`nginx/stream.d/devssh.conf`)
+  vers `dev-gateway:22`, puis `ProxyJump` vers `dev-<nom>:2222`; le CLI écrit
+  le bloc `Host dev-<nom>` dans `~/.ssh/config`. Clé seule, pas de mot de passe.
+  La vraie clé publique du propriétaire va dans `dev/gateway/authorized_keys`,
+  **gitignoré** (un `.example` est versionné) : un fichier suivi par Git
+  déclencherait le drift guard. `PermitOpen *:2222`, car OpenSSH n'a pas de
+  joker d'hôte (`dev-*:2222` refuse tout) : la clé est la seule barrière.
+- **Persistance.** `/work`, `~/.claude` et `~/.claude.json` sont synchronisés
+  chaque minute et à l'arrêt vers le bucket versionné `devbox`, identité S3
+  `devbox` : `devbox:devbox/<nom>/{work,claude,claude.json}`. Exclus : `target/`,
+  `node_modules/`, `.venv/`, `.git/hooks` (un hook restauré s'exécuterait au
+  prochain `git`). `create` avec le nom d'une session supprimée restaure depuis
+  le bucket (l'entrypoint voit un `work/` sauvegardé et ne clone pas). L'arrêt
+  laisse 120 s à la synchro finale. Le jeton d'abonnement Claude vit dans le
+  bucket (`.credentials.json`).
+- **Le vrai garde-fou : le jeton GitHub et la protection de branche.** Le
+  jeton est fine-grained, limité à un dépôt, créé par le propriétaire, sans
+  Administration. Sur **chaque** dépôt confié à une session, le propriétaire
+  doit exiger une PR et les checks CI avant tout merge dans `main`, sans
+  contournement pour l'identité du jeton. `devbox create` ne vérifie que le
+  champ `protected` de `main`, vrai pour n'importe quelle règle : au mieux,
+  pas une preuve. Un merge sur `main` d'un dépôt qui a un runner déploie du
+  code sur l'hôte : une session qui peut y merger est root sur le daemon en
+  pratique.
+- **Plafonds connus.**
+  - Toutes les sessions partagent une identité S3 et un `dev-net` : une
+    session compromise lit ou écrase les préfixes des autres et sonde leurs
+    ports. Remède : une identité S3 et un réseau par session.
+  - squid est `ubuntu/squid:6.6-24.04_edge` épinglé par digest : chercher un
+    tag 24.04 plus récent avant de déployer.
+  - Le CLI garde la clé API de Portainer (root sur le daemon) dans son
+    `config.toml`, sur la machine du propriétaire, et refuse `http://` sauf
+    `DEVBOX_ALLOW_HTTP=1`.
+  - L'env de chaque pile Portainer contient le `GH_TOKEN` de la session.
+  - 4 sessions actives au plus (`max_active`) et `mem_limit` 1536m : la VM de
+    l'hôte est petite.
+  - Les clés d'hôte SSH sont régénérées à chaque conteneur ; `delete` lance
+    `ssh-keygen -R`.
+  - `delete --purge` n'est pas automatisé : il affiche la commande
+    `rclone purge`.
+- **Avant la première utilisation** (propriétaire) :
+  1. `make vault-cli args="kv patch -mount=infra env DEVBOX_S3_SECRET_KEY=..."`
+     puis `make vault-env`. `check-env` l'exige désormais : `make up` échoue
+     tant qu'elle manque.
+  2. `make s3-provision app=devbox versioned=1`.
+  3. `cp dev/gateway/authorized_keys.example dev/gateway/authorized_keys` et
+     y coller la clé publique.
+  4. `make dev-image`.
+  5. `make dev-up` (crée aussi le réseau `dev-net`).
+  6. `make up`, pour recréer `nginx` avec le port `:2222`.
+  7. Écrire `config.toml` (voir le README, « Sessions de dev »).
+  8. `cargo build --release --manifest-path dev/cli/Cargo.toml`.
 
 ### Windows machines (`windows_exporter`)
 
