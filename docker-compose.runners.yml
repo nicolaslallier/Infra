@@ -1,0 +1,121 @@
+# The self-hosted GitHub Actions runners, one per repo (DarkAngel, EA, Heaven,
+# Infra, Moria), deployed as their own Portainer stack. Their own compose
+# project, outside the "infra" stack: every `make up` force-recreates every
+# container in that stack (see CLAUDE.md "Portainer-managed stack"), and a
+# runner recreated mid-job is a job that never reports its result.
+#
+# A GitHub-hosted runner cannot do this work at all: Portainer publishes its
+# API on ${LAN_IP}:9443 and is otherwise only on infra-net, and there is no
+# public ingress to either. The runners have to be on this LAN.
+#
+# Never add a pull_request / pull_request_target trigger to a workflow that
+# runs on one of these labels: a fork's PR would run on this host. The socket
+# holders (darkangel, heaven, infra) are root on the Docker daemon.
+#
+# The PATs live in .runner.env (never .env). See CLAUDE.md "CI: deploying on
+# a push to main".
+name: runners
+
+x-runner: &runner
+  # A moving tag on purpose. GitHub retires old runner versions
+  # server-side, so a digest pinned today ages into a runner the service
+  # refuses to talk to. Unlike every other image in this repo, which is
+  # digest-pinned.
+  image: myoung34/github-runner:ubuntu-noble
+  restart: unless-stopped
+  # Deliberately not on infra-net. A runner needs outbound HTTPS to GitHub and
+  # nothing else.
+  environment: &runner-env
+    RUNNER_SCOPE: repo
+    # De-register after every job; `restart: unless-stopped` then brings up a
+    # freshly registered one. No job inherits a working tree, a container or
+    # an env var another job left behind.
+    EPHEMERAL: "true"
+
+services:
+  runner-darkangel:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/DarkAngel
+      RUNNER_NAME: darkangel-host
+      # The repo's workflows select the runner by label. A renamed label
+      # leaves the job queued forever with no error.
+      LABELS: darkangel
+      # A PAT, exchanged at startup for the short-lived registration token the
+      # runner uses. It lives in .runner.env, never in .env: .env is handed to
+      # containers wholesale and shipped to Portainer as the stack env, and
+      # this token can register runners on the repo.
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_DARKANGEL:?Set GH_RUNNER_TOKEN_DARKANGEL in .runner.env}
+    volumes:
+      # Root on this host's Docker daemon, the same power Portainer's UI has.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-darkangel-work:/_work
+
+  runner-ea:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/EA
+      RUNNER_NAME: ea-host
+      LABELS: ea
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_EA:?Set GH_RUNNER_TOKEN_EA in .runner.env}
+    # No Docker socket: EA's scripts/portainer-stack.sh calls Portainer's API
+    # by URL, so a compromised job holds the two deploy secrets and nothing else.
+    # On this host the name resolves to 127.0.0.1 (hosts file), which inside the
+    # container is the container itself. Pin it to the LAN address nginx
+    # publishes 443 on. Same for OpenBao's vhost, read at deploy time.
+    extra_hosts:
+      - "portainer.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+      - "vault.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+    # tmpfs, not a named volume: `restart` reuses the container, so only memory
+    # is wiped between jobs.
+    tmpfs:
+      # exec: Docker mounts tmpfs noexec by default, and the job runs scripts it checked out.
+      - /_work:exec
+    volumes:
+      # The Infra CA, to verify Portainer's and OpenBao's certificates (public
+      # cert, no key). The path must be the one the *daemon* sees.
+      - ${INFRA_DIR:-.}/certs/infra-ca.crt:/etc/ea/infra-ca.crt:ro
+
+  runner-heaven:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/Heaven
+      RUNNER_NAME: heaven-host
+      LABELS: heaven
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_HEAVEN:?Set GH_RUNNER_TOKEN_HEAVEN in .runner.env}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-heaven-work:/_work
+
+  runner-infra:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/Infra
+      RUNNER_NAME: infra-host
+      # .github/workflows/deploy.yml selects this runner by label.
+      LABELS: infra
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_INFRA:?Set GH_RUNNER_TOKEN_INFRA in .runner.env}
+    volumes:
+      # Every step of the deploy goes through the socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - runner-infra-work:/_work
+
+  runner-moria:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/Moria
+      RUNNER_NAME: moria-host
+      LABELS: moria
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_MORIA:?Set GH_RUNNER_TOKEN_MORIA in .runner.env}
+    tmpfs:
+      - /_work:exec
+
+volumes:
+  runner-darkangel-work:
+  runner-heaven-work:
+  runner-infra-work:

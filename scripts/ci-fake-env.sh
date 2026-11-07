@@ -79,6 +79,10 @@ mkdir -p openbao
 head -c 32 /dev/urandom > openbao/seal.key
 chmod 600 openbao/seal.key
 
+# The runners' compose (docker-compose.runners.yml) guards five PATs in .runner.env.
+: > .runner.env
+for n in DARKANGEL EA HEAVEN INFRA MORIA; do printf 'GH_RUNNER_TOKEN_%s=fake-%s\n' "$n" "$(rand_hex 8)" >> .runner.env; done
+
 echo "ci-fake-env: wrote $PWD/.env and $PWD/openbao/seal.key (throwaway values)"
 
 # `nginx -t` parses nginx/snippets/ssl.conf, which names certs/infra.crt and

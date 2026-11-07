@@ -107,6 +107,41 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		failures+=("pr-validation checks")
 	fi
 
+	echo "== runners compose"
+	# ci-fake-env.sh (run by _run_all above) wrote a five-token .runner.env into $ws.
+	rc() { (cd "$ws" && docker compose -f docker-compose.runners.yml --env-file "$1" "${@:2}" 2>&1); }
+	if cfg="$(rc .runner.env config --format json)"; then
+		names="$(jq -r '.services | keys | join(",")' <<<"$cfg")"
+		if [ "$names" = "runner-darkangel,runner-ea,runner-heaven,runner-infra,runner-moria" ]; then
+			pass "five runner-<name> services"
+		else
+			fail "five runner-<name> services" "got: $names"
+		fi
+		for n in darkangel ea heaven infra moria; do
+			if jq -e --arg n "$n" '.services["runner-"+$n].environment | .LABELS == $n and .EPHEMERAL == "true"' <<<"$cfg" >/dev/null; then
+				pass "runner-$n label and EPHEMERAL"
+			else
+				fail "runner-$n label and EPHEMERAL"
+			fi
+		done
+		socks="$(jq -r '[.services | to_entries[] | select(any(.value.volumes[]?; .source == "/var/run/docker.sock")) | .key] | sort | join(",")' <<<"$cfg")"
+		if [ "$socks" = "runner-darkangel,runner-heaven,runner-infra" ]; then
+			pass "docker socket only on darkangel, heaven, infra"
+		else
+			fail "docker socket only on darkangel, heaven, infra" "got: $socks"
+		fi
+	else
+		fail "runners compose config" "$cfg"
+	fi
+	grep -v '^GH_RUNNER_TOKEN_MORIA=' "$ws/.runner.env" >"$ws/.runner.env.short"
+	if out="$(rc .runner.env.short config -q)"; then
+		fail "missing PAT is rejected" "config succeeded"
+	elif grep -qF GH_RUNNER_TOKEN_MORIA <<<"$out"; then
+		pass "missing PAT is rejected, naming GH_RUNNER_TOKEN_MORIA"
+	else
+		fail "missing PAT is rejected, naming GH_RUNNER_TOKEN_MORIA" "$out"
+	fi
+
 	echo "== check-env rejects broken .env files"
 	if [ ! -f "$ws/.baseline-ok" ]; then
 		# Already a failure above; every case would be rejected for that reason.

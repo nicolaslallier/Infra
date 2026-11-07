@@ -174,7 +174,8 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
                 "sh",
                 "-c",
                 "docker compose --env-file .env -f docker-compose.yml config -q && "
-                "docker compose --env-file .env -f docker-compose.portainer.yml config -q",
+                "docker compose --env-file .env -f docker-compose.portainer.yml config -q && "
+                "docker compose --env-file .runner.env -f docker-compose.runners.yml config -q",
             ],
             "working_dir": "/repo",
             "volumes": {
