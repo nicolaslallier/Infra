@@ -195,8 +195,11 @@ portainer-down: ## Stop Portainer (keeps its volume)
 portainer-restart: ## Restart Portainer
 	$(PORTAINER_COMPOSE) restart
 
+# Not `compose logs`: that interpolates the file, so it needs .env (LAN_IP).
 portainer-logs: ## Tail Portainer's logs
-	$(PORTAINER_COMPOSE) logs -f
+	@id=$$(docker ps -aq --filter label=com.docker.compose.project=portainer --filter label=com.docker.compose.service=portainer); \
+	if [ -z "$$id" ]; then echo "make portainer-logs: no Portainer container on this daemon (make portainer-up)." >&2; exit 1; fi; \
+	docker logs -f --tail 100 $$id
 
 ##@ CI runners
 # --- CI runner (deploy on a push to main) ----------------------------------
