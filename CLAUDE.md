@@ -14,7 +14,7 @@ over a shared Docker network rather than being folded into this one.
 
 ## Commands
 
-Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runner-*` the CI runner, `make clean CONFIRM=1` deletes the stack + volumes.
+Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runners-*` the five CI runners, `make clean CONFIRM=1` deletes the stack + volumes.
 
 The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
 is how a `.env` that `check-env` rejects gets repaired, so requiring it first
