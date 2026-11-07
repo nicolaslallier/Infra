@@ -937,7 +937,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Paging file used %",
+      "title": "Commit charge %",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
