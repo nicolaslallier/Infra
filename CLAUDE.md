@@ -979,8 +979,10 @@ the CLI tests and the image/state checks on the local daemon.
   code on the host. `devbox create`/`token` require a fine-grained token
   (`github_pat_`; one set to "All repositories" cannot be detected), a
   protected default branch, and a token *without* the Administration
-  permission (probed by reading the branch's protection), since that would
-  let it lift the protection. The token sits in the stack env: Portainer,
+  permission (probed by reading the branch's protection, fail-closed: only
+  GitHub's 403 passes; a 404 "Branch not protected" -- rulesets only -- means
+  the token could read it, and any other answer refuses), since that
+  permission would let it lift the protection. The token sits in the stack env: Portainer,
   `docker inspect`, and Portainer's volume on disk hold it; the CLI never
   prints it. `devbox token <name>` replaces it (redeploys the stack).
 - **The Portainer API key stays on the owner's machine**, in the CLI's

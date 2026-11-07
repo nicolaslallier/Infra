@@ -59,15 +59,42 @@ pub fn check_repo(slug: &str, token: &str) -> Result<String, String> {
     // Reading the protection settings takes the Administration permission,
     // which also allows changing them. The token must not have it.
     let r = get(&format!("https://api.github.com/repos/{slug}/branches/{b}/protection"), token)?;
-    if r.status().is_success() {
-        return Err(format!("the token has the Administration permission on {slug}: it could lift {b}'s protection. Give it Contents and Pull requests only"));
-    }
+    let status = r.status().as_u16();
+    admin_probe(status, &r.text().unwrap_or_default()).map_err(|e| format!("{slug}: {e}"))?;
     Ok(repo.default_branch)
+}
+
+/// The answer to GET .../branches/{b}/protection, read fail-closed: Ok only
+/// when GitHub refuses it for lack of the Administration permission.
+pub fn admin_probe(status: u16, body: &str) -> Result<(), String> {
+    const ADMIN: &str = "the token has the Administration permission: it could lift the branch's protection. Give it Contents and Pull requests only";
+    match status {
+        403 => Ok(()),
+        200..=299 => Err(ADMIN.into()),
+        // Only a token that may read protection gets told there is none
+        // (a branch protected by rulesets alone).
+        404 if body.contains("not protected") => Err(ADMIN.into()),
+        s => Err(format!("could not verify the token lacks the Administration permission (GitHub answered {s}); try again")),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admin_probe_fails_closed() {
+        // Only GitHub refusing the permission proves the token lacks it.
+        assert!(admin_probe(403, r#"{"message":"Resource not accessible by personal access token"}"#).is_ok());
+        // An answer at all means the token can read (so change) protection.
+        assert!(admin_probe(200, "{}").is_err());
+        // Rulesets only: an admin token gets 404 "Branch not protected".
+        assert!(admin_probe(404, r#"{"message":"Branch not protected"}"#).is_err());
+        // Anything else cannot prove anything.
+        for s in [404, 429, 500, 502, 301] {
+            assert!(admin_probe(s, r#"{"message":"Not Found"}"#).is_err(), "{s}");
+        }
+    }
 
     #[test]
     fn token_kinds() {
