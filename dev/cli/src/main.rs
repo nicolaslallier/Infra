@@ -33,7 +33,7 @@ enum Cmd {
     Stop { name: String },
     /// Relance une session arrêtée
     Resume { name: String },
-    /// Supprime une session et son volume
+    /// Supprime une session et ses volumes (work, état)
     Delete {
         name: String,
         /// Pas de confirmation

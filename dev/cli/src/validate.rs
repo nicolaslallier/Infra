@@ -5,7 +5,12 @@ pub fn session_name(s: &str) -> Result<&str, String> {
         && ok_char(&b[0])
         && ok_char(&b[b.len() - 1])
         && b.iter().all(|c| ok_char(c) || *c == b'-');
-    if valid {
+    if ["egress", "gateway"].contains(&s) {
+        // dev-egress / dev-gateway are the shared infra's container names.
+        Err(format!(
+            "nom de session '{s}' réservé (dev-{s} est l'infra partagée)"
+        ))
+    } else if valid {
         Ok(s)
     } else {
         Err(format!(
@@ -55,6 +60,14 @@ mod tests {
             assert!(session_name(n).is_err(), "{n}");
         }
         assert!(session_name(&"a".repeat(33)).is_err());
+    }
+
+    #[test]
+    fn reserved_names_refused() {
+        // container_name dev-<name> would collide with the shared infra.
+        for n in ["egress", "gateway"] {
+            assert!(session_name(n).unwrap_err().contains("réservé"), "{n}");
+        }
     }
 
     #[test]

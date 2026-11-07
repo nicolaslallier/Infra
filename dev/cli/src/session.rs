@@ -317,6 +317,15 @@ pub fn resume(cfg: &Config, name: &str) -> Result<()> {
     Ok(())
 }
 
+// Best effort: both volumes are always tried; returns the failures other than "absent".
+pub fn delete_volumes(c: &Client, name: &str) -> Vec<String> {
+    ["work", "state"]
+        .iter()
+        .filter_map(|v| c.delete_volume(&format!("dev-{name}-{v}")).err())
+        .filter(|e| !e.contains("404"))
+        .collect()
+}
+
 pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
     validate::session_name(name).map_err(|e| anyhow!(e))?;
     let c = Client::new(cfg).map_err(|e| anyhow!(e))?;
@@ -324,7 +333,7 @@ pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
     if !yes
         && !dialoguer::Confirm::new()
             .with_prompt(format!(
-                "Supprimer la session '{name}' et son volume /work?"
+                "Supprimer la session '{name}' et ses volumes (/work et état)?"
             ))
             .default(false)
             .interact()?
@@ -335,11 +344,10 @@ pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
         // Volume and ssh entry stay untouched until the stack is really gone.
         bail!("{e}. La pile s'arrête peut-être encore côté serveur (délai de grâce 120 s): relance `devbox delete {name}`");
     }
-    if let Err(e) = c.delete_volume(&format!("dev-{name}-work")) {
-        if !e.contains("404") {
-            eprintln!("avertissement: volume non supprimé: {e}");
-        }
+    for e in delete_volumes(&c, name) {
+        eprintln!("avertissement: volume non supprimé: {e}");
     }
+    // The state volume held the host key: the next session of this name gets a new one.
     for host in [format!("[dev-{name}]:2222"), format!("dev-{name}")] {
         let _ = std::process::Command::new("ssh-keygen")
             .args(["-R", &host])
@@ -352,7 +360,7 @@ pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
     }
     println!("Session '{name}' supprimée (l'état sauvegardé dans le bucket est conservé).");
     if purge {
-        println!("--purge n'est pas automatisé. Pour vider le bucket: rclone purge devbox:devbox/{name} (avec les identifiants S3 devbox)");
+        println!("--purge n'est pas automatisé. Pour vider le bucket (identifiants S3 devbox):\n  rclone purge devbox:devbox/{name}\nLe bucket est versionné: purge laisse les anciennes versions, dont claude/.credentials.json (le jeton Claude). Pour les supprimer:\n  rclone backend cleanup-hidden devbox:devbox/{name}\n(non vérifié contre SeaweedFS: contrôle avec `rclone ls --s3-versions devbox:devbox/{name}`, qui doit être vide)");
     }
     Ok(())
 }

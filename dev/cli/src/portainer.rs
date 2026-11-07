@@ -244,6 +244,30 @@ mod tests {
     }
 
     #[test]
+    fn delete_volumes_tries_both_even_after_a_failure() {
+        let (base, h) = stub(2, "500 Internal Server Error", r#"{"message":"boom"}"#);
+        let errs = crate::session::delete_volumes(&client(&base), "a");
+        let seen = h.join().unwrap();
+        let first = |i: usize| seen[i].lines().next().unwrap().to_string();
+        assert_eq!(
+            first(0),
+            "DELETE /api/endpoints/7/docker/volumes/dev-a-work HTTP/1.1"
+        );
+        assert_eq!(
+            first(1),
+            "DELETE /api/endpoints/7/docker/volumes/dev-a-state HTTP/1.1"
+        );
+        assert_eq!(errs.len(), 2, "{errs:?}");
+    }
+
+    #[test]
+    fn delete_volumes_absent_is_not_an_error() {
+        let (base, h) = stub(2, "404 Not Found", r#"{"message":"no such volume"}"#);
+        assert!(crate::session::delete_volumes(&client(&base), "a").is_empty());
+        assert_eq!(h.join().unwrap().len(), 2);
+    }
+
+    #[test]
     fn http_refused_unless_allowed() {
         assert!(check_url("http://p:9443", false).is_err());
         assert!(check_url("http://p:9443", true).is_ok());
