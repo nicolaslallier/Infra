@@ -419,12 +419,17 @@ DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
 
 # The key and squid.conf are baked into images (build contexts cross DOCKER_HOST,
 # bind mounts would not). DEV_AUTHORIZED_KEYS=<file> is copied over
-# dev/gateway/authorized_keys (gitignored) first; the guard checks what gets baked.
+# dev/gateway/authorized_keys (gitignored), only after the guard accepted it:
+# no PRIVATE KEY anywhere, and every non-comment line a public key (ssh-/ecdsa-/sk-).
 dev-up: ## Build and start dev-egress and dev-gateway (your public key in dev/gateway/authorized_keys, or DEV_AUTHORIZED_KEYS=<file>; needs infra-net)
-	@k=dev/gateway/authorized_keys; \
-	if [ -n "$${DEV_AUTHORIZED_KEYS:-}" ] && ! [ "$$DEV_AUTHORIZED_KEYS" -ef "$$k" ]; then cp "$$DEV_AUTHORIZED_KEYS" "$$k"; fi; \
-	test -f "$$k" && grep -qEv '^[[:space:]]*(#|$$)' "$$k" || { \
-		echo "make: $$k is missing or holds no public key -- copy dev/gateway/authorized_keys.example to it and put your SSH public key in it" >&2; exit 1; }
+	@k=dev/gateway/authorized_keys; src=$${DEV_AUTHORIZED_KEYS:-$$k}; \
+	test -f "$$src" || { echo "make: $$src is missing -- copy dev/gateway/authorized_keys.example to $$k and put your SSH public key in it" >&2; exit 1; }; \
+	rc=0; awk '/PRIVATE KEY/ { priv = 1 } /^[[:space:]]*(#|$$)/ { next } \
+		{ n++; if ($$0 !~ /^[[:space:]]*(ssh-|ecdsa-|sk-)/) bad = 1 } \
+		END { exit priv ? 2 : (n > 0 && !bad) ? 0 : 1 }' "$$src" || rc=$$?; \
+	[ "$$rc" != 2 ] || { echo "make: $$src holds a PRIVATE key -- only the public one (.pub) goes there" >&2; exit 1; }; \
+	[ "$$rc" = 0 ] || { echo "make: $$src holds no public key, or a line that is not one (ssh-/ecdsa-/sk-)" >&2; exit 1; }; \
+	[ "$$src" -ef "$$k" ] || cp "$$src" "$$k"
 	@docker network inspect infra-net >/dev/null 2>&1 || { echo "make: infra-net missing -- run 'make net' (or 'make init')" >&2; exit 1; }
 	$(DEV_COMPOSE) up -d --build
 
