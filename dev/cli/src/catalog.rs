@@ -15,7 +15,7 @@ struct Marketplace {
 }
 
 // ids end up in env var lists and shell-ish contexts: only [A-Za-z0-9._-].
-fn safe_name(s: &str) -> bool {
+pub(crate) fn safe_name(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))

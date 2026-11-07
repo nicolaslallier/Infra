@@ -15,9 +15,27 @@ pub struct Client {
     http: reqwest::blocking::Client,
 }
 
+// The API key is root-equivalent on the daemon: no cleartext unless asked for.
+pub fn check_url(url: &str, allow_http: bool) -> Result<(), String> {
+    if url.starts_with("http://") && !allow_http {
+        return Err("portainer_url en http:// refusé (la clé API circulerait en clair); utilise https:// ou DEVBOX_ALLOW_HTTP=1".into());
+    }
+    Ok(())
+}
+
 impl Client {
     pub fn new(cfg: &Config) -> Result<Client, String> {
+        Self::build(
+            cfg,
+            std::env::var("DEVBOX_ALLOW_HTTP").as_deref() == Ok("1"),
+        )
+    }
+
+    pub fn build(cfg: &Config, allow_http: bool) -> Result<Client, String> {
+        check_url(&cfg.portainer_url, allow_http)?;
         let http = reqwest::blocking::Client::builder()
+            // stop_grace_period is 120 s; stack stop/delete can take that long.
+            .timeout(std::time::Duration::from_secs(300))
             .danger_accept_invalid_certs(cfg.insecure_tls) // Portainer only
             .build()
             .map_err(|e| e.to_string())?;
@@ -223,6 +241,13 @@ mod tests {
             assert!(seen[1].contains(&format!("\"name\":\"{n}\"")), "{n}");
         }
         assert!(seen[1].contains("\"name\":\"dev-a\"") && seen[1].contains("stackFileContent"));
+    }
+
+    #[test]
+    fn http_refused_unless_allowed() {
+        assert!(check_url("http://p:9443", false).is_err());
+        assert!(check_url("http://p:9443", true).is_ok());
+        assert!(check_url("https://p:9443", false).is_ok());
     }
 
     #[test]

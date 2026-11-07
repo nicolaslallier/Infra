@@ -61,6 +61,10 @@ pub fn remove_ssh_block(existing: &str, name: &str) -> String {
             skip = false;
         }
     }
+    // No end marker: never drop to EOF, leave the file as it was.
+    if skip {
+        return existing.to_string();
+    }
     out
 }
 
@@ -96,6 +100,18 @@ pub fn plan_create(name: &str, stacks: &[Stack], max: usize) -> Result<(), Strin
     check_cap(running(stacks), max)
 }
 
+pub fn plugin_id_ok(id: &str) -> bool {
+    matches!(id.split_once('@'), Some((p, m)) if catalog::safe_name(p) && catalog::safe_name(m))
+}
+
+// Missing file means empty; any other error must not turn into a wipe.
+pub fn read_or_empty(p: &std::path::Path) -> std::io::Result<String> {
+    match std::fs::read_to_string(p) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        r => r,
+    }
+}
+
 fn running(stacks: &[Stack]) -> usize {
     stacks
         .iter()
@@ -115,17 +131,54 @@ fn ssh_config_path() -> Result<PathBuf> {
     Ok(home.home_dir().join(".ssh").join("config"))
 }
 
-fn edit_ssh_config(f: impl FnOnce(&str) -> String) -> Result<()> {
+// Returns whether the file content changed. Atomic: temp file, then rename.
+fn edit_ssh_config(f: impl FnOnce(&str) -> String) -> Result<bool> {
     let p = ssh_config_path()?;
     std::fs::create_dir_all(p.parent().unwrap())?;
-    let cur = std::fs::read_to_string(&p).unwrap_or_default();
-    std::fs::write(&p, f(&cur)).with_context(|| format!("écriture de {}", p.display()))
+    let cur = read_or_empty(&p).with_context(|| format!("lecture de {}", p.display()))?;
+    let new = f(&cur);
+    if new == cur {
+        return Ok(false);
+    }
+    let tmp = p.with_extension("devbox-tmp");
+    std::fs::write(&tmp, &new).with_context(|| format!("écriture de {}", tmp.display()))?;
+    if std::fs::rename(&tmp, &p).is_err() {
+        // Windows: rename onto an existing file can fail.
+        let _ = std::fs::remove_file(&p);
+        std::fs::rename(&tmp, &p).with_context(|| format!("remplacement de {}", p.display()))?;
+    }
+    Ok(true)
+}
+
+pub fn finish_create(
+    client: &Client,
+    cfg: &Config,
+    name: &str,
+    slug: &str,
+    token: &str,
+    plugins: &[String],
+    pubkey: &str,
+) -> Result<()> {
+    let env = stack_env(cfg, name, slug, token, plugins, pubkey);
+    client
+        .create_stack(&format!("dev-{name}"), COMPOSE, &env)
+        .map_err(|e| anyhow!(e))?;
+    let entry = ssh_config_entry(cfg, name);
+    if let Err(e) = edit_ssh_config(|c| upsert_ssh_block(c, &entry, name)) {
+        bail!("session créée mais ~/.ssh/config non mis à jour ({e}). Ajoute ce bloc à la main:\n{entry}");
+    }
+    println!("Session '{name}' créée.\n  ssh dev-{name}\nAu premier lancement: tape `claude` puis connecte-toi avec le lien d'abonnement.");
+    Ok(())
 }
 
 pub fn create(cfg: &Config, name: &str, repo: Option<String>, plugins: Vec<String>) -> Result<()> {
     validate::session_name(name).map_err(|e| anyhow!(e))?; // before any network call
+    if let Some(bad) = plugins.iter().find(|p| !plugin_id_ok(p)) {
+        bail!("plugin invalide '{bad}' (attendu: nom@marketplace, [A-Za-z0-9._-])");
+    }
     let client = Client::new(cfg).map_err(|e| anyhow!(e))?;
     let stacks = client.list_stacks().map_err(|e| anyhow!(e))?;
+    // ponytail: check-then-act; concurrent invocations can exceed the cap by one (single owner).
     plan_create(name, &stacks, cfg.max_active).map_err(|e| anyhow!(e))?;
 
     let pubkey = pubkey_line(
@@ -155,13 +208,7 @@ pub fn create(cfg: &Config, name: &str, repo: Option<String>, plugins: Vec<Strin
         plugins
     };
 
-    let env = stack_env(cfg, name, &slug, &token, &plugins, &pubkey);
-    client
-        .create_stack(&format!("dev-{name}"), COMPOSE, &env)
-        .map_err(|e| anyhow!(e))?;
-    edit_ssh_config(|c| upsert_ssh_block(c, &ssh_config_entry(cfg, name), name))?;
-    println!("Session '{name}' créée.\n  ssh dev-{name}\nAu premier lancement: tape `claude` puis connecte-toi avec le lien d'abonnement.");
-    Ok(())
+    finish_create(&client, cfg, name, &slug, &token, &plugins, &pubkey)
 }
 
 fn pick_plugins(cfg: &Config) -> Result<Vec<String>> {
@@ -177,7 +224,11 @@ fn pick_plugins(cfg: &Config) -> Result<Vec<String>> {
         .with_prompt("Plugins (espace pour cocher)")
         .items(&labels)
         .interact()?;
-    Ok(sel.into_iter().map(|i| all[i].id.clone()).collect())
+    let ids: Vec<String> = sel.into_iter().map(|i| all[i].id.clone()).collect();
+    if let Some(bad) = ids.iter().find(|p| !plugin_id_ok(p)) {
+        bail!("plugin invalide '{bad}' dans le catalogue");
+    }
+    Ok(ids)
 }
 
 pub fn list(cfg: &Config) -> Result<()> {
@@ -217,10 +268,6 @@ pub fn resume(cfg: &Config, name: &str) -> Result<()> {
 
 pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
     validate::session_name(name).map_err(|e| anyhow!(e))?;
-    if purge {
-        println!("--purge n'est pas implémenté. Pour vider le bucket: rclone purge devbox:devbox/{name} (avec les identifiants S3 devbox)");
-        return Ok(());
-    }
     let c = Client::new(cfg).map_err(|e| anyhow!(e))?;
     let id = find(&c.list_stacks().map_err(|e| anyhow!(e))?, name)?.id;
     if !yes
@@ -233,17 +280,29 @@ pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
     {
         bail!("annulé");
     }
-    c.delete(id).map_err(|e| anyhow!(e))?;
+    if let Err(e) = c.delete(id) {
+        // Volume and ssh entry stay untouched until the stack is really gone.
+        bail!("{e}. La pile s'arrête peut-être encore côté serveur (délai de grâce 120 s): relance `devbox delete {name}`");
+    }
     if let Err(e) = c.delete_volume(&format!("dev-{name}-work")) {
         if !e.contains("404") {
             eprintln!("avertissement: volume non supprimé: {e}");
         }
     }
-    let _ = std::process::Command::new("ssh-keygen")
-        .args(["-R", &format!("dev-{name}")])
-        .output();
-    edit_ssh_config(|cur| remove_ssh_block(cur, name))?;
+    for host in [format!("[dev-{name}]:2222"), format!("dev-{name}")] {
+        let _ = std::process::Command::new("ssh-keygen")
+            .args(["-R", &host])
+            .output();
+    }
+    match edit_ssh_config(|cur| remove_ssh_block(cur, name)) {
+        Ok(true) => {}
+        Ok(false) => eprintln!("avertissement: bloc `# devbox: {name}` absent ou non terminé dans ~/.ssh/config, laissé tel quel"),
+        Err(e) => eprintln!("avertissement: ~/.ssh/config non modifié: {e}"),
+    }
     println!("Session '{name}' supprimée (l'état sauvegardé dans le bucket est conservé).");
+    if purge {
+        println!("--purge n'est pas automatisé. Pour vider le bucket: rclone purge devbox:devbox/{name} (avec les identifiants S3 devbox)");
+    }
     Ok(())
 }
 
@@ -358,16 +417,65 @@ mod tests {
     }
 
     #[test]
-    fn errors_never_carry_secrets() {
-        let c = cfg();
-        let env = stack_env(&c, "a", "o/r", "ghp_TOKEN", &[], "ssh-ed25519 AAA");
-        // the error paths format only names/numbers, never the env.
-        let all = format!(
-            "{:?} {} {}",
-            c,
-            check_cap(4, 4).unwrap_err(),
-            pubkey_line("PRIVATE KEY").unwrap_err()
+    fn unterminated_block_left_alone() {
+        let t = "Host a\n  User x\n# devbox: foo\nHost dev-foo\n  Port 1\nHost b\n  User y\n";
+        assert_eq!(remove_ssh_block(t, "foo"), t);
+        let ok = "Host a\n# devbox: foo\nHost dev-foo\n# devbox-end: foo\nHost b\n";
+        assert_eq!(remove_ssh_block(ok, "foo"), "Host a\nHost b\n");
+    }
+
+    #[test]
+    fn plugin_ids() {
+        for bad in ["a,b@m", "p@m;x", "p", "@m", "p@", "a@b@c", "p@m "] {
+            assert!(!plugin_id_ok(bad), "{bad}");
+        }
+        assert!(plugin_id_ok("p@m") && plugin_id_ok("my.plug-in_1@official-mkt"));
+    }
+
+    #[test]
+    fn read_or_empty_only_for_missing() {
+        let d = std::env::temp_dir().join(format!("devbox-t-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(read_or_empty(&d.join("nope")).unwrap(), "");
+        std::fs::write(d.join("bad"), [0xff, 0xfe]).unwrap();
+        assert!(read_or_empty(&d.join("bad")).is_err());
+        assert!(read_or_empty(&d).is_err()); // a directory: not NotFound
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn failing_create_leaks_no_secret() {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut c = cfg();
+        c.portainer_url = format!("http://{}", l.local_addr().unwrap());
+        let h = std::thread::spawn(move || {
+            let (mut s, _) = l.accept().unwrap();
+            let mut b = [0u8; 8192];
+            let _ = s.read(&mut b);
+            let r = "{\"message\":\"boom\"}";
+            let _ = write!(
+                s,
+                "HTTP/1.1 500 X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{r}",
+                r.len()
+            );
+        });
+        let e = finish_create(
+            &Client::build(&c, true).unwrap(),
+            &c,
+            "aaa",
+            "o/r",
+            "ghp_TOKEN",
+            &[],
+            "ssh-ed25519 AAA",
+        )
+        .unwrap_err();
+        h.join().unwrap();
+        let e = format!("{e} {e:?}");
+        assert!(e.contains("500"), "{e}");
+        assert!(
+            !e.contains("ghp_TOKEN") && !e.contains("S3") && !e.contains("\"K\""),
+            "{e}"
         );
-        assert!(!all.contains("ghp_TOKEN") && !all.contains("S3\"") && env.len() == 8);
     }
 }
