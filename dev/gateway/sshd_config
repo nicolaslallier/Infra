@@ -5,8 +5,6 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 AuthorizedKeysFile /etc/ssh/authorized_keys/%u
-# The key file is a read-only bind mount owned by whoever runs `make dev-up`.
-StrictModes no
 AllowUsers jump
 # OpenSSH PermitOpen has no host wildcard (dev-*:2222 denies everything). The
 # gateway sits on infra-net and so can reach ANY host on port 2222 there; the

@@ -10,21 +10,21 @@
 services:
   dev-egress:
     container_name: dev-egress
-    image: ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
+    # Pinned squid + squid.conf, built on the daemon (`make dev-up` builds):
+    # files reach a remote DOCKER_HOST through a build context, never a bind mount.
+    build: ./dev/egress
+    image: dev-egress:1
     restart: unless-stopped
-    volumes:
-      - ${DEV_DIR:-./dev}/egress/squid.conf:/etc/squid/squid.conf:ro
     networks: [dev-net, dev-out, infra-net]
 
   dev-gateway:
     container_name: dev-gateway
-    build: ${DEV_DIR:-./dev}/gateway
+    build: ./dev/gateway # bakes in dev/gateway/authorized_keys
     image: dev-gateway:1
     restart: unless-stopped
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, SYS_CHROOT, CHOWN, DAC_OVERRIDE, KILL]
     volumes:
-      - ${DEV_AUTHORIZED_KEYS:-./dev/gateway/authorized_keys}:/etc/ssh/authorized_keys/jump:ro
       - gateway-hostkeys:/etc/ssh/hostkeys
     networks: [dev-net, infra-net]
 
@@ -35,6 +35,11 @@ networks:
   dev-net:
     name: dev-net
     internal: true
+    # Fixed so squid.conf can allow this subnet only: dev-egress is also on
+    # infra-net, where any container could otherwise use it as a proxy.
+    ipam:
+      config:
+        - subnet: 10.250.77.0/24
   dev-out:
   infra-net:
     external: true

@@ -15,7 +15,8 @@ SHELL := bash
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runner-up runner-down runner-restart runner-logs runner-status runner-pull \
 	runner-shell runner-env check-runner-env \
-	runner-ea-up runner-ea-down runner-ea-logs
+	runner-ea-up runner-ea-down runner-ea-logs \
+	dev-up dev-down dev-logs dev-status
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -416,11 +417,15 @@ clean: ## Delete the stack and its volumes (CONFIRM=1 required)
 # containers themselves are driven by the devbox CLI, not from here.
 DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
 
-dev-up: check-env ## Start dev-egress and dev-gateway (needs your key in dev/gateway/authorized_keys, untracked)
-	@f=$${DEV_AUTHORIZED_KEYS:-dev/gateway/authorized_keys}; \
-	test -f "$$f" && grep -qEv '^[[:space:]]*(#|$$)' "$$f" || { \
-		echo "make: $$f is missing or holds no public key -- copy dev/gateway/authorized_keys.example to dev/gateway/authorized_keys and put your SSH public key in it" >&2; exit 1; }
-	@docker network inspect infra-net >/dev/null 2>&1 || { echo "make: infra-net missing -- run 'make net'" >&2; exit 1; }
+# The key and squid.conf are baked into images (build contexts cross DOCKER_HOST,
+# bind mounts would not). DEV_AUTHORIZED_KEYS=<file> is copied over
+# dev/gateway/authorized_keys (gitignored) first; the guard checks what gets baked.
+dev-up: ## Build and start dev-egress and dev-gateway (your public key in dev/gateway/authorized_keys, or DEV_AUTHORIZED_KEYS=<file>; needs infra-net)
+	@k=dev/gateway/authorized_keys; \
+	if [ -n "$${DEV_AUTHORIZED_KEYS:-}" ] && ! [ "$$DEV_AUTHORIZED_KEYS" -ef "$$k" ]; then cp "$$DEV_AUTHORIZED_KEYS" "$$k"; fi; \
+	test -f "$$k" && grep -qEv '^[[:space:]]*(#|$$)' "$$k" || { \
+		echo "make: $$k is missing or holds no public key -- copy dev/gateway/authorized_keys.example to it and put your SSH public key in it" >&2; exit 1; }
+	@docker network inspect infra-net >/dev/null 2>&1 || { echo "make: infra-net missing -- run 'make net' (or 'make init')" >&2; exit 1; }
 	$(DEV_COMPOSE) up -d --build
 
 dev-down: ## Stop dev-egress and dev-gateway (sessions lose their proxy; they keep running)
