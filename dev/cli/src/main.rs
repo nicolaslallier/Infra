@@ -1,5 +1,6 @@
 // ponytail: config/validate are consumed by Tasks 5-6; drop this allow then.
 #![allow(dead_code)]
+mod catalog;
 mod config;
 mod validate;
 
