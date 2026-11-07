@@ -30,7 +30,7 @@ pub fn check_cap(active: usize, max: usize) -> Result<(), String> {
 /// The `~/.ssh/config` block that makes `ssh dev-<name>` go through the gateway.
 pub fn ssh_config_entry(cfg: &Config, name: &str) -> String {
     format!(
-        "Host dev-{name}\n    HostName dev-{name}\n    User dev\n    Port 2222\n    ProxyJump jump@{}:{}\n",
+        "Host dev-{name}\n    HostName dev-{name}\n    User dev\n    Port 2222\n    ProxyJump jump@{}:{}\n    ForwardAgent no\n",
         cfg.ssh_host, cfg.ssh_port
     )
 }
@@ -93,7 +93,7 @@ mod tests {
         let e = ssh_config_entry(&cfg, "jarvis");
         let lines: Vec<&str> = e.lines().map(str::trim).collect();
         assert_eq!(lines[0], "Host dev-jarvis");
-        for want in ["HostName dev-jarvis", "User dev", "Port 2222", "ProxyJump jump@192.168.2.10:2222"] {
+        for want in ["HostName dev-jarvis", "User dev", "Port 2222", "ProxyJump jump@192.168.2.10:2222", "ForwardAgent no"] {
             assert!(lines.contains(&want), "missing {want:?} in\n{e}");
         }
     }

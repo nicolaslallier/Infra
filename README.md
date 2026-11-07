@@ -1115,14 +1115,18 @@ Claude Code in a container per GitHub repo, over SSH, with egress limited to
 Anthropic, GitHub and the package registries. Design and caveats: CLAUDE.md
 "Dev sessions".
 
-Once, on the stack:
+Once, on the stack. **The vault key comes first, before this change is
+merged:** `check-env` requires `DEVBOX_S3_SECRET_KEY`, and the merge itself
+deploys, rendering `.env` from the vault.
 
 ```bash
+read -rs K && printf '%s' "$K" | make vault-cli args="kv patch -mount=infra env DEVBOX_S3_SECRET_KEY=-"; unset K
+#   (K from: openssl rand -hex 24)  -- then merge; after the deploy:
+make vault-env
+make s3-provision app=devbox versioned=1
 # your public key(s) into dev/gateway/authorized_keys, commit, then:
 make dev-image                      # builds devbox-session:1 from main
 make dev-up                         # egress proxy + SSH gateway
-# DEVBOX_S3_SECRET_KEY in the vault (openssl rand -hex 24), make vault-env, then:
-make s3-provision app=devbox versioned=1
 ```
 
 Once, on each Mac/PC: `cargo install --path dev/cli`, then write

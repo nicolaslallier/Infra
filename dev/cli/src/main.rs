@@ -88,6 +88,7 @@ fn create(cfg: &config::Config, name: &str, repo: Option<String>, mut plugins: V
         .with_prompt(format!("GitHub token for {slug} only (fine-grained, this one repository)"))
         .interact()
         .map_err(|e| e.to_string())?;
+    github::check_token_kind(&token)?;
     if !github::main_is_protected(&slug, &token)? {
         return Err(format!("main of {slug} is not protected: turn on branch protection for main first (Settings -> Branches)"));
     }

@@ -8,7 +8,6 @@ export GH_TOKEN
 
 install -m 600 /dev/null ~/.ssh/authorized_keys
 printf '%s\n' "$SSH_PUBKEY" > ~/.ssh/authorized_keys
-[ -f ~/.ssh/ssh_host_ed25519_key ] || ssh-keygen -q -t ed25519 -N '' -f ~/.ssh/ssh_host_ed25519_key
 
 mkdir -p ~/.config/rclone
 cat > ~/.config/rclone/rclone.conf <<CONF
@@ -22,7 +21,11 @@ CONF
 chmod 600 ~/.config/rclone/rclone.conf
 
 gh auth setup-git
-if rclone lsf --max-depth 1 "s3:devbox/$SESSION/" 2>/dev/null | grep -q .; then
+# Listed into a variable so that an unreachable bucket fails the start (set -e;
+# the container restarts and tries again) instead of reading as "empty": a
+# fresh clone would then be pushed over the saved work 60 s later.
+saved="$(rclone lsf --max-depth 1 "s3:devbox/$SESSION/")"
+if [ -n "$saved" ]; then
   echo "restoring $SESSION from the bucket"
   sync.sh restore
 fi
@@ -30,6 +33,13 @@ if [ ! -d /work/.git ]; then
   echo "cloning $REPO_URL"
   gh repo clone "$REPO_URL" /work
 fi
+
+# Host key on the /work volume, so a recreated container (Portainer's stop
+# and start recreate it) keeps the fingerprint clients trust. Not synced to
+# the shared bucket (sync.sh), and kept out of git.
+mkdir -p /work/.devbox
+[ -f /work/.devbox/ssh_host_ed25519_key ] || ssh-keygen -q -t ed25519 -N '' -f /work/.devbox/ssh_host_ed25519_key
+grep -qx '/.devbox/' /work/.git/info/exclude 2>/dev/null || echo '/.devbox/' >> /work/.git/info/exclude
 
 # Marketplaces first (comma-separated GitHub repos), then plugin@marketplace.
 # A plugin that fails to install is a warning: the session is still usable.
@@ -52,14 +62,15 @@ sync_pid=$!
 
 cat > ~/.ssh/sshd_config <<CONF
 Port 2222
-HostKey $HOME/.ssh/ssh_host_ed25519_key
+HostKey /work/.devbox/ssh_host_ed25519_key
 AuthorizedKeysFile $HOME/.ssh/authorized_keys
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 UsePAM no
 PermitUserEnvironment yes
-AllowTcpForwarding no
-X11Forwarding no
+# No agent/TCP/X11 forwarding: a forwarded agent would let the session push
+# with the owner's SSH key, past the one-repo token.
+DisableForwarding yes
 PidFile none
 Subsystem sftp internal-sftp
 CONF

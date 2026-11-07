@@ -944,6 +944,11 @@ and the plumbing in `docker-compose.dev.yml` (project `dev`, `make dev-up`):
   `devbox delete x` then `devbox create x` gets its work and its Claude
   login back. `~/.claude` holds the subscription credentials
   (`CLAUDE_CONFIG_DIR`), so Claude, and the bucket, can read them.
+- `DEVBOX_S3_SECRET_KEY` is required by `check-env`: put it in the vault
+  before merging anything that requires it (as with `MORIA_AMQP_PASSWORD`),
+  since the merge's CI deploy renders `.env` from the vault and fails without
+  it. `devbox create` also refuses a token that is not fine-grained
+  (`github_pat_`); one set to "All repositories" cannot be detected.
 - **Ceiling: one S3 identity for every session** (`devbox`,
   `DEVBOX_S3_SECRET_KEY`). A compromised session can read every other
   session's prefix, credentials included, and write it, e.g. a
