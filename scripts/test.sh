@@ -145,6 +145,19 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 	echo "== runners-stack selftest"
 	if out="$(cd "$ws" && bash scripts/runners-stack.sh selftest 2>&1)"; then pass "runners-stack.sh selftest"; else fail "runners-stack.sh selftest" "$out"; fi
 
+	echo "== PR workflow"
+	wf=.github/workflows/test.yml
+	if [ -f "$wf" ] && uv_py --with pyyaml python - "$PWD/$wf" <<-'PY'
+		import sys, yaml
+		d = yaml.safe_load(open(sys.argv[1]))
+		on = d.get(True, d.get("on"))  # YAML 1.1 reads a bare `on` as True
+		assert list(on) == ["pull_request"] and on["pull_request"] == {"branches": ["main"]}, on
+		assert d["jobs"]["test"]["runs-on"] == "ubuntu-latest", d["jobs"]["test"]["runs-on"]
+		assert d["permissions"] == {"contents": "read"}, d["permissions"]
+	PY
+	then pass "test.yml: pull_request on main, no paths, hosted runner, read-only"; else fail "test.yml: pull_request on main, no paths, hosted runner, read-only"; fi
+	if [ -f "$wf" ] && ! grep -v '^ *#' "$wf" | grep -qE 'self-hosted|secrets\.'; then pass "test.yml: no self-hosted label, no secrets"; else fail "test.yml: no self-hosted label, no secrets"; fi
+
 	echo "== runners Makefile targets"
 	if ! grep -qE '^runner(-ea)?-' Makefile; then pass "no runner-* / runner-ea-* targets"; else fail "no runner-* / runner-ea-* targets" "$(grep -nE '^runner(-ea)?-' Makefile)"; fi
 	if out="$(make -n runners-up FORCE=1 2>&1)" && grep -q 'scripts/runners-stack.sh up' <<<"$out"; then pass "make runners-up calls runners-stack.sh up"; else fail "make runners-up calls runners-stack.sh up" "$out"; fi
@@ -177,7 +190,7 @@ FAKE
 	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\n'
 	if out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$good" 2>&1)" \
 		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 5 ] \
-		&& [ "$(stat -f %Lp "$sb/.runner.env" 2>/dev/null || stat -c %a "$sb/.runner.env")" = 600 ]; then
+		&& [ "$(stat -c %a "$sb/.runner.env" 2>/dev/null || stat -f %Lp "$sb/.runner.env")" = 600 ]; then
 		pass "gen-runner-env writes five tokens, mode 600"
 	else
 		fail "gen-runner-env writes five tokens, mode 600" "$out"
