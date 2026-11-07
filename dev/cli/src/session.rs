@@ -131,23 +131,74 @@ fn ssh_config_path() -> Result<PathBuf> {
     Ok(home.home_dir().join(".ssh").join("config"))
 }
 
-// Returns whether the file content changed. Atomic: temp file, then rename.
+// Returns whether the file content changed.
 fn edit_ssh_config(f: impl FnOnce(&str) -> String) -> Result<bool> {
-    let p = ssh_config_path()?;
+    let mut p = ssh_config_path()?;
     std::fs::create_dir_all(p.parent().unwrap())?;
+    // A symlinked config (dotfiles manager): edit the real file, keep the link.
+    if let Ok(real) = std::fs::canonicalize(&p) {
+        p = real;
+    }
     let cur = read_or_empty(&p).with_context(|| format!("lecture de {}", p.display()))?;
     let new = f(&cur);
     if new == cur {
         return Ok(false);
     }
-    let tmp = p.with_extension("devbox-tmp");
-    std::fs::write(&tmp, &new).with_context(|| format!("écriture de {}", tmp.display()))?;
-    if std::fs::rename(&tmp, &p).is_err() {
-        // Windows: rename onto an existing file can fail.
-        let _ = std::fs::remove_file(&p);
-        std::fs::rename(&tmp, &p).with_context(|| format!("remplacement de {}", p.display()))?;
-    }
+    write_atomic(&p, &new)?;
     Ok(true)
+}
+
+// Temp file in the same directory (created exclusively, 0600 on unix), then rename.
+// On any failure the original is left untouched and the temp file removed.
+pub fn write_atomic(p: &std::path::Path, content: &str) -> Result<()> {
+    use std::io::Write;
+    let mut name = p.file_name().context("chemin sans nom")?.to_os_string();
+    name.push(format!(".devbox-tmp-{}", std::process::id()));
+    let tmp = p.with_file_name(name);
+    // Stale temp from a crashed run of this pid: only ever a regular file (never a symlink).
+    if std::fs::symlink_metadata(&tmp).is_ok_and(|m| m.is_file()) {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    let res = (|| -> Result<()> {
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            o.mode(0o600);
+        }
+        let mut f = o
+            .open(&tmp)
+            .with_context(|| format!("création de {}", tmp.display()))?;
+        f.write_all(content.as_bytes())?;
+        f.sync_all()?;
+        drop(f);
+        if let Ok(m) = std::fs::metadata(p) {
+            std::fs::set_permissions(&tmp, m.permissions())?;
+        }
+        if let Err(e) = std::fs::rename(&tmp, p) {
+            #[cfg(windows)]
+            if p.is_file() {
+                // Windows can't rename onto an existing file: park the original, never delete it.
+                let mut bak = p.as_os_str().to_os_string();
+                bak.push(".devbox-bak");
+                let bak = std::path::PathBuf::from(bak);
+                std::fs::rename(p, &bak)?;
+                if let Err(e2) = std::fs::rename(&tmp, p) {
+                    let _ = std::fs::rename(&bak, p);
+                    return Err(e2).with_context(|| format!("remplacement de {}", p.display()));
+                }
+                let _ = std::fs::remove_file(&bak);
+                return Ok(());
+            }
+            return Err(e).with_context(|| format!("remplacement de {}", p.display()));
+        }
+        Ok(())
+    })();
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res
 }
 
 pub fn finish_create(
@@ -451,8 +502,26 @@ mod tests {
         c.portainer_url = format!("http://{}", l.local_addr().unwrap());
         let h = std::thread::spawn(move || {
             let (mut s, _) = l.accept().unwrap();
-            let mut b = [0u8; 8192];
-            let _ = s.read(&mut b);
+            // read headers + Content-Length bytes so the reply can't race a reset
+            let mut buf = vec![];
+            let mut b = [0u8; 4096];
+            loop {
+                let k = s.read(&mut b).unwrap();
+                buf.extend_from_slice(&b[..k]);
+                let t = String::from_utf8_lossy(&buf).to_lowercase();
+                if let Some(i) = t.find("\r\n\r\n") {
+                    let cl = t[..i]
+                        .lines()
+                        .find_map(|l| {
+                            l.strip_prefix("content-length: ")
+                                .map(|v| v.trim().parse::<usize>().unwrap())
+                        })
+                        .unwrap_or(0);
+                    if buf.len() >= i + 4 + cl {
+                        break;
+                    }
+                }
+            }
             let r = "{\"message\":\"boom\"}";
             let _ = write!(
                 s,
@@ -477,5 +546,53 @@ mod tests {
             !e.contains("ghp_TOKEN") && !e.contains("S3") && !e.contains("\"K\""),
             "{e}"
         );
+    }
+
+    #[test]
+    fn write_atomic_replaces_and_keeps_mode() {
+        let d = std::env::temp_dir().join(format!("devbox-wa-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        let f = d.join("config");
+        std::fs::write(&f, "old").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        write_atomic(&f, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        // fresh file on unix is 0600 too
+        let g = d.join("fresh");
+        write_atomic(&g, "x").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&g).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 2, "no temp left");
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn write_atomic_failure_keeps_original() {
+        let d = std::env::temp_dir().join(format!("devbox-wf-{}", std::process::id()));
+        let dest = d.join("config");
+        std::fs::create_dir_all(&dest).unwrap(); // non-empty dir: rename onto it fails
+        std::fs::write(dest.join("keep"), "orig").unwrap();
+        assert!(write_atomic(&dest, "new").is_err());
+        assert_eq!(std::fs::read_to_string(dest.join("keep")).unwrap(), "orig");
+        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "temp removed");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 }
