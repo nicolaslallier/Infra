@@ -1,6 +1,6 @@
 # Redeploy the stack through Portainer after a push to main.
 #
-# runs-on is the self-hosted runner from docker-compose.runner.yml, and it
+# runs-on is the self-hosted runner from docker-compose.runners.yml (runner-infra), and it
 # has to be: Portainer publishes its API on ${LAN_IP}:9443 and is otherwise
 # only reachable on infra-net, with no public ingress to either, so a
 # GitHub-hosted runner cannot deploy this stack at all. See CLAUDE.md

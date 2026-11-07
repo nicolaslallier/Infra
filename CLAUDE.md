@@ -14,7 +14,7 @@ over a shared Docker network rather than being folded into this one.
 
 ## Commands
 
-Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runner-*` the CI runner, `make dev-*` the dev-session plumbing (see "Dev sessions"), `make clean CONFIRM=1` deletes the stack + volumes.
+Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runners-*` the five CI runners, `make dev-*` the dev-session plumbing (see "Dev sessions"), `make clean CONFIRM=1` deletes the stack + volumes.
 
 The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
 is how a `.env` that `check-env` rejects gets repaired, so requiring it first
@@ -458,8 +458,9 @@ Things that look odd and are load-bearing:
 ### CI: deploying on a push to main
 
 `.github/workflows/deploy.yml` redeploys the stack when main moves, running
-`scripts/ci-deploy.sh` on a self-hosted runner
-(`docker-compose.runner.yml`, `make runner-up`). `workflow_dispatch` runs the
+`scripts/ci-deploy.sh` on the self-hosted runner labelled `infra` — one of
+five (`darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo) in
+`docker-compose.runners.yml`, `make runners-up`. `workflow_dispatch` runs the
 same thing by hand, with a `pull_images` input that switches `make up` for
 `make pull`.
 
@@ -469,14 +470,40 @@ the whole design follows from. Portainer publishes its API on
 ingress to either — the same reason `prefect/flows/pr_validation.py` exists rather than a
 GitHub Actions job. The runner has to be on this LAN.
 
-Five things here are load-bearing.
+Several things here are load-bearing.
 
-- **The runner is its own compose project**, like Portainer and for the same
-  reason: every `up` force-recreates every container in `infra`, and a runner
-  recreated mid-job is a job that never reports. `make runner-up` drives it;
-  `--env-file .runner.env` on that target is not cosmetic, since without it
-  compose would interpolate the runner's one setting out of the stack's
-  entire secret set.
+- **The runners are their own Portainer stack (`runners`)**, like Portainer
+  itself and for the same reason: every `make up` force-recreates every
+  container in `infra`, and a runner recreated mid-job is a job that never
+  reports. `make runners-up` drives it through `scripts/runners-stack.sh`
+  (needs `PORTAINER_API_KEY` and `PORTAINER_PINNEDPUBKEY` in `.portainer.env`;
+  `INFRA_HOST` comes from the Makefile, `PORTAINER_URL` optionally overrides). **Portainer reads the compose from
+  GitHub main**, so merge before `make runners-up`. The env it sends is
+  `.runner.env` (five PATs) plus `INFRA_DIR`, never `.env`: that file is the
+  stack's whole secret set.
+- **One fine-grained PAT per repo** (`GH_RUNNER_TOKEN_<NAME>`, Administration:
+  read and write on that repo only). This limits the damage only as long as no
+  socket-holding runner is compromised: any job on `darkangel`, `heaven` or
+  `infra` holds `/var/run/docker.sock`, so it can `docker inspect`/`exec` into
+  the other runners and read all five tokens (admin on all five repos, on top
+  of root on the daemon) and tamper with the `ea` and `moria` runners. That is
+  the accepted ceiling. Follow-ups: darkangel could use its own
+  `PORTAINER_DIRECT` mode and drop the socket; heaven's `scripts/ci-deploy.sh`
+  uses `docker run`, so it needs a rewrite or keeps the socket.
+  A missing one fails `runners-up` by name rather than starting four of five.
+- **Privileges differ per runner.** The Docker socket (root on the daemon) is
+  mounted only on `darkangel`, `heaven` and `infra`, whose deploys need it;
+  `ea` and `moria` get none (`ea` keeps its CA mount and `extra_hosts`).
+  A runner is scoped to one repo, so a workflow elsewhere cannot use it.
+- **Self-hosted labels are never for PRs.** No workflow running on one of the
+  five labels may trigger on `pull_request`/`pull_request_target`; PR checks
+  (`test.yml`) run GitHub-hosted. `main` in each repo is meant to be guarded
+  by a PR-required ruleset (`main-protection`, no bypass actors), applied
+  repo by repo with the owner's go-ahead, Infra last: apply infra only after
+  `test` has run green on a real PR (`github-harden.sh --apply` refuses while a
+  required check has no successful run on the default branch). Escape hatch if
+  `test` goes red and blocks every Infra PR: repo Settings → Rules → Rulesets →
+  disable `main-protection`.
 - **The deploy acts on the *host* checkout, not the runner's.** Portainer
   takes `docker-compose.yml` from GitHub main but every bind mount from the
   checkout at `INFRA_CHECKOUT` (see "Portainer-managed stack"), so that
@@ -511,50 +538,34 @@ Five things here are load-bearing.
   `check-docker.sh` asserts macOS/Docker-Desktop facts that mean nothing in
   here.
 
-The `runner-*` targets are the whole management surface, and two of their
-behaviours are load-bearing rather than polish. **`runner-status` reports
-both sides** — the container on this daemon *and* `GET
-/repos/<repo>/actions/runners` — because the runner is `EPHEMERAL` and the
-two routinely disagree: it de-registers after every job, so a healthy
-container is no evidence GitHub has a runner for the next deploy, and
-GitHub never surfaces the gap (a job matching no labels queues silently
-instead of failing). It reads the same PAT from `.runner.env`, so there is
-nothing extra to provision, and it degrades to a warning — not an error —
-when jq, the token or the network is missing, since an operator who cannot
-reach GitHub must still be able to stop the runner. It does, however,
-**separate a PAT GitHub refuses from a GitHub it cannot reach**, and reports
-the first by name rather than as "unknown": that is the same credential the
-runner's entrypoint exchanges for a registration token on every start, so a
-401 here is the `Obtaining the token of the runner` → `curl: (22) ... 401` →
-`Invalid configuration provided for token` loop in `make runner-logs`, seen
-from the side that can explain it. Nothing else in the repo does — the
-container restarts forever, `make runner-up` reported success, and the next
-push to main queues its deploy silently. The fix is a new PAT
-(`make runner-env FORCE=1 && make runner-restart`); `gen-runner-env.sh`
-validates tokens when it writes them, but PATs expire afterwards.
-**`runner-down`,
-`-restart` and `-pull` refuse while a job is running** (`--busy`, exit 3;
-`FORCE=1` overrides), scoped to the `infra` label because that label is the
-contract with `deploy.yml`: recreating the container mid-job kills it and
-the workflow run never reports a result. `runner-pull` exists because the
-image tag moves on purpose — GitHub retires old runner versions server-side
-— so it is the fix for a runner the service has stopped accepting, not
-routine housekeeping.
+The `runners-*` targets are the whole management surface, and two behaviours
+are load-bearing. **`runners-status` reports both sides, per repo** — the
+container on the Docker host (`DOCKER_HOST`) *and* `GET /repos/<repo>/actions/runners` — because
+the runners are `EPHEMERAL` and the two routinely disagree: they de-register
+after every job, so a healthy container is no evidence GitHub has a runner for
+the next deploy, and a job matching no labels queues silently instead of
+failing. It separates a PAT GitHub refuses (named, per repo: the 401 loop in
+`make runners-logs`) from a GitHub it cannot reach (a warning). The fix for a
+bad PAT is `make runners-env FORCE=1 && make runners-up`; `gen-runner-env.sh`
+validates all five when it writes them, but PATs expire afterwards.
+**`runners-up`, `-down`, `-pull` and `-restart` are stack redeploys** that
+recreate all five runners, and refuse while *any* runner has a job (exit 3;
+`FORCE=1` overrides): recreating mid-job kills it and the run never reports.
+`runners-restart` is `runners-up`. `runners-pull` re-pulls the image, whose
+tag moves on purpose (GitHub retires old runner versions server-side). Only
+`runners-logs` is not a Portainer call: compose against the Docker host
+(`DOCKER_HOST`; from the Mac that is the deploy host over ssh, not a local
+daemon), as is the container half of `runners-status`.
 
 `INFRA_CHECKOUT` and `INFRA_HOST` come from repository variables
 (Settings → Secrets and variables → Actions → Variables) and fall back to the
-two values the Makefile already hard-codes for the Mac. `GH_RUNNER_TOKEN` —
-a PAT allowed to register runners — lives in `.runner.env`, gitignored, for
-the reason `PORTAINER_API_KEY` lives in `.portainer.env`. `make runner-env`
-(`scripts/gen-runner-env.sh`) writes that file, and the check it makes first
-is the point of it: it asks GitHub for `/repos/<repo>/actions/runners` with
-the token, and refuses to write one that gets a 401/403/404. A token with
-the wrong scope otherwise registers nothing while `make runner-up` reports
-success — the failure surfaces only as a 403 in the runner's own logs, from
-a container that then restarts forever, and `deploy.yml` meanwhile queues
-against a label no runner holds. The file is written where `make` runs, not
-on the Docker host: compose reads `--env-file` locally and only the
-interpolated result crosses `DOCKER_HOST`.
+two values the Makefile already hard-codes for the Mac. The five PATs live in
+`.runner.env`, gitignored, for the reason `PORTAINER_API_KEY` lives in
+`.portainer.env`. `make runners-env` (`scripts/gen-runner-env.sh`) writes that
+file after asking GitHub for each repo's `/actions/runners` with its token,
+and refuses any that gets a 401/403/404, naming the repo: a wrongly scoped
+token otherwise registers nothing while `make runners-up` reports success.
+The file is written where `make` runs, not on the Docker host.
 
 Docs-only pushes do not deploy (`paths-ignore` covers `**/*.md`, `docs/**`
 and `.github/**`): a deploy force-recreates `dns` among everything else, so
@@ -563,11 +574,11 @@ is not worth one. Deploys are serialised by a `concurrency` group and never
 cancelled in flight, since a cancelled job leaves Portainer mid-redeploy.
 
 **The security note, which is the part to read before changing any of this.**
-This repo is public and the runner holds `/var/run/docker.sock` — root on the
+This repo is public and the `darkangel`, `heaven` and `infra` runners hold `/var/run/docker.sock` — root on the
 Docker daemon, the same power Portainer's UI has. Two consequences:
 
 - **Never add a `pull_request` or `pull_request_target` trigger to a workflow
-  that runs on the `infra` label.** A fork's PR brings its own workflow file,
+  that runs on a self-hosted label (`darkangel`, `ea`, `heaven`, `infra`, `moria`).** A fork's PR brings its own workflow file,
   so that combination is arbitrary code execution as root on the deploy host.
   The deploy workflow triggers on `push` to main and `workflow_dispatch`
   only. Set Settings → Actions → General → "Fork pull request workflows from
@@ -575,7 +586,9 @@ Docker daemon, the same power Portainer's UI has. Two consequences:
   collaborators**; the default only gates first-time contributors.
 - **Merging to main is now enough to run code on the host.** That was already
   true for whoever ran `make up`; it is now true for whoever can push to
-  main. Branch protection on main is what keeps those two sets the same size.
+  main. What keeps those two sets the same size is the `main-protection`
+  ruleset (PR required, no bypass) — only where it has actually been applied;
+  until then nothing but the owner's discipline does.
 
 ### Single-ingress rule
 

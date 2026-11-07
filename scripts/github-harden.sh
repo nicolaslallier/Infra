@@ -1,0 +1,224 @@
+#!/usr/bin/env bash
+# Harden `main` and the Actions settings of one of the five repos.
+#   scripts/github-harden.sh [--apply] <darkangel|ea|heaven|infra|moria>
+# Without --apply: print the wanted ruleset/settings and the diff against what
+# GitHub has now (GET only). With --apply: write them, one repo per run, after
+# checking every required check exists as a job of a pull_request workflow
+# and has already succeeded on the default branch (a required check that never
+# reports blocks every merge). Never prompts,
+# never reads the runner PATs: it uses your own `gh` login.
+# Old rulesets (`Main`, `Protect Main`) are listed, never touched.
+set -uo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/runners.sh
+. "$here/lib/runners.sh"
+
+RULESET_NAME=main-protection
+
+# checks_for <name> -> one required check per line.
+# Only jobs of workflows that run on EVERY pull request: a check behind a
+# `paths` filter (Heaven image/image-web, Moria server.yml image/pin) never
+# reports on other PRs and would block them forever; `pin` does not run on PRs.
+checks_for() {
+  case "$1" in
+    darkangel) printf '%s\n' 'Backend unit + regression' 'Backend integration (real SeaweedFS + Postgres)' 'Frontend (vitest + vue-tsc + vite build)' ;;
+    ea) printf '%s\n' 'Backend — lint, types, contrat, tests' 'Frontend — types, lint, tests, build' 'Audit — bandit, pip-audit, npm audit' 'Pipelines — lint, types, tests (docs/adr/0028)' 'Intégration — PostgreSQL et MinIO jetables' ;;
+    heaven) printf '%s\n' 'test (3.11)' 'test (3.12)' 'test (3.13)' ;;
+    infra) printf '%s\n' 'test' ;;
+    moria) printf '%s\n' 'build (ubuntu-latest, target/release/moria-client, moria-client-linux)' 'build (windows-latest, target/release/moria-client.exe, moria-client-windows.exe)' 'build (macos-latest, target/release/moria-client, moria-client-macos)' ;;
+  esac
+}
+
+# ruleset_json <name> -> the ruleset body (pure).
+ruleset_json() {
+  local ctx
+  ctx="$(checks_for "$1" | jq -R . | jq -s .)"
+  jq -n --arg name "$RULESET_NAME" --argjson ctx "$ctx" '{
+    name: $name, target: "branch", enforcement: "active", bypass_actors: [],
+    conditions: {ref_name: {include: ["~DEFAULT_BRANCH"], exclude: []}},
+    rules: [
+      {type: "pull_request", parameters: {
+        required_approving_review_count: 0, required_review_thread_resolution: true,
+        dismiss_stale_reviews_on_push: false, require_code_owner_review: false,
+        require_last_push_approval: false}},
+      {type: "required_status_checks", parameters: {
+        strict_required_status_checks_policy: true,
+        required_status_checks: ($ctx | map({context: .}))}},
+      {type: "required_linear_history"},
+      {type: "deletion"},
+      {type: "non_fast_forward"}]}'
+}
+
+# workflow_jobs <repo> -> "ok|filtered<TAB>job name<TAB>matrix(0|1)" for each job
+# of each pull_request-triggered workflow. Read-only.
+workflow_jobs() {
+  local repo="$1" files f raw
+  files="$(gh api "repos/$repo/contents/.github/workflows" | jq -r '.[]|select(.type=="file")|.name')" || return 1
+  for f in $files; do
+    raw="$(gh api "repos/$repo/contents/.github/workflows/$f" -H "Accept: application/vnd.github.raw")" || return 1
+    printf '%s\n' "$raw" | awk '
+      /^on:/ || /^"on":/ { inon = 1 }
+      /^[a-z]/ && !/^on:/ && !/^"on":/ { inon = 0 }
+      inon && /pull_request(_target)?[:,\] ]|pull_request$/ { pr = 1 }
+      inon && /^  pull_request:/ { blk = 1; next }
+      inon && blk && /^  [^ ]/ { blk = 0 }
+      inon && blk && /^    paths(-ignore)?:/ { filtered = 1 }
+      /^jobs:/ { jobs = 1; next }
+      jobs && /^  [A-Za-z0-9_-]+:[ ]*$/ { flush(); id = $1; sub(":", "", id); name = id; mat = 0; next }
+      jobs && /^    name:/ { n = $0; sub(/^    name:[ ]*/, "", n); gsub(/^["\x27]|["\x27]$/, "", n); name = n }
+      jobs && /^      matrix:/ { mat = 1 }
+      function flush() { if (id != "") out[++k] = name "\t" mat }
+      END { flush(); if (pr) for (i = 1; i <= k; i++) print (filtered ? "filtered" : "ok") "\t" out[i] }'
+  done
+}
+
+# used_actions <repo> -> the allow-list patterns the repo's workflows need:
+# every non-GitHub-owned action as owner/repo[/sub]@*, sorted, unique. Local
+# (./) and docker:// refs and actions/*, github/* need nothing.
+used_actions() {
+  local repo="$1" files f
+  files="$(gh api "repos/$repo/contents/.github/workflows" | jq -r '.[]|select(.type=="file")|.name')" || return 1
+  for f in $files; do
+    gh api "repos/$repo/contents/.github/workflows/$f" -H "Accept: application/vnd.github.raw" || return 1
+  done | sed -nE 's/^[[:space:]-]*uses:[[:space:]]*["'"'"']?([^[:space:]"'"'"'#]+).*/\1/p' \
+    | { grep -vE '^(\./|docker://|actions/|github/)' || true; } | sed -E 's/@.*$//; s/$/@*/' | LC_ALL=C sort -u
+}
+
+# selected_json <repo> -> selected-actions body with the derived patterns.
+selected_json() {
+  local pats
+  pats="$(used_actions "$1")" || return 1
+  printf '%s\n' "$pats" | jq -R 'select(length>0)' | jq -sc '{github_owned_allowed:true, verified_allowed:true, patterns_allowed:.}'
+}
+
+# verify_checks <name> <repo>: every required context is a job of an unfiltered
+# pull_request workflow (matrix jobs expand to "<name> (<values>)").
+verify_checks() {
+  local jobs c st n m found rc=0
+  jobs="$(workflow_jobs "$2")" || { echo "cannot read workflows of $2" >&2; return 1; }
+  while IFS= read -r c; do
+    found=""
+    while IFS=$'\t' read -r st n m; do
+      if [ "$c" = "$n" ] || { [ "$m" = 1 ] && [ "${c#"$n ("}" != "$c" ]; }; then
+        [ "$st" = ok ] && { found=ok; break; }
+        found=filtered
+      fi
+    done <<<"$jobs"
+    case "$found" in
+      ok) ;;
+      filtered) echo "required check '$c' is behind a pull_request paths filter in $2: it would block PRs forever" >&2; rc=1 ;;
+      *) echo "required check '$c' is not a job of any pull_request workflow in $2" >&2; rc=1 ;;
+    esac
+  done < <(checks_for "$1")
+  return $rc
+}
+
+# verify_green <name> <repo>: every required context has a successful check run
+# on the latest commit of the default branch. A required check that has never
+# passed there (Infra's `test` before it has run for real) would block every PR,
+# and the ruleset has no bypass. Read-only.
+verify_green() {
+  local br runs c rc=0
+  br="$(gh api "repos/$2" | jq -r '.default_branch // "main"')" || return 1
+  runs="$(gh api "repos/$2/commits/$br/check-runs?per_page=100")" || { echo "cannot read check runs of $2@$br" >&2; return 1; }
+  while IFS= read -r c; do
+    jq -e --arg c "$c" '[.check_runs[]|select(.name==$c and .conclusion=="success")]|length>0' <<<"$runs" >/dev/null \
+      || { echo "required check '$c' has no successful run on $br of $2: run it green on a real PR first (it would block every PR, and the ruleset has no bypass)" >&2; rc=1; }
+  done < <(checks_for "$1")
+  return $rc
+}
+
+# normalise: only the fields we set, rules sorted, so desired and current compare.
+norm='{name,target,enforcement,bypass_actors,conditions,
+  rules:(.rules|map({type}+(if .parameters then {parameters} else {} end))|sort_by(.type))}'
+
+PERM='{"enabled":true,"allowed_actions":"selected"}'
+FORK='{"approval_policy":"all_external_contributors"}'
+
+# put <repo> <path> <json>
+put() { printf '%s' "$3" | gh api -X PUT "repos/$1/$2" --input - >/dev/null; }
+
+# merge_ok <repo>: required_linear_history needs squash or rebase merging.
+merge_ok() {
+  gh api "repos/$1" | jq -e '.allow_squash_merge==true or .allow_rebase_merge==true' >/dev/null && return 0
+  echo "repos/$1: neither allow_squash_merge nor allow_rebase_merge is true; required_linear_history would make every PR unmergeable" >&2
+  return 1
+}
+
+apply_ruleset() { # <name> <repo> <id or empty>
+  if [ -n "$3" ]; then ruleset_json "$1" | gh api -X PUT "repos/$2/rulesets/$3" --input - >/dev/null
+  else ruleset_json "$1" | gh api -X POST "repos/$2/rulesets" --input - >/dev/null; fi
+}
+
+# step <label> <cmd...>: run one write, report it, and on failure say what
+# was and was not applied.
+ALL_STEPS=("ruleset $RULESET_NAME" fork-pr-contributor-approval actions/permissions selected-actions)
+step() {
+  local label="$1"; shift
+  if "$@"; then done_steps+=("$label"); echo "applied: $label"; return 0; fi
+  local s left=""
+  echo "FAILED: $label" >&2
+  echo "applied before the failure: ${done_steps[*]:-nothing}" >&2
+  for s in "${ALL_STEPS[@]}"; do
+    case " ${done_steps[*]:-} " in *" $s "*) ;; *) left="$left, $s" ;; esac
+  done
+  echo "NOT applied: ${left#, }" >&2
+  return 1
+}
+
+main() {
+  local apply=0 name repo rid rs done_steps
+  [ "${1:-}" = --apply ] && { apply=1; shift; }
+  if [ "$#" -ne 1 ]; then echo "usage: github-harden.sh [--apply] <darkangel|ea|heaven|infra|moria>" >&2; return 2; fi
+  name="$1"
+  repo="$(runner_repo "$name")" || { echo "usage: github-harden.sh [--apply] <darkangel|ea|heaven|infra|moria>" >&2; return 2; }
+
+  rs="$(gh api "repos/$repo/rulesets")" || { echo "cannot list rulesets of $repo" >&2; return 1; }
+  rid="$(jq -r --arg n "$RULESET_NAME" '[.[]|select(.name==$n)|.id][0] // empty' <<<"$rs")"
+
+  local sel
+  sel="$(selected_json "$repo")" || { echo "cannot derive allowed actions of $repo" >&2; return 1; }
+
+  if [ "$apply" = 1 ]; then
+    verify_checks "$name" "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
+    merge_ok "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
+    verify_green "$name" "$repo" || { echo "refusing to apply to $repo" >&2; return 1; }
+    done_steps=()
+    step "ruleset $RULESET_NAME" apply_ruleset "$name" "$repo" "$rid" || return 1
+    step "fork-pr-contributor-approval" put "$repo" actions/permissions/fork-pr-contributor-approval "$FORK" || return 1
+    step "actions/permissions" put "$repo" actions/permissions "$PERM" || return 1
+    step "selected-actions" put "$repo" actions/permissions/selected-actions "$sel" || return 1
+    echo "applied to $repo"
+    return 0
+  fi
+
+  echo "# $repo (dry run, nothing is written)"
+  echo "## desired ruleset"; ruleset_json "$name"
+  echo "## other rulesets (never touched)"
+  jq -r --arg n "$RULESET_NAME" '.[]|select(.name!=$n)|"  \(.name) (#\(.id), \(.enforcement))"' <<<"$rs"
+  echo "## ruleset diff (< current, > desired)"
+  if [ -n "$rid" ]; then
+    diff <(gh api "repos/$repo/rulesets/$rid" | jq -S "$norm") <(ruleset_json "$name" | jq -S "$norm") && echo "  none"
+  else
+    echo "  $RULESET_NAME does not exist: --apply would POST it"
+  fi
+  local p want
+  for p in "actions/permissions/fork-pr-contributor-approval:$FORK" "actions/permissions:$PERM" "actions/permissions/selected-actions:$sel"; do
+    want="${p#*:}"
+    echo "## ${p%%:*} diff (< current, > desired)"
+    diff <(gh api "repos/$repo/${p%%:*}" 2>/dev/null | jq -S --argjson w "$want" 'with_entries(select(.key as $k | $w|has($k)))') \
+         <(jq -S . <<<"$want") && echo "  none"
+  done
+  echo "## merge methods"
+  merge_ok "$repo" && echo "  squash or rebase merge enabled"
+  echo "## allowed third-party actions (patterns_allowed)"
+  jq -r '.patterns_allowed[]|"  "+.' <<<"$sel"
+  echo "## required checks"
+  verify_checks "$name" "$repo" && echo "  all found" || echo "  --apply would REFUSE"
+  echo "## required checks green on the default branch"
+  verify_green "$name" "$repo" && echo "  all green" || echo "  --apply would REFUSE"
+  return 0
+}
+
+[ "${BASH_SOURCE[0]}" = "$0" ] && main "$@"
