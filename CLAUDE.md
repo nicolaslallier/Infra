@@ -906,6 +906,12 @@ postgres dump holds every app's data, so nothing is world-readable.
   target keeps its old time. Grafana rules `Backup stale` (over 26 h) and
   `Backup metric missing` (absent for 30 m).
 
+### Dev sessions
+
+Claude Code sessions in containers, one per git repo. The full section is
+written in Task 7. For now: every session uses the same S3 identity `devbox`
+(bucket `devbox`, one prefix per session, `DEVBOX_S3_SECRET_KEY`).
+
 ### Windows machines (`windows_exporter`)
 
 Job `windows` in `monitoring/prometheus/prometheus.yml`, dashboard
