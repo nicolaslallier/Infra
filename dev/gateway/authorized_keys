@@ -1,3 +1,4 @@
 # The owner's SSH public key(s), one per line -- e.g. ~/.ssh/id_ed25519.pub
 # from each machine that opens dev sessions. `make dev-up` refuses while this
 # file has no key. Replace this comment's neighbour line below:
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGOn+oxNlS9x/5T61u/Ea2Jkm5s5o2BphLsmsTRjvSK/ claude-infra-move@mac
