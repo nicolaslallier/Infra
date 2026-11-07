@@ -23,6 +23,10 @@ on:
       - '**/*.md'
       - 'docs/**'
       - '.github/**'
+      # Dev sessions are not part of the infra stack (nginx/stream.d/devssh.conf
+      # is, and still deploys).
+      - 'dev/**'
+      - 'docker-compose.dev.yml'
   workflow_dispatch:
     inputs:
       pull_images:
