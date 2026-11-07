@@ -1174,17 +1174,30 @@ s3_secret_key = "..."          # DEVBOX_S3_SECRET_KEY
 
 ```bash
 devbox create jarvis --repo https://github.com/o/r   # jeton GitHub demandé (ou DEVBOX_GH_TOKEN)
-ssh dev-jarvis                                       # puis `claude`; première connexion : login
+ssh -t dev-jarvis tmux new -A -s claude              # puis `claude`; première connexion : login
 devbox list
 devbox stop jarvis
 devbox resume jarvis
-devbox delete jarvis                                 # le bucket garde l'état
+devbox delete jarvis                                 # volumes supprimés, le bucket garde l'état
 ```
 
 Au premier `claude`, connecte-toi avec ton abonnement; le jeton est
-sauvegardé dans le bucket et resservira après un `resume` ou un `create` du
-même nom. `--plugin nom@marketplace` (répétable) évite la sélection
-interactive des plugins.
+sauvegardé sur le volume d'état et dans le bucket, et resservira après un
+`resume` ou un `create` du même nom. `--plugin nom@marketplace` (répétable)
+évite la sélection interactive des plugins; les catalogues doivent être
+publics.
+
+- **tmux** : une recréation de `nginx` (`make up`, déploiement CI) coupe les
+  connexions SSH; la session tmux, elle, survit.
+- **Identité git** : aucune n'est préconfigurée. Une fois par session :
+  `git config --global user.name ...` et `user.email ...` (gardée sur le
+  volume d'état, perdue au `delete`).
+- **Logs de CI** : `gh run view --log` passe par `*.blob.core.windows.net`,
+  hors liste blanche : la session voit le statut des checks, pas leurs logs.
+- **`delete --purge`** n'efface rien : il affiche la commande `rclone purge`,
+  qui laisse les anciennes versions du bucket versionné (jeton Claude
+  compris), et la commande `rclone backend cleanup-hidden` pour celles-ci
+  (non vérifiée contre SeaweedFS).
 
 ## Layout
 
