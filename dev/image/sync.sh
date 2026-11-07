@@ -1,55 +1,41 @@
 #!/usr/bin/env bash
-# sync.sh push [work|all] | restore work|claude | loop -- mirror /work and the
-# Claude state ($CLAUDE_CONFIG_DIR, which holds .claude.json too) to the S3 store.
-# Layout: devbox:devbox/<SESSION>/{work,claude} (remote "devbox", bucket "devbox").
+# Copy a session's state to/from its prefix in the devbox bucket (rclone
+# remote "s3", configured by entrypoint.sh): /work and $CLAUDE_CONFIG_DIR.
+#   push     local -> bucket; refused until $STATE/ready exists
+#   restore  bucket -> local (adds to what is there; never deletes)
+#   loop     push every SYNC_INTERVAL seconds (default 60)
+# Build outputs are not synced. No --delete-excluded, so an exclude added
+# later never deletes what the bucket already holds.
 set -euo pipefail
-: "${SESSION:?}" "${CLAUDE_CONFIG_DIR:?}"
-R="devbox:devbox/$SESSION"
-# --delete-excluded is deliberately absent: excluded dirs are never rebuilt remotely.
-# .git/hooks never travels: a restored hook would run on the next git command.
-EXCL=(--exclude 'target/**' --exclude 'node_modules/**' --exclude '.venv/**' --exclude '.git/hooks/**')
-# rclone exits 3 for an absent prefix (a new session): that means "nothing saved", not failure.
-tolerant() { "$@" || [ $? -eq 3 ]; }
-usage() { echo "usage: sync.sh push [work|all] | restore work|claude | loop" >&2; exit 2; }
+: "${SESSION:?}" "${STATE:?}" "${CLAUDE_CONFIG_DIR:?}"
+dst="s3:devbox/$SESSION"
+excludes=(--exclude 'target/**' --exclude 'node_modules/**' --exclude '.venv/**')
+# -M keeps file modes (executable scripts), --links keeps symlinks: without
+# them a restored checkout shows every script as a mode change.
+flags=(-M --links)
+
+push() {
+  # A push is an `rclone sync`: it makes the bucket match local, deletions
+  # included. Before the restore (or clone) has completed, local is partial,
+  # and a push would delete the saved copy.
+  [ -f "$STATE/ready" ] || { echo "sync: $STATE/ready missing, not pushing a partial state" >&2; return 1; }
+  rclone sync "${flags[@]}" /work "$dst/work" "${excludes[@]}"
+  rclone sync "${flags[@]}" "$CLAUDE_CONFIG_DIR" "$dst/claude"
+}
 
 case "${1:-}" in
-  push)
-    exec 9>/tmp/devbox-sync.lock; flock 9 # loop and SIGTERM push never overlap
-    # The entrypoint's restore markers: pushing a half-restored tree would
-    # delete the remote objects not restored yet.
-    for m in /home/dev/.state/restoring-*; do
-      [ ! -e "$m" ] || { echo "sync: restore unfinished ($m), not pushing" >&2; exit 1; }
-    done
-    # Both halves are attempted even if one fails; the exit status reports it.
-    rc=0
-    rclone sync /work "$R/work" "${EXCL[@]}" || rc=$?
-    case "${2:-all}" in
-      all) rclone sync "$CLAUDE_CONFIG_DIR" "$R/claude" || rc=$? ;; # includes .credentials.json
-      work) ;;
-      *) usage ;;
-    esac
-    exit "$rc"
-    ;;
+  push) push ;;
   restore)
-    case "${2:-}" in
-      work) tolerant rclone copy "${EXCL[@]}" "$R/work" /work ;;
-      claude) tolerant rclone copy "$R/claude" "$CLAUDE_CONFIG_DIR" ;;
-      *) usage ;;
-    esac
+    saved="$(rclone lsf --max-depth 1 "$dst/")"
+    if grep -qx 'work/' <<<"$saved"; then rclone copy "${flags[@]}" "$dst/work" /work; fi
+    if grep -qx 'claude/' <<<"$saved"; then rclone copy "${flags[@]}" "$dst/claude" "$CLAUDE_CONFIG_DIR"; fi
+    # S3 keeps no empty directories, and git refuses a .git without refs/
+    # (empty after `git gc` packs them).
+    if [ -d /work/.git ]; then
+      mkdir -p /work/.git/refs/heads /work/.git/refs/tags /work/.git/objects/info /work/.git/objects/pack /work/.git/info
+    fi
     ;;
   loop)
-    # /work every SYNC_INTERVAL; the Claude state (transcripts, into a
-    # versioned bucket) only every CLAUDE_SYNC_INTERVAL, and always on stop.
-    last=$(date +%s)
-    while sleep "${SYNC_INTERVAL:-60}"; do
-      what=work
-      [ $(( $(date +%s) - last )) -lt "${CLAUDE_SYNC_INTERVAL:-600}" ] || what=all
-      if "$0" push "$what"; then
-        [ "$what" = work ] || last=$(date +%s)
-      else
-        echo "sync: push failed, retrying in ${SYNC_INTERVAL:-60}s" >&2
-      fi
-    done
-    ;;
-  *) usage ;;
+    while sleep "${SYNC_INTERVAL:-60}"; do push || echo "sync: push failed, retrying next round" >&2; done ;;
+  *) echo "usage: sync.sh push|restore|loop" >&2; exit 2 ;;
 esac

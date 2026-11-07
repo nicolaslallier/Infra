@@ -1,3 +1,9 @@
-# squid.conf baked in: a bind mount would resolve on the machine running make, not on DOCKER_HOST's.
-FROM ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
+# The dev sessions' only way out: squid with a domain allow-list (squid.conf).
+FROM alpine:3.22@sha256:bfe7ceb9f09ec0566c48fb93356e45a47a00be5a1dd14fa5b909e7709c66b034
+RUN apk add --no-cache squid
 COPY squid.conf /etc/squid/squid.conf
+EXPOSE 3128
+# Unprivileged from the start: squid started as root drops to "squid" and can
+# then no longer write the stdout/stderr it logs to.
+USER squid
+CMD ["squid", "-N", "-f", "/etc/squid/squid.conf"]

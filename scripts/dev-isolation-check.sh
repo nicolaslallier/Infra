@@ -1,72 +1,72 @@
 #!/usr/bin/env bash
-# Usage: scripts/dev-isolation-check.sh <session>
-# Runs inside container dev-<session> and asserts the egress policy: the
-# session reaches only the allow-listed Internet hosts and s3:8333, through
-# dev-egress. One OK/KO line per control; exits 1 at the first KO.
-# DEV_CONTAINER / DEV_EGRESS / DEV_INFRA_NET rename the three for a throwaway copy.
-set -u
-session=${1:?usage: $0 <session>}
-c=${DEV_CONTAINER:-dev-$session}
-egress=${DEV_EGRESS:-dev-egress}
-infra_net=${DEV_INFRA_NET:-infra-net}
-docker inspect "$c" >/dev/null 2>&1 || { echo "KO  container $c not found" >&2; exit 1; }
+# Assert a dev session's network box: through dev-egress only the
+# allow-listed domains and s3:8333 answer, and a refused name is never even
+# resolved; LAN, infra-net, the Docker host and direct egress are out of reach.
+# Usage: scripts/dev-isolation-check.sh <session>   (container dev-<session>)
+set -euo pipefail
+c="dev-${1:?usage: dev-isolation-check.sh <session>}"
+fail=0
+ok() { printf 'OK  %s\n' "$1"; }
+ko() { printf 'KO  %s (got %s)\n' "$1" "$2"; fail=1; }
+docker inspect "$c" >/dev/null 2>&1 || { ko "container $c exists" missing; exit 1; }
 
-run() { docker exec "$c" "$@"; }
-ok() { echo "OK  $1"; }
-ko() { echo "KO  $1" >&2; exit 1; }
-
-# status <url>: HTTP status of the request, or of the proxy's CONNECT for https
-# (000 = no answer at all). Goes through the proxy from the container's env.
-status() {
-  case $1 in
-    https://*) run curl -s -o /dev/null -m 15 -w '%{http_connect}' "$1" ;;
-    *)         run curl -s -o /dev/null -m 15 -w '%{http_code}' "$1" ;;
-  esac
+# A request through the session's proxy env: "<CONNECT code> <HTTP code> <squid error>".
+# 000 = no connection; the squid error is empty when squid did not refuse.
+probe() {
+  local r
+  r="$(docker exec "$c" curl -s -o /dev/null -D - -w '\n%{http_connect} %{http_code}' -m 10 "$@" 2>/dev/null)" || true
+  local codes err
+  codes="$(tail -1 <<<"$r")"
+  err="$(grep -i '^x-squid-error:' <<<"$r" | head -1 | awk '{print $2}' | tr -d '\r')"
+  echo "${codes:-000 000} ${err:--}"
+}
+reached() { # <label> <expect: tunnel|http> <curl args...>
+  local label=$1 how=$2; shift 2; local r; r="$(probe "$@")"
+  case "$how" in
+    tunnel) [[ "$r" == "200 "* ]] ;;
+    http) read -r _ code err <<<"$r"; [[ "$code" != 000 && "$err" == - ]] ;;
+  esac && ok "$label reachable" || ko "$label reachable" "$r"
+}
+refused() { # <label> <curl args...>: squid said no, or nothing answered at all
+  local label=$1; shift; local r; r="$(probe "$@")"
+  read -r conn code err <<<"$r"
+  [[ "$err" == ERR_* || ( "$conn" == 000 && "$code" == 000 ) || ( "$conn" != 000 && "$conn" != 200 ) ]] \
+    && ok "$label refused ($r)" || ko "$label refused" "$r"
 }
 
+# HTTPS: squid's answer to CONNECT (200 = tunnelled), not the site's status --
+# static.crates.io itself answers 403 on "/".
 for u in https://api.anthropic.com https://github.com https://static.crates.io \
          https://registry.npmjs.org https://pypi.org; do
-  [ "$(status "$u")" = 200 ] && ok "reachable via proxy: $u" || ko "not reachable via proxy: $u"
+  reached "$u" tunnel "$u"
+done
+# An authenticated SeaweedFS answers 403 itself: squid's own refusal is told
+# apart by its X-Squid-Error header.
+reached "http://s3:8333" http http://s3:8333
+
+refused "https://example.com" https://example.com
+refused "https://140.82.112.3 (IP literal, PTR in .github.com)" -k https://140.82.112.3
+refused "http://example.com" http://example.com
+refused "http://140.82.112.3" http://140.82.112.3
+refused "http://192.168.2.35:11434 (LAN)" http://192.168.2.35:11434
+refused "http://postgres:5432 (infra-net)" http://postgres:5432
+refused "http://nginx (infra-net)" http://nginx
+refused "http://s3:8888 (filer)" http://s3:8888
+refused "http://s3:9333 (master)" http://s3:9333
+refused "CONNECT s3:8333" -p http://s3:8333
+refused "http://host.docker.internal" http://host.docker.internal
+for u in https://github.com http://host.docker.internal http://192.168.65.254 http://172.17.0.1; do
+  refused "direct $u (no proxy)" --noproxy '*' "$u"
 done
 
-# headers <url> [curl args]: response headers (proxy's CONNECT reply for https).
-headers() { local u=$1; shift; run curl -s -o /dev/null -m 15 -D - "$@" "$u" || true; }
+# The session itself resolves nothing outside dev-net.
+docker exec "$c" getent hosts example.com >/dev/null 2>&1 && ko "no DNS in the session" "example.com resolved" \
+  || ok "no DNS in the session"
+# A refused name is never looked up by squid (no DNS exfiltration).
+leak="leakcheck$RANDOM$RANDOM.example.org"
+probe "http://$leak/" >/dev/null; probe "https://$leak/" >/dev/null
+docker exec dev-egress wget -qO- http://127.0.0.1:3128/squid-internal-mgr/ipcache 2>/dev/null | grep -q "$leak" \
+  && ko "refused names are not resolved" "$leak in squid's ipcache" || ok "refused names are not resolved"
 
-# s3 is plain http: any answer from SeaweedFS (even 403) beats a proxy refusal.
-hdr=$(headers http://s3:8333/)
-echo "$hdr" | grep -q '^HTTP' && ! echo "$hdr" | grep -qi '^X-Squid-Error' \
-  && ok "reachable via proxy: http://s3:8333" || ko "not reachable via proxy: http://s3:8333"
-
-# Refused means squid itself said 403 (X-Squid-Error), not an origin's 403.
-# The port-80/443 targets are the ones that reach the private_dst rule; the
-# others fall to Safe_ports or deny all first.
-for u in https://example.com http://192.168.2.35:11434 http://postgres:5432 \
-         http://s3:9333 "http://$egress:3128" \
-         http://192.168.2.35/ http://s3/ http://nginx/ https://192.168.2.35/ \
-         http://127.0.0.1/ 'http://[::1]/'; do
-  hdr=$(headers "$u" -g)
-  echo "$hdr" | grep -q ' 403' && echo "$hdr" | grep -qi '^X-Squid-Error' \
-    && ok "refused by proxy (403): $u" || ko "NOT refused by proxy: $u"
-done
-
-# The proxy serves dev-net only: from a container on infra-net (where dev-egress
-# also sits) even a whitelisted site must be refused by squid itself.
-img=$(docker inspect -f '{{.Config.Image}}' "$c")
-hdr=$(docker run --rm --network "$infra_net" --entrypoint curl "$img" \
-  -s -o /dev/null -m 15 -D - -x "http://$egress:3128" http://github.com/ || true)
-echo "$hdr" | grep -q ' 403' && echo "$hdr" | grep -qi '^X-Squid-Error' \
-  && ok "proxy refuses a client on $infra_net" || ko "proxy usable from $infra_net"
-
-# Plain-http s3 without the proxy: no route, so this must fail.
-if run curl -s -o /dev/null -m 8 --noproxy '*' http://s3:8333/; then
-  ko "direct http://s3:8333 works without proxy"
-else ok "direct s3 without proxy fails"; fi
-
-if run curl -s -o /dev/null -m 8 --noproxy '*' https://github.com; then
-  ko "direct access without proxy works"
-else ok "direct access without proxy fails"; fi
-
-# Positive "absent" answer: a failing `docker exec` must not read as "no socket".
-[ "$(run sh -c 'test -e /var/run/docker.sock && echo present || echo absent')" = absent ] \
-  && ok "no docker.sock" || ko "/var/run/docker.sock present (or docker exec failed)"
-echo "all isolation checks passed for $c"
+docker exec "$c" test ! -e /var/run/docker.sock && ok "no docker socket" || ko "no docker socket" present
+exit "$fail"

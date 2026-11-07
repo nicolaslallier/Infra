@@ -14,7 +14,7 @@ over a shared Docker network rather than being folded into this one.
 
 ## Commands
 
-Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runner-*` the CI runner, `make clean CONFIRM=1` deletes the stack + volumes.
+Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runners-*` the five CI runners, `make dev-*` the dev-session plumbing (see "Dev sessions"), `make clean CONFIRM=1` deletes the stack + volumes.
 
 The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
 is how a `.env` that `check-env` rejects gets repaired, so requiring it first
@@ -458,8 +458,9 @@ Things that look odd and are load-bearing:
 ### CI: deploying on a push to main
 
 `.github/workflows/deploy.yml` redeploys the stack when main moves, running
-`scripts/ci-deploy.sh` on a self-hosted runner
-(`docker-compose.runner.yml`, `make runner-up`). `workflow_dispatch` runs the
+`scripts/ci-deploy.sh` on the self-hosted runner labelled `infra` — one of
+five (`darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo) in
+`docker-compose.runners.yml`, `make runners-up`. `workflow_dispatch` runs the
 same thing by hand, with a `pull_images` input that switches `make up` for
 `make pull`.
 
@@ -469,14 +470,40 @@ the whole design follows from. Portainer publishes its API on
 ingress to either — the same reason `prefect/flows/pr_validation.py` exists rather than a
 GitHub Actions job. The runner has to be on this LAN.
 
-Five things here are load-bearing.
+Several things here are load-bearing.
 
-- **The runner is its own compose project**, like Portainer and for the same
-  reason: every `up` force-recreates every container in `infra`, and a runner
-  recreated mid-job is a job that never reports. `make runner-up` drives it;
-  `--env-file .runner.env` on that target is not cosmetic, since without it
-  compose would interpolate the runner's one setting out of the stack's
-  entire secret set.
+- **The runners are their own Portainer stack (`runners`)**, like Portainer
+  itself and for the same reason: every `make up` force-recreates every
+  container in `infra`, and a runner recreated mid-job is a job that never
+  reports. `make runners-up` drives it through `scripts/runners-stack.sh`
+  (needs `PORTAINER_API_KEY` and `PORTAINER_PINNEDPUBKEY` in `.portainer.env`;
+  `INFRA_HOST` comes from the Makefile, `PORTAINER_URL` optionally overrides). **Portainer reads the compose from
+  GitHub main**, so merge before `make runners-up`. The env it sends is
+  `.runner.env` (five PATs) plus `INFRA_DIR`, never `.env`: that file is the
+  stack's whole secret set.
+- **One fine-grained PAT per repo** (`GH_RUNNER_TOKEN_<NAME>`, Administration:
+  read and write on that repo only). This limits the damage only as long as no
+  socket-holding runner is compromised: any job on `darkangel`, `heaven` or
+  `infra` holds `/var/run/docker.sock`, so it can `docker inspect`/`exec` into
+  the other runners and read all five tokens (admin on all five repos, on top
+  of root on the daemon) and tamper with the `ea` and `moria` runners. That is
+  the accepted ceiling. Follow-ups: darkangel could use its own
+  `PORTAINER_DIRECT` mode and drop the socket; heaven's `scripts/ci-deploy.sh`
+  uses `docker run`, so it needs a rewrite or keeps the socket.
+  A missing one fails `runners-up` by name rather than starting four of five.
+- **Privileges differ per runner.** The Docker socket (root on the daemon) is
+  mounted only on `darkangel`, `heaven` and `infra`, whose deploys need it;
+  `ea` and `moria` get none (`ea` keeps its CA mount and `extra_hosts`).
+  A runner is scoped to one repo, so a workflow elsewhere cannot use it.
+- **Self-hosted labels are never for PRs.** No workflow running on one of the
+  five labels may trigger on `pull_request`/`pull_request_target`; PR checks
+  (`test.yml`) run GitHub-hosted. `main` in each repo is meant to be guarded
+  by a PR-required ruleset (`main-protection`, no bypass actors), applied
+  repo by repo with the owner's go-ahead, Infra last: apply infra only after
+  `test` has run green on a real PR (`github-harden.sh --apply` refuses while a
+  required check has no successful run on the default branch). Escape hatch if
+  `test` goes red and blocks every Infra PR: repo Settings → Rules → Rulesets →
+  disable `main-protection`.
 - **The deploy acts on the *host* checkout, not the runner's.** Portainer
   takes `docker-compose.yml` from GitHub main but every bind mount from the
   checkout at `INFRA_CHECKOUT` (see "Portainer-managed stack"), so that
@@ -511,50 +538,34 @@ Five things here are load-bearing.
   `check-docker.sh` asserts macOS/Docker-Desktop facts that mean nothing in
   here.
 
-The `runner-*` targets are the whole management surface, and two of their
-behaviours are load-bearing rather than polish. **`runner-status` reports
-both sides** — the container on this daemon *and* `GET
-/repos/<repo>/actions/runners` — because the runner is `EPHEMERAL` and the
-two routinely disagree: it de-registers after every job, so a healthy
-container is no evidence GitHub has a runner for the next deploy, and
-GitHub never surfaces the gap (a job matching no labels queues silently
-instead of failing). It reads the same PAT from `.runner.env`, so there is
-nothing extra to provision, and it degrades to a warning — not an error —
-when jq, the token or the network is missing, since an operator who cannot
-reach GitHub must still be able to stop the runner. It does, however,
-**separate a PAT GitHub refuses from a GitHub it cannot reach**, and reports
-the first by name rather than as "unknown": that is the same credential the
-runner's entrypoint exchanges for a registration token on every start, so a
-401 here is the `Obtaining the token of the runner` → `curl: (22) ... 401` →
-`Invalid configuration provided for token` loop in `make runner-logs`, seen
-from the side that can explain it. Nothing else in the repo does — the
-container restarts forever, `make runner-up` reported success, and the next
-push to main queues its deploy silently. The fix is a new PAT
-(`make runner-env FORCE=1 && make runner-restart`); `gen-runner-env.sh`
-validates tokens when it writes them, but PATs expire afterwards.
-**`runner-down`,
-`-restart` and `-pull` refuse while a job is running** (`--busy`, exit 3;
-`FORCE=1` overrides), scoped to the `infra` label because that label is the
-contract with `deploy.yml`: recreating the container mid-job kills it and
-the workflow run never reports a result. `runner-pull` exists because the
-image tag moves on purpose — GitHub retires old runner versions server-side
-— so it is the fix for a runner the service has stopped accepting, not
-routine housekeeping.
+The `runners-*` targets are the whole management surface, and two behaviours
+are load-bearing. **`runners-status` reports both sides, per repo** — the
+container on the Docker host (`DOCKER_HOST`) *and* `GET /repos/<repo>/actions/runners` — because
+the runners are `EPHEMERAL` and the two routinely disagree: they de-register
+after every job, so a healthy container is no evidence GitHub has a runner for
+the next deploy, and a job matching no labels queues silently instead of
+failing. It separates a PAT GitHub refuses (named, per repo: the 401 loop in
+`make runners-logs`) from a GitHub it cannot reach (a warning). The fix for a
+bad PAT is `make runners-env FORCE=1 && make runners-up`; `gen-runner-env.sh`
+validates all five when it writes them, but PATs expire afterwards.
+**`runners-up`, `-down`, `-pull` and `-restart` are stack redeploys** that
+recreate all five runners, and refuse while *any* runner has a job (exit 3;
+`FORCE=1` overrides): recreating mid-job kills it and the run never reports.
+`runners-restart` is `runners-up`. `runners-pull` re-pulls the image, whose
+tag moves on purpose (GitHub retires old runner versions server-side). Only
+`runners-logs` is not a Portainer call: compose against the Docker host
+(`DOCKER_HOST`; from the Mac that is the deploy host over ssh, not a local
+daemon), as is the container half of `runners-status`.
 
 `INFRA_CHECKOUT` and `INFRA_HOST` come from repository variables
 (Settings → Secrets and variables → Actions → Variables) and fall back to the
-two values the Makefile already hard-codes for the Mac. `GH_RUNNER_TOKEN` —
-a PAT allowed to register runners — lives in `.runner.env`, gitignored, for
-the reason `PORTAINER_API_KEY` lives in `.portainer.env`. `make runner-env`
-(`scripts/gen-runner-env.sh`) writes that file, and the check it makes first
-is the point of it: it asks GitHub for `/repos/<repo>/actions/runners` with
-the token, and refuses to write one that gets a 401/403/404. A token with
-the wrong scope otherwise registers nothing while `make runner-up` reports
-success — the failure surfaces only as a 403 in the runner's own logs, from
-a container that then restarts forever, and `deploy.yml` meanwhile queues
-against a label no runner holds. The file is written where `make` runs, not
-on the Docker host: compose reads `--env-file` locally and only the
-interpolated result crosses `DOCKER_HOST`.
+two values the Makefile already hard-codes for the Mac. The five PATs live in
+`.runner.env`, gitignored, for the reason `PORTAINER_API_KEY` lives in
+`.portainer.env`. `make runners-env` (`scripts/gen-runner-env.sh`) writes that
+file after asking GitHub for each repo's `/actions/runners` with its token,
+and refuses any that gets a 401/403/404, naming the repo: a wrongly scoped
+token otherwise registers nothing while `make runners-up` reports success.
+The file is written where `make` runs, not on the Docker host.
 
 Docs-only pushes do not deploy (`paths-ignore` covers `**/*.md`, `docs/**`
 and `.github/**`): a deploy force-recreates `dns` among everything else, so
@@ -563,11 +574,11 @@ is not worth one. Deploys are serialised by a `concurrency` group and never
 cancelled in flight, since a cancelled job leaves Portainer mid-redeploy.
 
 **The security note, which is the part to read before changing any of this.**
-This repo is public and the runner holds `/var/run/docker.sock` — root on the
+This repo is public and the `darkangel`, `heaven` and `infra` runners hold `/var/run/docker.sock` — root on the
 Docker daemon, the same power Portainer's UI has. Two consequences:
 
 - **Never add a `pull_request` or `pull_request_target` trigger to a workflow
-  that runs on the `infra` label.** A fork's PR brings its own workflow file,
+  that runs on a self-hosted label (`darkangel`, `ea`, `heaven`, `infra`, `moria`).** A fork's PR brings its own workflow file,
   so that combination is arbitrary code execution as root on the deploy host.
   The deploy workflow triggers on `push` to main and `workflow_dispatch`
   only. Set Settings → Actions → General → "Fork pull request workflows from
@@ -575,7 +586,9 @@ Docker daemon, the same power Portainer's UI has. Two consequences:
   collaborators**; the default only gates first-time contributors.
 - **Merging to main is now enough to run code on the host.** That was already
   true for whoever ran `make up`; it is now true for whoever can push to
-  main. Branch protection on main is what keeps those two sets the same size.
+  main. What keeps those two sets the same size is the `main-protection`
+  ruleset (PR required, no bypass) — only where it has actually been applied;
+  until then nothing but the owner's discipline does.
 
 ### Single-ingress rule
 
@@ -601,6 +614,9 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 7687 → NGINX's `stream{}` block (`nginx/stream.d/neo4j.conf`),
   a raw TCP passthrough proxy to `neo4j:7687` (Bolt), bound to
   `127.0.0.1:7687` the same way.
+- Port 2222 → NGINX's `stream{}` block (`nginx/stream.d/devssh.conf`), to
+  `dev-gateway:22`, bound to `${LAN_IP}` (never `0.0.0.0`): dev-session SSH
+  has to reach other LAN machines (see "Dev sessions").
 **`portainer` is the one deliberate exception.** It publishes 9443 (UI,
 TLS), 9000 (UI, plain HTTP) and 8000 (Edge-agent tunnel) itself, from
 `docker-compose.portainer.yml`, bound to `${LAN_IP}` — never `0.0.0.0`,
@@ -614,8 +630,8 @@ as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
 `s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `neo4j`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`,
-`dev-egress`, `dev-gateway`, or other monitoring backends.** If a backend service needs to be reachable from the host, add
+`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `neo4j`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, other
+monitoring backends, `dev-egress`, `dev-gateway`, or a `dev-*` session.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
 deliberate constraint, not an oversight — keeping every backend-app
@@ -906,151 +922,96 @@ postgres dump holds every app's data, so nothing is world-readable.
   target keeps its old time. Grafana rules `Backup stale` (over 26 h) and
   `Backup metric missing` (absent for 30 m).
 
-### Sessions de dev (devbox)
+### Dev sessions
 
-Des conteneurs Claude Code, un par session, pilotés depuis la machine du
-propriétaire par un CLI Rust (`dev/cli`, `devbox create|list|stop|resume|delete`;
-config `config.toml` dans le dossier de configuration de l'OS). Rien n'est
-déployé par `make up`.
+Claude Code in containers, one per GitHub repo, reached over SSH from the
+LAN. Usage is in the README ("Dev sessions"). Pieces: the `devbox` CLI
+(`dev/cli`, Rust, runs on the owner's Mac/PC), one Portainer stack per
+session (`dev/session.compose.yml`, stack `dev-<name>`, image
+`devbox-session:1` from `dev/image`, built on the daemon by `make dev-image`),
+and the plumbing in `docker-compose.dev.yml` (project `dev`, `make dev-up`):
+`dev-egress` (squid) and `dev-gateway` (sshd). Neither project is part of the
+`infra` stack, so `make up` never recreates a session -- but it does recreate
+nginx, which drops every session's SSH (see tmux below). `make dev-test` runs
+the CLI tests and the image/state checks on the local daemon.
 
-- **Une pile Portainer par session.** `dev-<nom>` (conteneur `dev-<nom>`,
-  volumes `dev-<nom>-work` et `dev-<nom>-state`), créée par le CLI via l'API
-  de Portainer depuis `dev/session.compose.yml`. Les noms `egress` et
-  `gateway` sont refusés (`dev-egress`/`dev-gateway` existent déjà). Le socle
-  partagé est `docker-compose.dev.yml` (projet `dev` : `dev-egress`, squid, et
-  `dev-gateway`, sshd), piloté par `make dev-up/-down/-logs/-status` : un
-  projet à part, comme Portainer et le runner, pour qu'un `make up` ne le
-  recrée pas. L'image de session est construite sur le daemon par
-  `make dev-image` (comme `ollama-proxy` : `pull_policy: never`);
-  `scripts/dev-image-check.sh` lance son vrai entrypoint contre un S3 factice
-  (sshd sur 2222, sftp, PATH, poussée finale au `docker stop`, clé d'hôte
-  conservée, refus d'un `/work` d'un autre dépôt).
-- **Aucun bind mount dans `docker-compose.dev.yml`.** Depuis le Mac,
-  `DOCKER_HOST` est le portable : un chemin du Mac y arriverait comme un
-  dossier vide créé d'office (le piège de `INFRA_DIR`). La clé publique
-  (`dev/gateway/authorized_keys`) et `dev/egress/squid.conf` sont donc copiées
-  dans les images `dev-gateway:1` et `dev-egress:1` (`dev/egress/Dockerfile`
-  = squid épinglé + la conf) : un contexte de build traverse `DOCKER_HOST`.
-  `make dev-up` construit (`up -d --build`) ; changer la clé ou la conf, c'est
-  relancer `make dev-up`. `DEV_AUTHORIZED_KEYS=<fichier>` est d'abord copié
-  sur `dev/gateway/authorized_keys`, et la garde (une ligne non commentée)
-  porte sur ce fichier-là.
-- **Isolation.** `dev-net` est `internal: true`, sous-réseau fixe
-  `10.250.77.0/24` : un conteneur de session n'a aucune route. Les deux seules
-  sorties sont `dev-egress` (liste blanche de domaines, refus des plages
-  privées, IPv6 et CGNAT même si un nom autorisé y résout, et `s3:8333`
-  seulement) et la passerelle SSH. `dev-egress` est aussi sur `infra-net`
-  pour joindre `s3` : squid refuse donc toute source hors de `10.250.77.0/24`
-  (`http_access deny !sessions_src` en tête), sans quoi n'importe quel
-  conteneur d'`infra-net` s'en servirait comme proxy. Changer le sous-réseau,
-  c'est changer les deux fichiers ensemble. Les sessions ne sont jamais sur
-  `infra-net`. `scripts/dev-isolation-check.sh <session>` le prouve (sites
-  autorisés joignables, cibles privées refusées par squid, proxy refusé
-  depuis `infra-net`, pas de sortie sans proxy, pas de `docker.sock`). Il ne
-  prouve pas ce que le proxy autorise déjà : un domaine de la liste blanche
-  est un canal d'exfiltration (GitHub accepte n'importe quel dépôt), et rien
-  n'y est testé sur l'isolement entre sessions.
-- **Chemin SSH.** Flux `nginx` `:2222` lié à `${LAN_IP}` (`nginx/stream.d/devssh.conf`)
-  vers `dev-gateway:22`, puis `ProxyJump` vers `dev-<nom>:2222`; le CLI écrit
-  le bloc `Host dev-<nom>` dans `~/.ssh/config`. Clé seule, pas de mot de passe.
-  La vraie clé publique du propriétaire va dans `dev/gateway/authorized_keys`,
-  **gitignoré** (un `.example` est versionné) : un fichier suivi par Git
-  déclencherait le drift guard. `PermitOpen *:2222`, car OpenSSH n'a pas de
-  joker d'hôte (`dev-*:2222` refuse tout) : la clé est la seule barrière.
-  sshd de session : sous-système sftp (scp, sftp, VS Code Remote) et `PATH`
-  avec `~/.cargo/bin` même pour `ssh dev-x cmd`. Toute recréation de `nginx`
-  (`make up`, déploiement CI) coupe les sessions SSH : travailler dans tmux,
-  `ssh -t dev-<nom> tmux new -A -s claude`.
-- **Persistance.** Deux volumes par session. `dev-<nom>-work` porte `/work`;
-  `dev-<nom>-state` porte `/home/dev/.state` : la clé d'hôte SSH (jamais
-  synchronisée, donc même empreinte après une recréation), l'état Claude
-  (`CLAUDE_CONFIG_DIR=/home/dev/.state/claude`, où Claude range aussi
-  `.claude.json`) et la config git globale (`GIT_CONFIG_GLOBAL=/home/dev/.state/gitconfig`).
-  Vers le bucket versionné `devbox`, identité S3 `devbox` :
-  `devbox:devbox/<nom>/{work,claude}`. `/work` part toutes les
-  `SYNC_INTERVAL` (60 s), l'état Claude toutes les `CLAUDE_SYNC_INTERVAL`
-  (600 s), et les deux à l'arrêt (120 s de grâce) ou si sshd meurt. Exclus de
-  `/work` : `target/`, `node_modules/`, `.venv/`, `.git/hooks` (un hook
-  restauré s'exécuterait au prochain `git`). **La restauration ne se fait que
-  dans un volume vide** : le bucket a jusqu'à un intervalle de retard, et
-  restaurer sur un volume intact reviendrait en arrière. Une restauration
-  interrompue n'est pas prise pour des données intactes : un marqueur
-  `restoring-work`/`restoring-claude` sur le volume d'état, retiré seulement
-  après succès, fait reprendre la copie au démarrage suivant, et tant qu'il
-  existe `sync.sh push` refuse de pousser (un `rclone sync` depuis un arbre
-  à moitié restauré effacerait les objets distants pas encore copiés). Un
-  `docker stop` pendant le démarrage sort sans rien pousser. Une fois la
-  restauration finie, l'entrypoint exige que l'`origin` de `/work` soit
-  `REPO_URL`, sinon il refuse de démarrer : une session supprimée puis
-  recréée sous le même nom avec un autre dépôt ne reprend pas l'ancien. Le
-  préfixe S3 de ce nom peut alors être la seule bonne copie de l'ancien
-  travail : le vérifier (`rclone ls devbox:devbox/<nom>/work`) avant d'y
-  supprimer quoi que ce soit ; le plus sûr est un autre nom. Le jeton d'abonnement Claude
-  vit dans le bucket (`claude/.credentials.json`). Aucune identité git n'est
-  préconfigurée : `git config --global user.name/user.email` une fois dans la
-  session (sur le volume d'état; perdu au `delete`).
-- **Le vrai garde-fou : le jeton GitHub et la protection de branche.** Le
-  jeton est fine-grained, limité à un dépôt, créé par le propriétaire, sans
-  Administration. Sur **chaque** dépôt confié à une session, le propriétaire
-  doit exiger une PR et les checks CI avant tout merge dans `main`, sans
-  contournement pour l'identité du jeton. `devbox create` ne vérifie que le
-  champ `protected` de `main`, vrai pour n'importe quelle règle : au mieux,
-  pas une preuve. Un merge sur `main` d'un dépôt qui a un runner déploie du
-  code sur l'hôte : une session qui peut y merger est root sur le daemon en
-  pratique.
-- **Plafonds connus.**
-  - Toutes les sessions partagent une identité S3 et un `dev-net`. Une
-    session compromise lit les préfixes des autres et peut **écraser** celui
-    d'une autre session ; au prochain restore de celle-ci, c'est de
-    l'exécution de code dans cette session (`.git/config` de `work/`, hooks
-    de `claude/settings.json`), donc l'accès à son jeton GitHub. La
-    restauration réservée aux volumes vides **réduit** ce risque au cas
-    supprimer-puis-recréer (ou volume perdu), elle ne le **ferme pas**. Le
-    fermer demande une identité S3 et un bucket par session (et un réseau
-    par session contre le sondage des ports).
-  - Le bucket est versionné et l'état Claude (transcriptions) y est poussé
-    toutes les 10 min : il grossit sans fin. Une expiration des versions non
-    courantes (cycle de vie) sur `devbox` est à faire par le propriétaire si
-    SeaweedFS la prend en charge ; ce n'est pas vérifié ici.
-  - squid est `ubuntu/squid:6.6-24.04_edge` épinglé par digest
-    (`dev/egress/Dockerfile`) : chercher un tag 24.04 plus récent avant de
-    déployer.
-  - Le CLI garde la clé API de Portainer (root sur le daemon) dans son
-    `config.toml`, sur la machine du propriétaire, et refuse `http://` sauf
-    `DEVBOX_ALLOW_HTTP=1`.
-  - L'env de chaque pile Portainer contient le `GH_TOKEN` de la session.
-  - 4 sessions actives au plus (`max_active`) et `mem_limit` 1536m : la VM de
-    l'hôte est petite.
-  - `delete` supprime les deux volumes (au mieux) et lance `ssh-keygen -R` :
-    une session recréée sous le même nom a une nouvelle clé d'hôte.
-  - `delete --purge` n'est pas automatisé : il affiche `rclone purge
-    devbox:devbox/<nom>`. Sur un bucket versionné, purge laisse les anciennes
-    versions, dont `claude/.credentials.json` ; le CLI indique
-    `rclone backend cleanup-hidden devbox:devbox/<nom>` pour les retirer, non
-    vérifié contre SeaweedFS (contrôler avec `rclone ls --s3-versions`).
-  - Les catalogues de plugins (`catalogs`) doivent être **publics** : la
-    session ne les clone qu'avec son jeton, limité à un seul dépôt.
-  - `gh run view --log` télécharge depuis `*.blob.core.windows.net`, hors de
-    la liste blanche : Claude ne lit pas les logs d'une CI en échec depuis la
-    session (le statut des checks, oui). Ne pas élargir la liste pour ça.
-- **Avant la première utilisation** (propriétaire) :
-  1. `make vault-cli args="kv patch -mount=infra env DEVBOX_S3_SECRET_KEY=..."`
-     puis `make vault-env`. `check-env` l'exige désormais : `make up` échoue
-     tant qu'elle manque.
-  2. `make s3-provision app=devbox versioned=1`.
-  3. `cp dev/gateway/authorized_keys.example dev/gateway/authorized_keys` et
-     y coller la clé publique.
-  4. `make dev-image`.
-  5. `make dev-up` : exige `infra-net` (`make init` ou `make net` d'abord);
-     crée `dev-net`. Un `dev-net` créé avant le sous-réseau fixe doit être
-     supprimé d'abord (`make dev-down`). Les conteneurs de session, même
-     arrêtés, gardent une référence à l'ancien réseau et ne reprendront
-     probablement pas (`devbox resume`) : les supprimer (`devbox delete`)
-     puis les recréer (`devbox create`, même nom et même dépôt) ; leur état
-     revient du bucket.
-  6. `make up`, pour recréer `nginx` avec le port `:2222`.
-  7. Écrire `config.toml` (voir le README, « Sessions de dev »).
-  8. `cargo build --release --manifest-path dev/cli/Cargo.toml`.
+- **SSH is a `ProxyJump`.** nginx (`stream.d/devssh.conf`) passes
+  `${LAN_IP}:2222` to `dev-gateway:22`, user `jump`, which forwards only to
+  port 2222 and has no shell; each session runs its own unprivileged sshd on
+  2222, with every forwarding off (a forwarded agent would push past the
+  one-repo token). `PermitOpen *:2222` cannot name sessions (no patterns),
+  so the jump user can reach port 2222 on any host the gateway sees: accepted,
+  owner keys only. The gateway's keys are `dev/gateway/authorized_keys`,
+  baked into its image (edit, then `make dev-up`); a session's are
+  `pubkey_path` + `extra_pubkeys` from the CLI config, so every machine of
+  the owner can log in. The CLI keeps the `Host dev-<name>` blocks in
+  `~/.ssh/devbox.conf`, included at the *top* of `~/.ssh/config` (ssh keeps
+  the first value it reads, so a `Host *` must not come first).
+- **Interactive logins land in tmux** (session `main`): a dropped link (Wi-Fi,
+  sleep, nginx recreated) leaves `claude` running; ssh again re-attaches.
+- **The only way out is the proxy.** Sessions are on `dev-net`
+  (`internal: true`: no route anywhere, no DNS) and get
+  `HTTP(S)_PROXY=dev-egress:3128`. squid's rule order is load-bearing:
+  `s3:8333` first, then **names** (`deny !allowed`) before **addresses**
+  (`deny private`) -- a `dst` check resolves the name, so checking it for a
+  name about to be refused would leak that name over DNS
+  (`<secret>.attacker.tld`). Only s3 and the allow-list (Anthropic, GitHub,
+  crates.io, npm, PyPI) are ever resolved, through Docker's DNS and on to the
+  host's resolver. The `-n` on `dstdomain` is load-bearing too: without it
+  squid reverse-resolves an IP literal, and an attacker's own PTR record
+  (`x.github.com`) would pass the list. `scripts/dev-isolation-check.sh <name>`
+  asserts all of it against a running session, DNS leak included (it reads
+  squid's ipcache through the cache manager, allowed from localhost only).
+- **Sessions share `dev-net`**, so one session can reach ports another
+  listens on (a dev server, a debugger). Not an anti-goal; per-session
+  networks would need the CLI to attach the proxy and gateway to each.
+- **No bind mounts in `docker-compose.dev.yml`**: configs are `COPY`'d into
+  the images, because `make dev-up` runs compose over the ssh `DOCKER_HOST`,
+  which sends the build context but not files to mount.
+- **One S3 identity per session**: `devbox-<name>`, actions
+  `Read/Write/List:devbox/<name>/*` (SeaweedFS action scopes; the `/*` is
+  what makes them work, and `devbox/ab` is not `devbox/a`). `devbox create`
+  mints it with a fresh secret by running `weed shell` in the infra `s3`
+  container through Portainer's Docker API (the secret travels in the exec's
+  env, never an argv), creating the versioned bucket `devbox` on first use;
+  `devbox delete` removes it. No `.env` key, nothing in `check-env`.
+- **State**: `/work` (volume `dev-<name>-work`) and the state volume
+  `dev-<name>-state` (Claude's config and subscription credentials via
+  `CLAUDE_CONFIG_DIR`, the SSH host key, the `ready` marker) survive a stop,
+  a resume and a recreate. Both are pushed to `devbox/<name>/{work,claude}`
+  every 60 s and on stop (`stop_grace_period: 120s`), with modes and
+  symlinks (`-M --links`); `target/`, `node_modules/`, `.venv/` are not. The
+  `ready` marker is written once a restore or clone has completed, and no push
+  happens without it: a push is an `rclone sync`, and pushing a half-restored
+  `/work` would delete the saved copy. A start without it restores again, so
+  `devbox delete x` then `devbox create x` (same repo) gets the work and the
+  Claude login back -- with a new host key, which `delete` forgets from
+  `known_hosts`. Reusing a name for another repo is refused at start.
+- **The GitHub token is the real guard rail**, not the container: Claude may
+  merge to the default branch, which on a repo with a self-hosted runner runs
+  code on the host. `devbox create`/`token` require a fine-grained token
+  (`github_pat_`; one set to "All repositories" cannot be detected), a
+  protected default branch, and a token *without* the Administration
+  permission (probed by reading the branch's protection, fail-closed: only
+  GitHub's 403 passes; a 404 "Branch not protected" -- rulesets only -- means
+  the token could read it, and any other answer refuses), since that
+  permission would let it lift the protection. The token sits in the stack env: Portainer,
+  `docker inspect`, and Portainer's volume on disk hold it; the CLI never
+  prints it. `devbox token <name>` replaces it (redeploys the stack).
+- **The Portainer API key stays on the owner's machine**, in the CLI's
+  `config.toml` (warned about unless mode 600); nothing in a session can reach
+  Portainer or the socket. Point `portainer_url` at the nginx vhost with
+  `ca_cert` = the stack's `certs/infra-ca.crt`: `insecure_tls` hands the key
+  to anyone on the LAN who can answer for Portainer's address.
+- **Budget**: `max_active` (4) x `mem_limit` (1536m) is 6 GiB on the laptop's
+  ~7.7 GiB VM, already carrying the stack, so sessions have
+  `oom_score_adj: 1000` (the OOM killer takes them first), `cpus` (2) and
+  `pids_limit: 1024`. Lower `max_active` if builds run in parallel.
+- **The image**: Claude Code is pinned (`CLAUDE_CODE_VERSION`) with its
+  auto-updater off; `npm i -g` goes to `~/.npm-global`; Debian's pip is
+  PEP 668-managed (use a venv). The dev/ Dockerfiles' base digests are
+  Renovate's (`dockerfile` manager); the three local images are ignored.
+  Changes under `dev/` do not trigger the infra deploy.
 
 ### Windows machines (`windows_exporter`)
 

@@ -562,12 +562,10 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make runner-up` / `make runner-down` | Start / stop the self-hosted CI runner that deploys on a push to `main` (its own compose project, `docker-compose.runner.yml`) |
-| `make runner-restart` / `make runner-logs` | Restart the runner / tail its logs |
-| `make runner-status` | Is it running here, and does GitHub have it registered with the `infra` label? |
-| `make runner-pull` | Re-pull the runner image and recreate it (the tag moves; GitHub retires old versions) |
-| `make runner-shell` | Open a shell in the running runner |
-| `make runner-env` | Write `.runner.env` from a GitHub PAT, checking first that it may administer runners (`FORCE=1` replaces it) |
+| `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (five self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
+| `make runners-logs` | Tail the five runners' logs (on the Docker host) |
+| `make runners-status` | Per repo: running here, and registered at GitHub with its label? |
+| `make runners-env` | Write `.runner.env` from five per-repo PATs, checking each first (`FORCE=1` replaces it) |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -895,39 +893,51 @@ container, `dns` included, so it costs a brief LAN DNS outage.
 
 It runs on a **self-hosted runner**, and has to: Portainer's API is on
 `${LAN_IP}:9443` and otherwise only on `infra-net`, with no public ingress,
-so a GitHub-hosted runner cannot reach it. The runner is its own compose
-project — outside the stack it deploys, for the same reason Portainer is.
+so a GitHub-hosted runner cannot reach it. There are five runners
+(`darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo), together a
+Portainer stack `runners` of their own — outside `infra`, so a `make up` never
+recreates a runner mid-job. Portainer reads `docker-compose.runners.yml` from
+GitHub main: merge before `make runners-up`.
 
-Setup is a token, a `make`, and one settings change:
+Setup is five tokens, a `make`, and one settings change:
 
 ```bash
-# 1. a PAT that may register runners on this repo:
-#    GitHub -> Settings -> Developer settings -> Personal access tokens
-#    (classic, 'repo' scope; or fine-grained with Administration: RW here)
-#    Minting it is a web-UI step -- GitHub has no API that issues a PAT.
-make runner-env         # paste it; writes .runner.env, mode 600
+# 1. one fine-grained PAT per repo, Administration: read and write on that
+#    repo only (GitHub -> Settings -> Developer settings; minted in the web UI).
+#    Caveat: a compromised job on darkangel, heaven or infra (they hold the
+#    Docker socket) can read all five tokens off the other runners.
+make runners-env        # paste the five; writes .runner.env, mode 600
 
-# 2. start it; it registers itself with the label 'infra'
-make runner-up
-make runner-status      # the container here, and what GitHub has registered
-make runner-logs        # until "Listening for Jobs"
+# 2. .portainer.env needs PORTAINER_API_KEY and PORTAINER_PINNEDPUBKEY
+#    (INFRA_HOST comes from the Makefile; PORTAINER_URL optionally overrides);
+#    then deploy the stack
+make runners-up
+make runners-status     # per repo: the container here, and what GitHub has
+make runners-logs       # until "Listening for Jobs"
 ```
 
-`make runner-status` is worth preferring over the browser, because it
-answers the question that actually bites: the runner is `EPHEMERAL`, so it
-de-registers after every job and re-registers on restart, and a container
-that is up says nothing about whether GitHub still has a runner to hand the
-next deploy to. GitHub does not report the gap — a job whose labels match
-nothing queues silently rather than failing — so the two sides have to be
-read together.
+`make runners-status` answers the question that bites: the runners are
+`EPHEMERAL`, so each de-registers after a job, and a container that is up says
+nothing about whether GitHub still has a runner for the next one. A job whose
+labels match nothing queues silently rather than failing.
 
-`runner-down`, `-restart` and `-pull` refuse while a job is running, since
-recreating the container mid-job leaves that workflow run with no result;
-`FORCE=1 make runner-down` overrides. If GitHub cannot be reached to ask,
-they warn and continue rather than trapping you with a runner you cannot
-stop. `make runner-pull` is the fix for a runner GitHub has stopped
-accepting: the image tag moves on purpose, because pinning a digest ages
-into a version the service refuses.
+`runners-up`, `-down`, `-pull` and `-restart` are stack redeploys that recreate
+all five runners, so they refuse while any job is running;
+`FORCE=1 make runners-down` overrides. If GitHub cannot be reached to ask they
+warn and continue. `make runners-pull` is the fix for a runner GitHub has
+stopped accepting (the image tag moves on purpose).
+
+Branch protection and Actions settings for the five repos come from
+`scripts/github-harden.sh <darkangel|ea|heaven|infra|moria>`: a dry run by
+default (prints the `main-protection` ruleset and the diff against GitHub,
+writes nothing). `--apply` is manual and per repo, with your own `gh` login,
+and **Infra last, only after `test` has run green on a real PR** (the Infra
+ruleset requires it and has no bypass). It refuses if a required check is not
+a job of an unfiltered `pull_request` workflow, or has no successful run on the
+latest commit of the default branch, since either would block every merge. If
+Infra PRs are ever stuck on a red `test`, disable the ruleset at repo
+Settings → Rules → Rulesets → `main-protection`. Old
+rulesets (`Main`, `Protect Main`) are listed and left alone.
 
 Then check it is listed at **Settings → Actions → Runners**, and set
 **Settings → Actions → General → "Fork pull request workflows from outside
@@ -945,11 +955,12 @@ The runner's own `actions/checkout` tree only supplies the script; the
 deployed bind mounts come from the host checkout, and confusing the two is
 the failure mode the drift guard catches.
 
-Two things worth knowing before relying on it. The runner holds
+Two things worth knowing before relying on it. The `infra` runner
+(like `darkangel` and `heaven`; `ea` and `moria` get none) holds
 `/var/run/docker.sock` — root on this daemon, the same power Portainer's UI
-has — so **merging to main is now enough to run code on the host**; branch
-protection is what keeps that set small. And **no workflow on the `infra`
-label may ever trigger on `pull_request`**: this repo is public, and a fork's
+has — so **merging to main is now enough to run code on the host**; a
+PR-required `main` ruleset is what keeps that set small. And **no workflow on
+a self-hosted label may ever trigger on `pull_request`**: this repo is public, and a fork's
 PR brings its own workflow file. `CLAUDE.md` ("CI: deploying on a push to
 main") has the rest, including why the checkout is mounted at the same path
 on both sides and why `DOCKER_HOST` is set to the socket.
@@ -1109,6 +1120,60 @@ to do with it.
   Android (F-Droid build) its own connection, but iOS then gets delayed
   delivery.
 
+## Dev sessions
+
+Claude Code in a container per GitHub repo, over SSH, with egress limited to
+Anthropic, GitHub and the package registries. Design and caveats: CLAUDE.md
+"Dev sessions".
+
+Once, on the stack (after this is merged):
+
+```bash
+# your public key(s) into dev/gateway/authorized_keys, commit, then:
+make dev-image                      # builds devbox-session:1 from main (FORCE=1 rebuilds)
+make dev-up                         # egress proxy + SSH gateway
+```
+
+Nothing else: `devbox create` makes the `devbox` bucket and each session's
+S3 identity itself.
+
+Once, on each Mac/PC: `cargo install --path dev/cli`, then write
+`config.toml` in the OS config dir (`devbox` names the path in its error
+when it is missing; macOS: `~/Library/Application Support/net.famillelallier.devbox/`,
+Windows: `%APPDATA%\famillelallier\devbox\config\`), mode 600:
+
+```toml
+portainer_url = "https://portainer.infra.famillelallier.net"
+ca_cert = "/Users/me/OpenCode/Infra/certs/infra-ca.crt"   # a copy of the stack's CA
+api_key = "ptr_..."            # Portainer -> My account -> Access tokens
+endpoint_id = 3                # Portainer's environment id
+ssh_host = "192.168.2.10"      # LAN_IP
+pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
+# extra_pubkeys = ["ssh-ed25519 AAAA... me@windows-pc"]   # your other machines
+# catalogs = ["anthropics/claude-plugins-official", "me/my-plugins"]
+# max_active = 4
+# mem_limit = "1536m"
+# cpus = "2"
+```
+
+Then:
+
+```bash
+devbox create jarvis --repo nicolaslallier/Jarvis   # asks for the token, then plugins
+ssh dev-jarvis                                     # lands in tmux; first time: run `claude` and log in
+devbox list
+devbox stop jarvis      # pushes /work and Claude's state to the bucket first
+devbox resume jarvis
+devbox token jarvis     # a new token when the old one expires
+devbox delete jarvis    # keeps the bucket copy; create (same repo) restores from it
+```
+
+The token is a fine-grained PAT on that one repository with Contents and
+Pull requests read/write, and **not** Administration; `create` refuses a
+repo whose default branch is not protected. `scripts/dev-isolation-check.sh
+<name>` checks a session's network box; `make dev-test` runs the CLI tests
+and the image/state checks on this machine's Docker.
+
 ## Connecting an application repo
 
 1. Add a database + role for the app: put its name in `APP_DATABASES` in
@@ -1150,54 +1215,6 @@ to do with it.
    (`OTEL_EXPORTER_OTLP_ENDPOINT=http://alloy:4318`). Container logs are
    collected automatically via the Docker socket — no app changes needed
    for Loki.
-
-## Sessions de dev
-
-`devbox` (`dev/cli`) crée des conteneurs Claude Code isolés, un par session,
-joignables en SSH. Les étapes de mise en place et le modèle de sécurité sont
-dans `CLAUDE.md` (« Sessions de dev (devbox) »).
-
-Build : `cargo build --release --manifest-path dev/cli/Cargo.toml`. Config
-(`config.toml` dans le dossier de configuration de l'OS, par exemple
-`~/Library/Application Support/net.famillelallier.devbox/` sur macOS) :
-
-```toml
-portainer_url = "https://192.168.2.10:9443"
-api_key = "ptr_..."            # clé API Portainer
-endpoint_id = 2
-insecure_tls = true            # certificat auto-signé de Portainer
-ssh_host = "192.168.2.10"      # LAN_IP
-ssh_port = 2222
-pubkey_path = "/home/me/.ssh/id_ed25519.pub"
-s3_secret_key = "..."          # DEVBOX_S3_SECRET_KEY
-```
-
-```bash
-devbox create jarvis --repo https://github.com/o/r   # jeton GitHub demandé (ou DEVBOX_GH_TOKEN)
-ssh -t dev-jarvis tmux new -A -s claude              # puis `claude`; première connexion : login
-devbox list
-devbox stop jarvis
-devbox resume jarvis
-devbox delete jarvis                                 # volumes supprimés, le bucket garde l'état
-```
-
-Au premier `claude`, connecte-toi avec ton abonnement; le jeton est
-sauvegardé sur le volume d'état et dans le bucket, et resservira après un
-`resume` ou un `create` du même nom. `--plugin nom@marketplace` (répétable)
-évite la sélection interactive des plugins; les catalogues doivent être
-publics.
-
-- **tmux** : une recréation de `nginx` (`make up`, déploiement CI) coupe les
-  connexions SSH; la session tmux, elle, survit.
-- **Identité git** : aucune n'est préconfigurée. Une fois par session :
-  `git config --global user.name ...` et `user.email ...` (gardée sur le
-  volume d'état, perdue au `delete`).
-- **Logs de CI** : `gh run view --log` passe par `*.blob.core.windows.net`,
-  hors liste blanche : la session voit le statut des checks, pas leurs logs.
-- **`delete --purge`** n'efface rien : il affiche la commande `rclone purge`,
-  qui laisse les anciennes versions du bucket versionné (jeton Claude
-  compris), et la commande `rclone backend cleanup-hidden` pour celles-ci
-  (non vérifiée contre SeaweedFS).
 
 ## Layout
 

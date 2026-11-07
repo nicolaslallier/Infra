@@ -107,6 +107,250 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		failures+=("pr-validation checks")
 	fi
 
+	echo "== runners compose"
+	# ci-fake-env.sh (run by _run_all above) wrote a five-token .runner.env into $ws.
+	rc() { (cd "$ws" && docker compose -f docker-compose.runners.yml --env-file "$1" "${@:2}" 2>&1); }
+	if cfg="$(rc .runner.env config --format json)"; then
+		names="$(jq -r '.services | keys | join(",")' <<<"$cfg")"
+		if [ "$names" = "runner-darkangel,runner-ea,runner-heaven,runner-infra,runner-moria" ]; then
+			pass "five runner-<name> services"
+		else
+			fail "five runner-<name> services" "got: $names"
+		fi
+		for n in darkangel ea heaven infra moria; do
+			if jq -e --arg n "$n" '.services["runner-"+$n].environment | .LABELS == $n and .EPHEMERAL == "true"' <<<"$cfg" >/dev/null; then
+				pass "runner-$n label and EPHEMERAL"
+			else
+				fail "runner-$n label and EPHEMERAL"
+			fi
+		done
+		socks="$(jq -r '[.services | to_entries[] | select(any(.value.volumes[]?; .source == "/var/run/docker.sock")) | .key] | sort | join(",")' <<<"$cfg")"
+		if [ "$socks" = "runner-darkangel,runner-heaven,runner-infra" ]; then
+			pass "docker socket only on darkangel, heaven, infra"
+		else
+			fail "docker socket only on darkangel, heaven, infra" "got: $socks"
+		fi
+	else
+		fail "runners compose config" "$cfg"
+	fi
+	grep -v '^GH_RUNNER_TOKEN_MORIA=' "$ws/.runner.env" >"$ws/.runner.env.short"
+	if out="$(rc .runner.env.short config -q)"; then
+		fail "missing PAT is rejected" "config succeeded"
+	elif grep -qF GH_RUNNER_TOKEN_MORIA <<<"$out"; then
+		pass "missing PAT is rejected, naming GH_RUNNER_TOKEN_MORIA"
+	else
+		fail "missing PAT is rejected, naming GH_RUNNER_TOKEN_MORIA" "$out"
+	fi
+
+	echo "== runners-stack selftest"
+	if out="$(cd "$ws" && bash scripts/runners-stack.sh selftest 2>&1)"; then pass "runners-stack.sh selftest"; else fail "runners-stack.sh selftest" "$out"; fi
+
+	echo "== PR workflow"
+	wf=.github/workflows/test.yml
+	if [ -f "$wf" ] && uv_py --with pyyaml python - "$PWD/$wf" <<-'PY'
+		import sys, yaml
+		d = yaml.safe_load(open(sys.argv[1]))
+		on = d.get(True, d.get("on"))  # YAML 1.1 reads a bare `on` as True
+		assert list(on) == ["pull_request"] and on["pull_request"] == {"branches": ["main"]}, on
+		assert d["jobs"]["test"]["runs-on"] == "ubuntu-latest", d["jobs"]["test"]["runs-on"]
+		assert d["permissions"] == {"contents": "read"}, d["permissions"]
+	PY
+	then pass "test.yml: pull_request on main, no paths, hosted runner, read-only"; else fail "test.yml: pull_request on main, no paths, hosted runner, read-only"; fi
+	if [ -f "$wf" ] && ! grep -v '^ *#' "$wf" | grep -qE 'self-hosted|secrets\.'; then pass "test.yml: no self-hosted label, no secrets"; else fail "test.yml: no self-hosted label, no secrets"; fi
+
+	echo "== runners Makefile targets"
+	if ! grep -qE '^runner(-ea)?-' Makefile; then pass "no runner-* / runner-ea-* targets"; else fail "no runner-* / runner-ea-* targets" "$(grep -nE '^runner(-ea)?-' Makefile)"; fi
+	if out="$(make -n runners-up FORCE=1 2>&1)" && grep -q 'scripts/runners-stack.sh up' <<<"$out"; then pass "make runners-up calls runners-stack.sh up"; else fail "make runners-up calls runners-stack.sh up" "$out"; fi
+	if grep -q 'INFRA_HOST=' <<<"$(make -n runners-up FORCE=1 2>&1)"; then pass "make runners-up passes INFRA_HOST"; else fail "make runners-up passes INFRA_HOST"; fi
+	fe="$ws/.fe-sb"; mkdir -p "$fe"; cp "$ws/.env.example" "$fe/"; : >"$fe/.runner.env"
+	if ! out="$(bash "$ws/scripts/ci-fake-env.sh" "$fe" 2>&1)" && grep -qF .runner.env <<<"$out"; then pass "ci-fake-env refuses to overwrite .runner.env"; else fail "ci-fake-env refuses to overwrite .runner.env" "$out"; fi
+	rm -rf "$fe"
+	for f in docker-compose.runner.yml docker-compose.runner-ea.yml; do
+		if [ ! -e "$f" ]; then pass "$f is gone"; else fail "$f is gone"; fi
+	done
+
+	echo "== runner scripts (fake curl)"
+	# Sandbox with just the scripts; a fake curl answers per token / repo.
+	sb="$ws/.runner-sb"; mkdir -p "$sb/scripts/lib" "$sb/bin"
+	cp "$ws/scripts/gen-runner-env.sh" "$ws/scripts/runner-status.sh" "$sb/scripts/"
+	cp "$ws/scripts/lib/runners.sh" "$sb/scripts/lib/"
+	cat >"$sb/bin/curl" <<'FAKE'
+#!/usr/bin/env bash
+# gen mode (-w '%{http_code}'): the code only, 404 for a token containing 404.
+# status mode (-w '\n%{http_code}'): a one-runner body for the repo in the URL.
+tok="$(sed -n 's/.*Bearer \(.*\)".*/\1/p')"
+url="${*: -1}"; w=""
+while [ $# -gt 0 ]; do [ "$1" = -w ] && w="$2"; shift; done
+repo="$(sed 's|.*/repos/[^/]*/\([^/]*\)/actions.*|\1|' <<<"$url" | tr '[:upper:]' '[:lower:]')"
+code=200; case "$tok" in *404*) code=404 ;; esac
+if [ "${w:0:1}" = $'\n' ]; then
+  busy=false; [ "$repo" = "${FAKE_BUSY:-}" ] && busy=true
+  printf '{"runners":[{"name":"%s-host","status":"online","busy":%s,"labels":[{"name":"%s"}]}]}\n%s' "$repo" "$busy" "$repo" "$code"
+else
+  printf '%s' "$code"
+fi
+FAKE
+	chmod +x "$sb/bin/curl"
+	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\n'
+	if out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$good" 2>&1)" \
+		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 5 ] \
+		&& [ "$(stat -c %a "$sb/.runner.env" 2>/dev/null || stat -f %Lp "$sb/.runner.env")" = 600 ]; then
+		pass "gen-runner-env writes five tokens, mode 600"
+	else
+		fail "gen-runner-env writes five tokens, mode 600" "$out"
+	fi
+	rm -f "$sb/.runner.env"
+	bad=$'tok-a\ntok-404\ntok-c\ntok-d\ntok-e\n'
+	out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$bad" 2>&1)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF nicolaslallier/EA <<<"$out" && [ ! -e "$sb/.runner.env" ]; then
+		pass "gen-runner-env rejects EA's 404 token, names the repo, writes nothing"
+	else
+		fail "gen-runner-env rejects EA's 404 token, names the repo, writes nothing" "exit $code: $out"
+	fi
+	printf 'GH_RUNNER_TOKEN_%s=t\n' DARKANGEL EA HEAVEN INFRA MORIA >"$sb/.runner.env"
+	out="$(cd "$sb" && FAKE_BUSY=heaven PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
+	if [ "$code" = 3 ] && grep -qF heaven-host <<<"$out"; then
+		pass "runner-status --busy: busy heaven runner -> exit 3, named"
+	else
+		fail "runner-status --busy: busy heaven runner -> exit 3, named" "exit $code: $out"
+	fi
+	out="$(cd "$sb" && FAKE_BUSY=none PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
+	if [ "$code" = 0 ]; then pass "runner-status --busy: all idle -> exit 0"; else fail "runner-status --busy: all idle -> exit 0" "exit $code: $out"; fi
+
+	echo "== github-harden.sh (fake gh, no write ever)"
+	hs="$ws/scripts/github-harden.sh"
+	# shellcheck disable=SC1090
+	rj() { (. "$hs"; ruleset_json "$1"); }
+	if [ -f "$hs" ] \
+		&& rj infra | jq -e '.name=="main-protection" and .target=="branch" and .enforcement=="active" and .bypass_actors==[]
+			and .conditions.ref_name.include==["~DEFAULT_BRANCH"]
+			and ([.rules[].type]|sort)==["deletion","non_fast_forward","pull_request","required_linear_history","required_status_checks"]
+			and (.rules[]|select(.type=="pull_request").parameters.required_approving_review_count)==0
+			and (.rules[]|select(.type=="required_status_checks").parameters
+				| .strict_required_status_checks_policy==true and ([.required_status_checks[].context]==["test"]))' >/dev/null \
+		&& [ "$(rj darkangel | jq '[.rules[]|select(.type=="required_status_checks").parameters.required_status_checks[]]|length')" = 3 ]; then
+		pass "ruleset_json: infra/darkangel shape"
+	else
+		fail "ruleset_json: infra/darkangel shape"
+	fi
+	out="$(bash "$hs" nope 2>&1)"; code=$?
+	if [ "$code" -ne 0 ]; then pass "github-harden nope -> usage error"; else fail "github-harden nope -> usage error" "$out"; fi
+
+	hb="$ws/.harden-sb"; mkdir -p "$hb/bin" "$hb/fix"
+	cat >"$hb/bin/gh" <<'FAKE'
+#!/usr/bin/env bash
+# Records every call in $LOG; GETs answer from $FIX/<path with / as _>, else 404.
+# Bodies sent with --input - are recorded after the call line.
+shift # api
+m=GET; path=""; body=""
+while [ $# -gt 0 ]; do
+  case "$1" in -X) m="$2"; shift ;; -H) shift ;; --input) body="$(cat)"; shift ;; *) path="$1" ;; esac
+  shift
+done
+path="${path%%\?*}"
+printf '%s %s %s\n' "$m" "$path" "$body" >>"$LOG"
+if [ "$m" != GET ]; then
+  n=$(( $(cat "$LOG.n" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$LOG.n"
+  [ "$n" = "${FAKE_FAIL_NTH:-}" ] && { echo "HTTP 500" >&2; exit 1; }
+  exit 0
+fi
+f="$FIX/$(tr / _ <<<"$path")"
+[ -f "$f" ] && cat "$f" || { echo "HTTP 404" >&2; exit 1; }
+FAKE
+	chmod +x "$hb/bin/gh"
+	fx="$hb/fix"; W=repos_nicolaslallier_Infra_contents_.github_workflows
+	echo '[{"name":"test.yml","type":"file"},{"name":"deploy.yml","type":"file"}]' >"$fx/$W"
+	printf 'name: test\non:\n  pull_request:\n    branches: [main]\njobs:\n  test:\n    runs-on: ubuntu-latest\n' >"$fx/${W}_test.yml"
+	printf 'name: deploy\non:\n  push:\n    branches: [main]\njobs:\n  deploy:\n    runs-on: [self-hosted, infra]\n' >"$fx/${W}_deploy.yml"
+	R=repos_nicolaslallier_Infra
+	echo '[{"id":7,"name":"Main","enforcement":"active"}]' >"$fx/${R}_rulesets"
+	echo '{"allow_squash_merge":true,"allow_rebase_merge":false}' >"$fx/$R"
+	cr() { printf '{"check_runs":[%s]}' "$(for c in "$@"; do printf '{"name":"%s","conclusion":"success"},' "$c"; done | sed 's/,$//')"; }
+	cr test >"$fx/${R}_commits_main_check-runs"
+	cr 'build (ubuntu-latest, target/release/moria-client, moria-client-linux)' 'build (windows-latest, target/release/moria-client.exe, moria-client-windows.exe)' 'build (macos-latest, target/release/moria-client, moria-client-macos)' >"$fx/repos_nicolaslallier_Moria_commits_main_check-runs"
+	hg() { (cd "$hb" && rm -f "$hb/log.n" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash "$hs" "$@" 2>&1); }
+
+	: >"$hb/log"; out="$(hg infra)"; code=$?
+	if [ "$code" = 0 ] && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log" && grep -qF 'Main' <<<"$out" && grep -qF 'would POST' <<<"$out"; then
+		pass "github-harden dry run: lists old ruleset, writes nothing"
+	else fail "github-harden dry run: lists old ruleset, writes nothing" "exit $code: $out"; fi
+
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" = 0 ] && grep -q '^POST repos/nicolaslallier/Infra/rulesets {' "$hb/log" \
+		&& ! grep -q '^PUT repos/nicolaslallier/Infra/rulesets' "$hb/log" \
+		&& grep -q '^PUT repos/nicolaslallier/Infra/actions/permissions/fork-pr-contributor-approval {"approval_policy":"all_external_contributors"}' "$hb/log" \
+		&& grep -q '^PUT repos/nicolaslallier/Infra/actions/permissions {"enabled":true,"allowed_actions":"selected"}' "$hb/log" \
+		&& grep -q '^PUT repos/nicolaslallier/Infra/actions/permissions/selected-actions {"github_owned_allowed":true,"verified_allowed":true,"patterns_allowed":\[\]}' "$hb/log"; then
+		pass "github-harden --apply: POST ruleset + three PUT settings, old ruleset untouched"
+	else fail "github-harden --apply: POST ruleset + three PUT settings" "exit $code: $out"$'\n'"$(cat "$hb/log")"; fi
+
+	echo '[{"id":7,"name":"Main","enforcement":"active"},{"id":9,"name":"main-protection","enforcement":"active"}]' >"$fx/${R}_rulesets"
+	: >"$hb/log"; hg --apply infra >/dev/null
+	if grep -q '^PUT repos/nicolaslallier/Infra/rulesets/9 {' "$hb/log" && ! grep -q '^POST ' "$hb/log" && ! grep -q 'rulesets/7' "$hb/log"; then
+		pass "github-harden --apply twice: PUT by id, no duplicate, #7 untouched"
+	else fail "github-harden --apply twice: PUT by id" "$(cat "$hb/log")"; fi
+
+	# A required check that never succeeded on main refuses --apply (nothing written); the dry run still reports it.
+	echo '{"check_runs":[{"name":"test","conclusion":"failure"}]}' >"$fx/${R}_commits_main_check-runs"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF "'test' has no successful run" <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden --apply: check never green on main refused, named, nothing written"
+	else fail "github-harden --apply: check never green on main refused" "exit $code: $out"; fi
+	: >"$hb/log"; out="$(hg infra)"; code=$?
+	if [ "$code" = 0 ] && grep -qF 'would REFUSE' <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden dry run: reports a check never green, writes nothing"
+	else fail "github-harden dry run: reports a check never green" "exit $code: $out"; fi
+	cr test >"$fx/${R}_commits_main_check-runs"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" = 0 ] && grep -q '^PUT repos/nicolaslallier/Infra/rulesets/9 {' "$hb/log"; then
+		pass "github-harden --apply: accepted once every check succeeded on main"
+	else fail "github-harden --apply: accepted once green" "exit $code: $out"; fi
+
+	# Third-party actions: derived from the workflows' `uses:`, GitHub-owned and local refs ignored.
+	M=repos_nicolaslallier_Moria; MW=${M}_contents_.github_workflows
+	echo '[{"name":"client.yml","type":"file"}]' >"$fx/$MW"
+	printf 'name: client\non:\n  pull_request:\n    branches: [main]\njobs:\n  build:\n    strategy:\n      matrix:\n        os: [ubuntu-latest, windows-latest, macos-latest]\n    runs-on: ${{ matrix.os }}\n    steps:\n      - uses: actions/checkout@v4\n      - uses: dtolnay/rust-toolchain@stable\n      - uses: "Swatinem/rust-cache@v2"\n      - uses: ./.github/actions/x\n      - uses: foo/bar/sub@v1 # c\n      - uses: docker://alpine:3\n' >"$fx/${MW}_client.yml"
+	echo '[]' >"$fx/${M}_rulesets"; echo '{"allow_rebase_merge":true}' >"$fx/$M"
+	: >"$hb/log"; hg --apply moria >/dev/null
+	want='{"github_owned_allowed":true,"verified_allowed":true,"patterns_allowed":["Swatinem/rust-cache@*","dtolnay/rust-toolchain@*","foo/bar/sub@*"]}'
+	if grep -qF "PUT repos/nicolaslallier/Moria/actions/permissions/selected-actions $want" "$hb/log"; then
+		pass "github-harden: patterns_allowed derived from uses: (owner/repo[/sub]@*, byte-sorted)"
+	else fail "github-harden: patterns_allowed derived from uses:" "$(cat "$hb/log")"; fi
+	# bash 3.2-safe: build the fixtures for the filter test
+	H=repos_nicolaslallier_Heaven; HW=${H}_contents_.github_workflows
+	echo '[{"name":"ci.yml","type":"file"},{"name":"docker.yml","type":"file"},{"name":"ign.yml","type":"file"}]' >"$fx/$HW"
+	printf 'on:\n  push:\n    paths: [x]\n  pull_request:\njobs:\n  test:\n    strategy:\n      matrix:\n        v: [1]\n' >"$fx/${HW}_ci.yml"
+	printf 'on:\n  pull_request:\n    paths:\n      - a\njobs:\n  image:\n    runs-on: x\n' >"$fx/${HW}_docker.yml"
+	printf 'on:\n  pull_request:\n    paths-ignore:\n      - a\njobs:\n  ignored:\n    runs-on: x\n' >"$fx/${HW}_ign.yml"
+	out="$(cd "$hb" && LOG="$hb/log" FIX="$fx" PATH="$hb/bin:$PATH" bash -c '. "$1"; workflow_jobs nicolaslallier/Heaven' _ "$hs" 2>&1)"
+	if [ "$out" = "$(printf 'ok\ttest\t1\nfiltered\timage\t0\nfiltered\tignored\t0')" ]; then
+		pass "workflow_jobs: matrix accepted, paths and paths-ignore filtered, push paths ignored"
+	else fail "workflow_jobs: paths/paths-ignore/matrix" "$out"; fi
+
+	# required_linear_history needs squash or rebase merging.
+	echo '{"allow_squash_merge":false,"allow_rebase_merge":false,"allow_merge_commit":true}' >"$fx/$R"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF allow_squash_merge <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden --apply: merge-commit-only repo refused, nothing written"
+	else fail "github-harden --apply: merge-commit-only repo refused" "exit $code: $out"; fi
+	echo '{"allow_squash_merge":true}' >"$fx/$R"
+
+	# A failing third write reports what was and was not applied.
+	: >"$hb/log"; out="$(FAKE_FAIL_NTH=3 hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF 'applied: ruleset main-protection' <<<"$out" \
+		&& grep -qF 'FAILED: actions/permissions' <<<"$out" \
+		&& grep -qF 'applied before the failure: ruleset main-protection fork-pr-contributor-approval' <<<"$out" \
+		&& grep -qF 'NOT applied: actions/permissions, selected-actions' <<<"$out"; then
+		pass "github-harden --apply: failure on write 3 lists applied and pending steps"
+	else fail "github-harden --apply: partial failure report" "exit $code: $out"; fi
+
+	# A required check that is no job (here: the workflow renamed it) refuses before any write.
+	sed -i.sed 's/^  test:/  tests:/' "$fx/${W}_test.yml"; rm -f "$fx/${W}_test.yml.sed"
+	: >"$hb/log"; out="$(hg --apply infra)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF "'test'" <<<"$out" && ! grep -qE '^(POST|PUT|PATCH|DELETE) ' "$hb/log"; then
+		pass "github-harden --apply: missing check refused, named, nothing written"
+	else fail "github-harden --apply: missing check refused" "exit $code: $out"; fi
+
 	echo "== check-env rejects broken .env files"
 	if [ ! -f "$ws/.baseline-ok" ]; then
 		# Already a failure above; every case would be rejected for that reason.
@@ -140,8 +384,6 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		expect_reject "short cookie secret" "byte cookie key" "set_env JARVIS_OAUTH_COOKIE_SECRET abc"
 		expect_reject "STS key not base64" "is not padded standard base64" "set_env S3_STS_SIGNING_KEY not-base64"
 		expect_reject "amqp password not url-safe" "MORIA_AMQP_PASSWORD must be letters and digits" "set_env MORIA_AMQP_PASSWORD 'a@b/c'"
-		expect_reject "devbox s3 key absent" "missing settings" "sed -i.sed '/^DEVBOX_S3_SECRET_KEY=/d' .env && rm -f .env.sed"
-		expect_reject "devbox s3 key placeholder" "placeholder" "set_env DEVBOX_S3_SECRET_KEY change-me"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
 		# check-env passes LAN_IP by design where it cannot list addresses.
 		if command -v ifconfig >/dev/null 2>&1 || command -v ip >/dev/null 2>&1; then

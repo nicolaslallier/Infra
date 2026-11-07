@@ -167,14 +167,20 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
         {
             # Catches a ${VAR:?} with nothing behind it and a malformed
             # service block -- the two ways a deploy dies before any container
-            # starts. Both compose projects, since portainer's is separate.
+            # starts. Every compose project: portainer's and the dev plumbing
+            # are separate, and a session's file is filled in by the devbox
+            # CLI (dummy values here).
             "name": "compose config",
             "image": IMG_DOCKER_CLI,
             "command": [
                 "sh",
                 "-c",
                 "docker compose --env-file .env -f docker-compose.yml config -q && "
-                "docker compose --env-file .env -f docker-compose.portainer.yml config -q",
+                "docker compose --env-file .env -f docker-compose.portainer.yml config -q && "
+                "docker compose --env-file .runner.env -f docker-compose.runners.yml config -q && "
+                "docker compose --env-file /dev/null -f docker-compose.dev.yml config -q && "
+                "SESSION=x REPO_URL=x GH_TOKEN=x SSH_PUBKEYS=x S3_ACCESS_KEY=x S3_SECRET_KEY=x "
+                "docker compose --env-file /dev/null -f dev/session.compose.yml config -q",
             ],
             "working_dir": "/repo",
             "volumes": {

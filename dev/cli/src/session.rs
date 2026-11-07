@@ -1,606 +1,182 @@
+//! Pure pieces of the session commands: stack env, the cap, the SSH config.
 use crate::config::Config;
-use crate::portainer::{Client, Stack};
-use crate::{catalog, github, validate};
-use anyhow::{anyhow, bail, Context, Result};
-use std::path::PathBuf;
 
-const COMPOSE: &str = include_str!("../../session.compose.yml");
+/// Everything the stack env needs that is not in the config.
+pub struct NewSession<'a> {
+    pub name: &'a str,
+    /// `owner/repo`
+    pub repo: &'a str,
+    pub token: &'a str,
+    pub plugins: &'a [String],
+    /// Comma-joined, from `pubkeys`.
+    pub pubkeys: &'a str,
+    /// This session's own S3 secret (identity `devbox-<name>`).
+    pub s3_secret: &'a str,
+}
 
-pub fn stack_env(
-    cfg: &Config,
-    name: &str,
-    repo: &str,
-    token: &str,
-    plugins: &[String],
-    pubkey: &str,
-) -> Vec<(String, String)> {
+/// The stack env dev/session.compose.yml reads.
+pub fn stack_env(cfg: &Config, s: &NewSession) -> Vec<(String, String)> {
     [
-        ("SESSION", name.to_string()),
-        ("REPO_URL", format!("https://github.com/{repo}")),
-        ("GH_TOKEN", token.to_string()),
-        ("PLUGINS", plugins.join(",")),
+        ("SESSION", s.name.to_string()),
+        ("REPO_URL", format!("https://github.com/{}", s.repo)),
+        ("GH_TOKEN", s.token.to_string()),
         ("MARKETPLACES", cfg.catalogs.join(",")),
-        ("SSH_PUBKEY", pubkey.to_string()),
-        ("S3_SECRET_KEY", cfg.s3_secret_key.clone()),
+        ("PLUGINS", s.plugins.join(",")),
+        ("SSH_PUBKEYS", s.pubkeys.to_string()),
+        ("S3_ACCESS_KEY", format!("devbox-{}", s.name)),
+        ("S3_SECRET_KEY", s.s3_secret.to_string()),
         ("MEM_LIMIT", cfg.mem_limit.clone()),
+        ("CPUS", cfg.cpus.clone()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect()
 }
 
+/// The owner's public keys, comma-joined for SSH_PUBKEYS: the creating
+/// machine's plus `extra_pubkeys`. A key holding a comma or a newline would
+/// split into garbage, so it is refused.
+pub fn pubkeys(primary: &str, extra: &[String]) -> Result<String, String> {
+    let keys: Vec<&str> = std::iter::once(primary.trim()).chain(extra.iter().map(|k| k.trim())).collect();
+    for k in &keys {
+        if k.is_empty() || k.contains(',') || k.contains('\n') {
+            return Err(format!("unusable public key {k:?}: empty, or holds a comma or a line break"));
+        }
+    }
+    Ok(keys.join(","))
+}
+
+/// Refuses a create/resume that would exceed `max` running sessions.
 pub fn check_cap(active: usize, max: usize) -> Result<(), String> {
-    if active >= max {
-        Err(format!(
-            "trop de sessions actives ({active}/{max}): arrête-en une (devbox stop)"
-        ))
-    } else {
+    if active < max {
         Ok(())
+    } else {
+        Err(format!("{active} sessions running, the cap is {max} (max_active): stop one first"))
     }
 }
 
+/// The block that makes `ssh dev-<name>` go through the gateway.
 pub fn ssh_config_entry(cfg: &Config, name: &str) -> String {
     format!(
-        "# devbox: {name}\nHost dev-{name}\n  HostName dev-{name}\n  User dev\n  Port 2222\n  ProxyJump jump@{}:{}\n# devbox-end: {name}\n",
+        "Host dev-{name}\n    HostName dev-{name}\n    User dev\n    Port 2222\n    ProxyJump jump@{}:{}\n    ForwardAgent no\n",
         cfg.ssh_host, cfg.ssh_port
     )
 }
 
-pub fn remove_ssh_block(existing: &str, name: &str) -> String {
-    let (start, end) = (format!("# devbox: {name}"), format!("# devbox-end: {name}"));
+/// Session blocks live in their own file, `~/.ssh/devbox.conf`. Returns it
+/// with `name`'s block present exactly once (replaced if it was there).
+pub fn devbox_conf_with(conf: &str, entry: &str, name: &str) -> String {
+    let rest = devbox_conf_without(conf, name);
+    if rest.is_empty() { entry.to_string() } else { format!("{}\n\n{entry}", rest.trim_end()) }
+}
+
+/// `conf` without `name`'s block.
+pub fn devbox_conf_without(conf: &str, name: &str) -> String {
+    let host = format!("Host dev-{name}");
+    let mut out = Vec::new();
     let mut skip = false;
-    let mut out = String::new();
-    for l in existing.split_inclusive('\n') {
-        if l.trim_end() == start {
-            skip = true;
+    for line in conf.lines() {
+        if line.trim_start().starts_with("Host ") {
+            skip = line.trim() == host;
         }
         if !skip {
-            out.push_str(l);
-        }
-        if skip && l.trim_end() == end {
-            skip = false;
+            out.push(line);
         }
     }
-    // No end marker: never drop to EOF, leave the file as it was.
-    if skip {
-        return existing.to_string();
-    }
-    out
+    let s = out.join("\n");
+    let s = s.trim();
+    if s.is_empty() { String::new() } else { format!("{s}\n") }
 }
 
-pub fn upsert_ssh_block(existing: &str, entry: &str, name: &str) -> String {
-    let mut s = remove_ssh_block(existing, name);
-    if !s.is_empty() && !s.ends_with('\n') {
-        s.push('\n');
+/// `~/.ssh/config` with `Include devbox.conf` as its first line, or None if
+/// it already has it. First: ssh keeps the first value it reads, so a later
+/// `Host *` must not override the session blocks.
+pub fn ssh_config_including(config: &str) -> Option<String> {
+    const INCLUDE: &str = "Include devbox.conf";
+    if config.lines().any(|l| l.trim() == INCLUDE) {
+        return None;
     }
-    s + entry
-}
-
-pub fn pubkey_line(content: &str) -> Result<String, String> {
-    if content.contains("PRIVATE KEY") {
-        return Err("le fichier contient une clé PRIVÉE: indique la clé publique (.pub)".into());
-    }
-    let l = content
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .ok_or("clé publique vide")?;
-    if ["ssh-", "ecdsa-", "sk-"].iter().any(|p| l.starts_with(p)) {
-        Ok(l.to_string())
-    } else {
-        Err("ce n'est pas une clé publique SSH (ssh-/ecdsa-/sk-)".into())
-    }
-}
-
-pub fn plan_create(name: &str, stacks: &[Stack], max: usize) -> Result<(), String> {
-    validate::session_name(name)?;
-    if stacks.iter().any(|s| s.name == format!("dev-{name}")) {
-        return Err(format!("la session '{name}' existe déjà"));
-    }
-    check_cap(running(stacks), max)
-}
-
-pub fn plugin_id_ok(id: &str) -> bool {
-    matches!(id.split_once('@'), Some((p, m)) if catalog::safe_name(p) && catalog::safe_name(m))
-}
-
-// Missing file means empty; any other error must not turn into a wipe.
-pub fn read_or_empty(p: &std::path::Path) -> std::io::Result<String> {
-    match std::fs::read_to_string(p) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        r => r,
-    }
-}
-
-fn running(stacks: &[Stack]) -> usize {
-    stacks
-        .iter()
-        .filter(|s| s.name.starts_with("dev-") && s.running)
-        .count()
-}
-
-fn find<'a>(stacks: &'a [Stack], name: &str) -> Result<&'a Stack> {
-    stacks
-        .iter()
-        .find(|s| s.name == format!("dev-{name}"))
-        .ok_or_else(|| anyhow!("session '{name}' introuvable"))
-}
-
-fn ssh_config_path() -> Result<PathBuf> {
-    let home = directories::BaseDirs::new().context("dossier personnel introuvable")?;
-    Ok(home.home_dir().join(".ssh").join("config"))
-}
-
-// Returns whether the file content changed.
-fn edit_ssh_config(f: impl FnOnce(&str) -> String) -> Result<bool> {
-    let mut p = ssh_config_path()?;
-    std::fs::create_dir_all(p.parent().unwrap())?;
-    // A symlinked config (dotfiles manager): edit the real file, keep the link.
-    if let Ok(real) = std::fs::canonicalize(&p) {
-        p = real;
-    }
-    let cur = read_or_empty(&p).with_context(|| format!("lecture de {}", p.display()))?;
-    let new = f(&cur);
-    if new == cur {
-        return Ok(false);
-    }
-    write_atomic(&p, &new)?;
-    Ok(true)
-}
-
-// Temp file in the same directory (created exclusively, 0600 on unix), then rename.
-// On any failure the original is left untouched and the temp file removed.
-pub fn write_atomic(p: &std::path::Path, content: &str) -> Result<()> {
-    use std::io::Write;
-    let mut name = p.file_name().context("chemin sans nom")?.to_os_string();
-    name.push(format!(".devbox-tmp-{}", std::process::id()));
-    let tmp = p.with_file_name(name);
-    // Stale temp from a crashed run of this pid: only ever a regular file (never a symlink).
-    if std::fs::symlink_metadata(&tmp).is_ok_and(|m| m.is_file()) {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    let res = (|| -> Result<()> {
-        let mut o = std::fs::OpenOptions::new();
-        o.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            o.mode(0o600);
-        }
-        let mut f = o
-            .open(&tmp)
-            .with_context(|| format!("création de {}", tmp.display()))?;
-        f.write_all(content.as_bytes())?;
-        f.sync_all()?;
-        drop(f);
-        if let Ok(m) = std::fs::metadata(p) {
-            std::fs::set_permissions(&tmp, m.permissions())?;
-        }
-        if let Err(e) = std::fs::rename(&tmp, p) {
-            #[cfg(windows)]
-            if p.is_file() {
-                // Windows can't rename onto an existing file: park the original, never delete it.
-                let mut bak = p.as_os_str().to_os_string();
-                bak.push(".devbox-bak");
-                let bak = std::path::PathBuf::from(bak);
-                std::fs::rename(p, &bak)?;
-                if let Err(e2) = std::fs::rename(&tmp, p) {
-                    let _ = std::fs::rename(&bak, p);
-                    return Err(e2).with_context(|| format!("remplacement de {}", p.display()));
-                }
-                let _ = std::fs::remove_file(&bak);
-                return Ok(());
-            }
-            return Err(e).with_context(|| format!("remplacement de {}", p.display()));
-        }
-        Ok(())
-    })();
-    if res.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    res
-}
-
-pub fn finish_create(
-    client: &Client,
-    cfg: &Config,
-    name: &str,
-    slug: &str,
-    token: &str,
-    plugins: &[String],
-    pubkey: &str,
-) -> Result<()> {
-    let env = stack_env(cfg, name, slug, token, plugins, pubkey);
-    client
-        .create_stack(&format!("dev-{name}"), COMPOSE, &env)
-        .map_err(|e| anyhow!(e))?;
-    let entry = ssh_config_entry(cfg, name);
-    if let Err(e) = edit_ssh_config(|c| upsert_ssh_block(c, &entry, name)) {
-        bail!("session créée mais ~/.ssh/config non mis à jour ({e}). Ajoute ce bloc à la main:\n{entry}");
-    }
-    println!("Session '{name}' créée.\n  ssh dev-{name}\nAu premier lancement: tape `claude` puis connecte-toi avec le lien d'abonnement.");
-    Ok(())
-}
-
-pub fn create(cfg: &Config, name: &str, repo: Option<String>, plugins: Vec<String>) -> Result<()> {
-    validate::session_name(name).map_err(|e| anyhow!(e))?; // before any network call
-    if let Some(bad) = plugins.iter().find(|p| !plugin_id_ok(p)) {
-        bail!("plugin invalide '{bad}' (attendu: nom@marketplace, [A-Za-z0-9._-])");
-    }
-    let client = Client::new(cfg).map_err(|e| anyhow!(e))?;
-    let stacks = client.list_stacks().map_err(|e| anyhow!(e))?;
-    // ponytail: check-then-act; concurrent invocations can exceed the cap by one (single owner).
-    plan_create(name, &stacks, cfg.max_active).map_err(|e| anyhow!(e))?;
-
-    let pubkey = pubkey_line(
-        &std::fs::read_to_string(&cfg.pubkey_path)
-            .with_context(|| format!("lecture de {}", cfg.pubkey_path.display()))?,
-    )
-    .map_err(|e| anyhow!(e))?;
-    let repo = match repo {
-        Some(r) => r,
-        None => dialoguer::Input::<String>::new()
-            .with_prompt("Dépôt GitHub (URL ou owner/nom)")
-            .interact_text()?,
-    };
-    let slug = validate::repo_slug(&repo).map_err(|e| anyhow!(e))?;
-    let token = match std::env::var("DEVBOX_GH_TOKEN") {
-        Ok(t) if !t.is_empty() => t,
-        _ => dialoguer::Password::new()
-            .with_prompt("Jeton GitHub")
-            .interact()?,
-    };
-    if !github::main_is_protected(&slug, &token).map_err(|e| anyhow!(e))? {
-        bail!("active la protection de `main` d'abord (dépôt {slug})");
-    }
-    let plugins = if plugins.is_empty() {
-        pick_plugins(cfg)?
-    } else {
-        plugins
-    };
-
-    finish_create(&client, cfg, name, &slug, &token, &plugins, &pubkey)
-}
-
-fn pick_plugins(cfg: &Config) -> Result<Vec<String>> {
-    let all = catalog::fetch_all(&cfg.catalogs).map_err(|e| anyhow!(e))?;
-    if all.is_empty() {
-        return Ok(vec![]);
-    }
-    let labels: Vec<String> = all
-        .iter()
-        .map(|p| format!("{} - {}", p.id, p.description))
-        .collect();
-    let sel = dialoguer::MultiSelect::new()
-        .with_prompt("Plugins (espace pour cocher)")
-        .items(&labels)
-        .interact()?;
-    let ids: Vec<String> = sel.into_iter().map(|i| all[i].id.clone()).collect();
-    if let Some(bad) = ids.iter().find(|p| !plugin_id_ok(p)) {
-        bail!("plugin invalide '{bad}' dans le catalogue");
-    }
-    Ok(ids)
-}
-
-pub fn list(cfg: &Config) -> Result<()> {
-    for s in Client::new(cfg)
-        .map_err(|e| anyhow!(e))?
-        .list_stacks()
-        .map_err(|e| anyhow!(e))?
-    {
-        if let Some(n) = s.name.strip_prefix("dev-") {
-            println!("{n}\t{}", if s.running { "en cours" } else { "arrêtée" });
-        }
-    }
-    Ok(())
-}
-
-pub fn stop(cfg: &Config, name: &str) -> Result<()> {
-    validate::session_name(name).map_err(|e| anyhow!(e))?;
-    let c = Client::new(cfg).map_err(|e| anyhow!(e))?;
-    let id = find(&c.list_stacks().map_err(|e| anyhow!(e))?, name)?.id;
-    c.stop(id).map_err(|e| anyhow!(e))?; // synchronous on Portainer's side
-    println!("Session '{name}' arrêtée.");
-    Ok(())
-}
-
-pub fn resume(cfg: &Config, name: &str) -> Result<()> {
-    validate::session_name(name).map_err(|e| anyhow!(e))?;
-    let c = Client::new(cfg).map_err(|e| anyhow!(e))?;
-    let stacks = c.list_stacks().map_err(|e| anyhow!(e))?;
-    let s = find(&stacks, name)?;
-    if !s.running {
-        check_cap(running(&stacks), cfg.max_active).map_err(|e| anyhow!(e))?;
-        c.start(s.id).map_err(|e| anyhow!(e))?;
-    }
-    println!("Session '{name}' en cours: ssh dev-{name}");
-    Ok(())
-}
-
-// Best effort: both volumes are always tried; returns the failures other than "absent".
-pub fn delete_volumes(c: &Client, name: &str) -> Vec<String> {
-    ["work", "state"]
-        .iter()
-        .filter_map(|v| c.delete_volume(&format!("dev-{name}-{v}")).err())
-        .filter(|e| !e.contains("404"))
-        .collect()
-}
-
-pub fn delete(cfg: &Config, name: &str, yes: bool, purge: bool) -> Result<()> {
-    validate::session_name(name).map_err(|e| anyhow!(e))?;
-    let c = Client::new(cfg).map_err(|e| anyhow!(e))?;
-    let id = find(&c.list_stacks().map_err(|e| anyhow!(e))?, name)?.id;
-    if !yes
-        && !dialoguer::Confirm::new()
-            .with_prompt(format!(
-                "Supprimer la session '{name}' et ses volumes (/work et état)?"
-            ))
-            .default(false)
-            .interact()?
-    {
-        bail!("annulé");
-    }
-    if let Err(e) = c.delete(id) {
-        // Volume and ssh entry stay untouched until the stack is really gone.
-        bail!("{e}. La pile s'arrête peut-être encore côté serveur (délai de grâce 120 s): relance `devbox delete {name}`");
-    }
-    for e in delete_volumes(&c, name) {
-        eprintln!("avertissement: volume non supprimé: {e}");
-    }
-    // The state volume held the host key: the next session of this name gets a new one.
-    for host in [format!("[dev-{name}]:2222"), format!("dev-{name}")] {
-        let _ = std::process::Command::new("ssh-keygen")
-            .args(["-R", &host])
-            .output();
-    }
-    match edit_ssh_config(|cur| remove_ssh_block(cur, name)) {
-        Ok(true) => {}
-        Ok(false) => eprintln!("avertissement: bloc `# devbox: {name}` absent ou non terminé dans ~/.ssh/config, laissé tel quel"),
-        Err(e) => eprintln!("avertissement: ~/.ssh/config non modifié: {e}"),
-    }
-    println!("Session '{name}' supprimée (l'état sauvegardé dans le bucket est conservé).");
-    if purge {
-        println!("--purge n'est pas automatisé. Pour vider le bucket (identifiants S3 devbox):\n  rclone purge devbox:devbox/{name}\nLe bucket est versionné: purge laisse les anciennes versions, dont claude/.credentials.json (le jeton Claude). Pour les supprimer:\n  rclone backend cleanup-hidden devbox:devbox/{name}\n(non vérifié contre SeaweedFS: contrôle avec `rclone ls --s3-versions devbox:devbox/{name}`, qui doit être vide)");
-    }
-    Ok(())
+    Some(if config.is_empty() { format!("{INCLUDE}\n") } else { format!("{INCLUDE}\n\n{config}") })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{tests::MINIMAL, Config};
 
-    fn cfg() -> Config {
-        Config::parse("portainer_url=\"http://127.0.0.1:1\"\napi_key=\"K\"\nendpoint_id=2\nssh_host=\"192.168.2.10\"\nssh_port=2200\npubkey_path=\"/p\"\ns3_secret_key=\"S3\"\ncatalogs=[\"a/b\",\"c/d\"]").unwrap()
-    }
-    fn st(n: &str, running: bool) -> Stack {
-        Stack {
-            id: 1,
-            name: n.into(),
-            running,
-        }
+    #[test]
+    fn env() {
+        let cfg = Config::parse(MINIMAL).unwrap();
+        let plugins = ["a@m".to_string(), "b@m".to_string()];
+        let env = stack_env(&cfg, &NewSession { name: "jarvis", repo: "o/r", token: "ghp_x", plugins: &plugins, pubkeys: "k1,k2", s3_secret: "sek" });
+        let mut keys: Vec<&str> = env.iter().map(|(k, _)| k.as_str()).collect();
+        keys.sort();
+        assert_eq!(keys, ["CPUS", "GH_TOKEN", "MARKETPLACES", "MEM_LIMIT", "PLUGINS", "REPO_URL", "S3_ACCESS_KEY", "S3_SECRET_KEY", "SESSION", "SSH_PUBKEYS"]);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).unwrap().1.clone();
+        assert_eq!(get("SESSION"), "jarvis");
+        assert_eq!(get("REPO_URL"), "https://github.com/o/r");
+        assert_eq!(get("GH_TOKEN"), "ghp_x");
+        assert_eq!(get("PLUGINS"), "a@m,b@m");
+        assert_eq!(get("MARKETPLACES"), "anthropics/claude-plugins-official");
+        assert_eq!(get("SSH_PUBKEYS"), "k1,k2");
+        assert_eq!(get("S3_ACCESS_KEY"), "devbox-jarvis");
+        assert_eq!(get("S3_SECRET_KEY"), "sek");
+        assert_eq!(get("MEM_LIMIT"), "1536m");
+        assert_eq!(get("CPUS"), "2");
     }
 
     #[test]
-    fn env_has_exactly_eight() {
-        let e = stack_env(
-            &cfg(),
-            "jarvis",
-            "o/r",
-            "tok",
-            &["p@m".into(), "q@m".into()],
-            "ssh-ed25519 AAA",
-        );
-        let want = [
-            ("SESSION", "jarvis"),
-            ("REPO_URL", "https://github.com/o/r"),
-            ("GH_TOKEN", "tok"),
-            ("PLUGINS", "p@m,q@m"),
-            ("MARKETPLACES", "a/b,c/d"),
-            ("SSH_PUBKEY", "ssh-ed25519 AAA"),
-            ("S3_SECRET_KEY", "S3"),
-            ("MEM_LIMIT", "1536m"),
-        ];
-        let want: Vec<(String, String)> = want
-            .iter()
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .collect();
-        assert_eq!(e, want);
+    fn keys() {
+        assert_eq!(pubkeys("ssh-ed25519 AAA me@mac\n", &[]).unwrap(), "ssh-ed25519 AAA me@mac");
+        assert_eq!(pubkeys("ssh-ed25519 A m", &["ecdsa-sha2-nistp256 B pc".into()]).unwrap(), "ssh-ed25519 A m,ecdsa-sha2-nistp256 B pc");
+        assert!(pubkeys("ssh-ed25519 A me,you", &[]).is_err());
+        assert!(pubkeys("ssh-ed25519 A m", &["x\ny".into()]).is_err());
+        assert!(pubkeys("", &[]).is_err());
     }
 
     #[test]
     fn cap() {
         assert!(check_cap(3, 4).is_ok());
         let e = check_cap(4, 4).unwrap_err();
-        assert!(e.contains("4/4"), "{e}");
+        assert!(e.contains('4'), "{e}");
+        assert!(check_cap(5, 4).is_err());
     }
 
     #[test]
-    fn ssh_entry_exact() {
-        assert_eq!(
-            ssh_config_entry(&cfg(), "jarvis"),
-            "# devbox: jarvis\nHost dev-jarvis\n  HostName dev-jarvis\n  User dev\n  Port 2222\n  ProxyJump jump@192.168.2.10:2200\n# devbox-end: jarvis\n"
-        );
-    }
-
-    #[test]
-    fn ssh_upsert_and_remove() {
-        let e = ssh_config_entry(&cfg(), "jarvis");
-        let other = "Host x\n  User y\n";
-        let once = upsert_ssh_block(other, &e, "jarvis");
-        assert_eq!(upsert_ssh_block(&once, &e, "jarvis"), once);
-        assert_eq!(once.matches("Host dev-jarvis").count(), 1);
-        assert!(once.starts_with(other));
-        assert_eq!(remove_ssh_block(&once, "jarvis"), other);
-        assert_eq!(upsert_ssh_block("", &e, "jarvis"), e);
-    }
-
-    #[test]
-    fn pubkey() {
-        assert_eq!(
-            pubkey_line("\n ssh-ed25519 AAA me\n").unwrap(),
-            "ssh-ed25519 AAA me"
-        );
-        assert!(pubkey_line("-----BEGIN OPENSSH PRIVATE KEY-----\nssh-ed25519 x").is_err());
-        assert!(pubkey_line("hello world").is_err());
-        assert!(pubkey_line("").is_err());
-        assert!(pubkey_line("ecdsa-sha2-nistp256 AAA").is_ok());
-        assert!(pubkey_line("sk-ssh-ed25519@openssh.com AAA").is_ok());
-    }
-
-    #[test]
-    fn plan_rules() {
-        let s = [
-            st("dev-a", true),
-            st("dev-b", true),
-            st("dev-c", false),
-            st("other", true),
-        ];
-        assert!(plan_create("Bad_Name", &s, 4)
-            .unwrap_err()
-            .contains("invalide"));
-        assert!(plan_create("aaa", &[st("dev-aaa", false)], 4)
-            .unwrap_err()
-            .contains("existe"));
-        assert!(plan_create("new", &s, 4).is_ok());
-        let e = plan_create("new", &s, 2).unwrap_err();
-        assert!(e.contains("2/2"), "{e}");
-    }
-
-    #[test]
-    fn bad_name_fails_before_network() {
-        // portainer_url points at a closed port: a network call would say "injoignable".
-        let e = create(&cfg(), "Bad_Name", None, vec![])
-            .unwrap_err()
-            .to_string();
-        assert!(e.contains("invalide"), "{e}");
-    }
-
-    #[test]
-    fn unterminated_block_left_alone() {
-        let t = "Host a\n  User x\n# devbox: foo\nHost dev-foo\n  Port 1\nHost b\n  User y\n";
-        assert_eq!(remove_ssh_block(t, "foo"), t);
-        let ok = "Host a\n# devbox: foo\nHost dev-foo\n# devbox-end: foo\nHost b\n";
-        assert_eq!(remove_ssh_block(ok, "foo"), "Host a\nHost b\n");
-    }
-
-    #[test]
-    fn plugin_ids() {
-        for bad in ["a,b@m", "p@m;x", "p", "@m", "p@", "a@b@c", "p@m "] {
-            assert!(!plugin_id_ok(bad), "{bad}");
+    fn ssh_entry() {
+        let cfg = Config::parse(MINIMAL).unwrap();
+        let e = ssh_config_entry(&cfg, "jarvis");
+        let lines: Vec<&str> = e.lines().map(str::trim).collect();
+        assert_eq!(lines[0], "Host dev-jarvis");
+        for want in ["HostName dev-jarvis", "User dev", "Port 2222", "ProxyJump jump@192.168.2.10:2222", "ForwardAgent no"] {
+            assert!(lines.contains(&want), "missing {want:?} in\n{e}");
         }
-        assert!(plugin_id_ok("p@m") && plugin_id_ok("my.plug-in_1@official-mkt"));
     }
 
     #[test]
-    fn read_or_empty_only_for_missing() {
-        let d = std::env::temp_dir().join(format!("devbox-t-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        assert_eq!(read_or_empty(&d.join("nope")).unwrap(), "");
-        std::fs::write(d.join("bad"), [0xff, 0xfe]).unwrap();
-        assert!(read_or_empty(&d.join("bad")).is_err());
-        assert!(read_or_empty(&d).is_err()); // a directory: not NotFound
-        std::fs::remove_dir_all(&d).unwrap();
+    fn devbox_conf() {
+        let a = "Host dev-a\n    User dev\n";
+        let b = "Host dev-b\n    User dev\n";
+        let one = devbox_conf_with("", a, "a");
+        assert_eq!(one, a);
+        let two = devbox_conf_with(&one, b, "b");
+        assert_eq!(two.matches("Host dev-").count(), 2);
+        // Same name again: replaced, not duplicated.
+        let again = devbox_conf_with(&two, "Host dev-a\n    User other\n", "a");
+        assert_eq!(again.matches("Host dev-a\n").count(), 1);
+        assert!(again.contains("User other") && again.contains("Host dev-b"));
+        // "ab" is not "a".
+        let ab = devbox_conf_with(&two, "Host dev-ab\n    User dev\n", "ab");
+        assert_eq!(devbox_conf_without(&ab, "a").matches("Host dev-").count(), 2);
+        assert!(!devbox_conf_without(&two, "a").contains("Host dev-a\n"));
+        assert!(devbox_conf_without(&two, "a").contains("Host dev-b"));
     }
 
     #[test]
-    fn failing_create_leaks_no_secret() {
-        use std::io::{Read, Write};
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut c = cfg();
-        c.portainer_url = format!("http://{}", l.local_addr().unwrap());
-        let h = std::thread::spawn(move || {
-            let (mut s, _) = l.accept().unwrap();
-            // read headers + Content-Length bytes so the reply can't race a reset
-            let mut buf = vec![];
-            let mut b = [0u8; 4096];
-            loop {
-                let k = s.read(&mut b).unwrap();
-                buf.extend_from_slice(&b[..k]);
-                let t = String::from_utf8_lossy(&buf).to_lowercase();
-                if let Some(i) = t.find("\r\n\r\n") {
-                    let cl = t[..i]
-                        .lines()
-                        .find_map(|l| {
-                            l.strip_prefix("content-length: ")
-                                .map(|v| v.trim().parse::<usize>().unwrap())
-                        })
-                        .unwrap_or(0);
-                    if buf.len() >= i + 4 + cl {
-                        break;
-                    }
-                }
-            }
-            let r = "{\"message\":\"boom\"}";
-            let _ = write!(
-                s,
-                "HTTP/1.1 500 X\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{r}",
-                r.len()
-            );
-        });
-        let e = finish_create(
-            &Client::build(&c, true).unwrap(),
-            &c,
-            "aaa",
-            "o/r",
-            "ghp_TOKEN",
-            &[],
-            "ssh-ed25519 AAA",
-        )
-        .unwrap_err();
-        h.join().unwrap();
-        let e = format!("{e} {e:?}");
-        assert!(e.contains("500"), "{e}");
-        assert!(
-            !e.contains("ghp_TOKEN") && !e.contains("S3") && !e.contains("\"K\""),
-            "{e}"
-        );
-    }
-
-    #[test]
-    fn write_atomic_replaces_and_keeps_mode() {
-        let d = std::env::temp_dir().join(format!("devbox-wa-{}", std::process::id()));
-        std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("config");
-        std::fs::write(&f, "old").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
-        }
-        write_atomic(&f, "new").unwrap();
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), "new");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
-        // fresh file on unix is 0600 too
-        let g = d.join("fresh");
-        write_atomic(&g, "x").unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                std::fs::metadata(&g).unwrap().permissions().mode() & 0o777,
-                0o600
-            );
-        }
-        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 2, "no temp left");
-        std::fs::remove_dir_all(&d).unwrap();
-    }
-
-    #[test]
-    fn write_atomic_failure_keeps_original() {
-        let d = std::env::temp_dir().join(format!("devbox-wf-{}", std::process::id()));
-        let dest = d.join("config");
-        std::fs::create_dir_all(&dest).unwrap(); // non-empty dir: rename onto it fails
-        std::fs::write(dest.join("keep"), "orig").unwrap();
-        assert!(write_atomic(&dest, "new").is_err());
-        assert_eq!(std::fs::read_to_string(dest.join("keep")).unwrap(), "orig");
-        assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "temp removed");
-        std::fs::remove_dir_all(&d).unwrap();
+    fn include_first() {
+        assert_eq!(ssh_config_including("").unwrap(), "Include devbox.conf\n");
+        let c = ssh_config_including("Host *\n    User me\n").unwrap();
+        assert!(c.starts_with("Include devbox.conf\n\nHost *"), "{c}");
+        assert_eq!(ssh_config_including(&c), None);
     }
 }

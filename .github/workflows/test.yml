@@ -1,0 +1,31 @@
+# `make test` on every pull request, on a GitHub-hosted runner.
+#
+# runs-on MUST stay ubuntu-latest, never a self-hosted label. The deploy
+# runner holds the Docker socket (root on the deploy host) and this repo is
+# public, so a pull_request trigger on that label would hand a fork's PR
+# arbitrary code execution there -- see deploy.yml and CLAUDE.md "CI:
+# deploying on a push to main". Nothing here needs the LAN or any secret:
+# make test works on a throwaway copy with a fake .env.
+#
+# No `paths` filter: this is a required check, and a required check that is
+# skipped by a filter never reports and blocks the PR forever.
+name: test
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v10.3.0
+
+      - run: make test
