@@ -142,6 +142,54 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		fail "missing PAT is rejected, naming GH_RUNNER_TOKEN_MORIA" "$out"
 	fi
 
+	echo "== runner scripts (fake curl)"
+	# Sandbox with just the scripts; a fake curl answers per token / repo.
+	sb="$ws/.runner-sb"; mkdir -p "$sb/scripts/lib" "$sb/bin"
+	cp "$ws/scripts/gen-runner-env.sh" "$ws/scripts/runner-status.sh" "$sb/scripts/"
+	cp "$ws/scripts/lib/runners.sh" "$sb/scripts/lib/"
+	cat >"$sb/bin/curl" <<'FAKE'
+#!/usr/bin/env bash
+# gen mode (-w '%{http_code}'): the code only, 404 for a token containing 404.
+# status mode (-w '\n%{http_code}'): a one-runner body for the repo in the URL.
+tok="$(sed -n 's/.*Bearer \(.*\)".*/\1/p')"
+url="${*: -1}"; w=""
+while [ $# -gt 0 ]; do [ "$1" = -w ] && w="$2"; shift; done
+repo="$(sed 's|.*/repos/[^/]*/\([^/]*\)/actions.*|\1|' <<<"$url" | tr '[:upper:]' '[:lower:]')"
+code=200; case "$tok" in *404*) code=404 ;; esac
+if [ "${w:0:1}" = $'\n' ]; then
+  busy=false; [ "$repo" = "${FAKE_BUSY:-}" ] && busy=true
+  printf '{"runners":[{"name":"%s-host","status":"online","busy":%s,"labels":[{"name":"%s"}]}]}\n%s' "$repo" "$busy" "$repo" "$code"
+else
+  printf '%s' "$code"
+fi
+FAKE
+	chmod +x "$sb/bin/curl"
+	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\n'
+	if out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$good" 2>&1)" \
+		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 5 ] \
+		&& [ "$(stat -f %Lp "$sb/.runner.env" 2>/dev/null || stat -c %a "$sb/.runner.env")" = 600 ]; then
+		pass "gen-runner-env writes five tokens, mode 600"
+	else
+		fail "gen-runner-env writes five tokens, mode 600" "$out"
+	fi
+	rm -f "$sb/.runner.env"
+	bad=$'tok-a\ntok-404\ntok-c\ntok-d\ntok-e\n'
+	out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$bad" 2>&1)"; code=$?
+	if [ "$code" -ne 0 ] && grep -qF nicolaslallier/EA <<<"$out" && [ ! -e "$sb/.runner.env" ]; then
+		pass "gen-runner-env rejects EA's 404 token, names the repo, writes nothing"
+	else
+		fail "gen-runner-env rejects EA's 404 token, names the repo, writes nothing" "exit $code: $out"
+	fi
+	printf 'GH_RUNNER_TOKEN_%s=t\n' DARKANGEL EA HEAVEN INFRA MORIA >"$sb/.runner.env"
+	out="$(cd "$sb" && FAKE_BUSY=heaven PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
+	if [ "$code" = 3 ] && grep -qF heaven-host <<<"$out"; then
+		pass "runner-status --busy: busy heaven runner -> exit 3, named"
+	else
+		fail "runner-status --busy: busy heaven runner -> exit 3, named" "exit $code: $out"
+	fi
+	out="$(cd "$sb" && FAKE_BUSY=none PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
+	if [ "$code" = 0 ]; then pass "runner-status --busy: all idle -> exit 0"; else fail "runner-status --busy: all idle -> exit 0" "exit $code: $out"; fi
+
 	echo "== check-env rejects broken .env files"
 	if [ ! -f "$ws/.baseline-ok" ]; then
 		# Already a failure above; every case would be rejected for that reason.
