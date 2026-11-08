@@ -332,7 +332,8 @@ stack: name, compose file, Portainer environment, owned paths): `dns`
 (`docker-compose.dns.yml`: Technitium, so a merge no longer cuts the LAN's
 DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
-postgres-exporter), then
+postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
+rabbitmq, ntfy), then
 `infra` (`docker-compose.yml`, everything else). More stacks follow, each
 meant to be able to run on another Portainer-managed machine.
 `make up` / `pull` / `down` walk the list top to bottom, deploying a stack and
