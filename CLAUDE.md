@@ -138,8 +138,8 @@ never orphans another app that's still attached to it):
   variables are documented in the README ("Notifications").
 - **`litellm`** — `ghcr.io/berriai/litellm-database`, the LLM gateway, at
   `litellm.infra.famillelallier.net` (NGINX → `litellm:4000`; admin UI at
-  `/ui`). OpenAI- and Anthropic-format API in front of exo on the Macs
-  (`EXO_API_BASE`, by LAN address) and `ollama-proxy`. Config is
+  `/ui`). OpenAI- and Anthropic-format API in front of Ollama on the
+  MacBook (by LAN address) and, through `ollama-proxy`, on the Mac Studio. Config is
   `litellm/config.yaml`; secrets (`LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`,
   `LITELLM_UI_PASSWORD`) come from `.env`. Database/role `litellm`, provisioned
   like any other app; without it the UI login fails with "Not connected to DB".
