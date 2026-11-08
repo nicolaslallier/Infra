@@ -17,7 +17,8 @@
 # router forwards neither port.
 #
 # A remote stack mounts nothing from the checkout (portainer-stack.sh refuses
-# INFRA_DIR), and neither service needs to: every mount is the VM's own.
+# any compose file that names the checkout variable, even in a comment),
+# and neither service needs to: every mount is the VM's own.
 
 services:
   node-exporter:
