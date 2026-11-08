@@ -34,7 +34,7 @@ pub fn stack_env(cfg: &Config, s: &NewSession) -> Vec<(String, String)> {
 }
 
 /// The gateway part of the stack env (`llm` in the config), read by the
-/// session's entrypoint: ANTHROPIC_* for Claude Code, LLM_CA_PEM for TLS.
+/// session's entrypoint: ANTHROPIC_* for Claude Code, LLM_CA_B64 for TLS.
 pub fn llm_env(cfg: &Config) -> Result<Vec<(String, String)>, String> {
     let Some(l) = &cfg.llm else { return Ok(vec![]) };
     let mut env = vec![("ANTHROPIC_BASE_URL".to_string(), l.base_url.clone()), ("ANTHROPIC_AUTH_TOKEN".to_string(), l.api_key.clone())];
@@ -43,9 +43,16 @@ pub fn llm_env(cfg: &Config) -> Result<Vec<(String, String)>, String> {
         env.push(("ANTHROPIC_SMALL_FAST_MODEL".into(), l.model.clone()));
     }
     if let Some(ca) = &l.ca_cert {
-        env.push(("LLM_CA_PEM".into(), std::fs::read_to_string(ca).map_err(|e| format!("llm.ca_cert {}: {e}", ca.display()))?));
+        let pem = std::fs::read_to_string(ca).map_err(|e| format!("llm.ca_cert {}: {e}", ca.display()))?;
+        env.push(("LLM_CA_B64".into(), pem_body(&pem)));
     }
     Ok(env)
+}
+
+/// A PEM certificate's base64 body on one line: Portainer writes the stack
+/// env to a dotenv file, where a multi-line value breaks the deploy.
+pub fn pem_body(pem: &str) -> String {
+    pem.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("-----")).collect()
 }
 
 /// The owner's public keys, comma-joined for SSH_PUBKEYS: the creating
@@ -155,6 +162,7 @@ mod tests {
         assert_eq!(get("MEM_LIMIT"), "1536m");
         assert_eq!(get("CPUS"), "2");
         assert!(llm_env(&cfg).unwrap().is_empty());
+        assert_eq!(pem_body("-----BEGIN CERTIFICATE-----\nAB/c\n+d=\n-----END CERTIFICATE-----\n"), "AB/c+d=");
         let with = Config::parse(&format!("{}\n[llm]\nbase_url = \"https://gw\"\napi_key = \"sk-v\"\nmodel = \"m\"\n", crate::config::tests::MINIMAL)).unwrap();
         let keys: Vec<String> = llm_env(&with).unwrap().into_iter().map(|(k, _)| k).collect();
         assert_eq!(keys, ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"]);

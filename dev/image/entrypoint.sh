@@ -98,8 +98,9 @@ done
 
 # The LLM gateway's CA (homelab CA, not in the system store): Claude Code
 # is node, which reads NODE_EXTRA_CA_CERTS.
-if [ -n "${LLM_CA_PEM:-}" ]; then
-  printf '%s\n' "$LLM_CA_PEM" > ~/.llm-ca.pem
+# LLM_CA_B64 is the PEM body on one line (a stack env value cannot span lines).
+if [ -n "${LLM_CA_B64:-}" ]; then
+  { echo '-----BEGIN CERTIFICATE-----'; fold -w 64 <<<"$LLM_CA_B64"; echo '-----END CERTIFICATE-----'; } > ~/.llm-ca.pem
   export NODE_EXTRA_CA_CERTS=~/.llm-ca.pem
 fi
 

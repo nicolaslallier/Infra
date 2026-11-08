@@ -44,7 +44,8 @@ services:
       ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
       ANTHROPIC_SMALL_FAST_MODEL: ${ANTHROPIC_SMALL_FAST_MODEL:-}
-      LLM_CA_PEM: ${LLM_CA_PEM:-}
+      # The gateway's CA, its PEM body on one line (see pem_body in the CLI).
+      LLM_CA_B64: ${LLM_CA_B64:-}
     volumes:
       - work:/work
       - state:/home/dev/state
