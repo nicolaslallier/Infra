@@ -15,7 +15,6 @@ KEYCLOAK_HOST="keycloak.famillelallier.net"
 JARVIS_HOST="jarvis.famillelallier.net"
 CHAT_HOST="chat.famillelallier.net"
 EA_HOST="ea.infra.famillelallier.net"
-OBSIDIAN_HOST="obsidian.infra.famillelallier.net"
 PREFECT_HOST="prefect.infra.famillelallier.net"
 VAULT_HOST="vault.infra.famillelallier.net"
 HEAVEN_HOST="heaven.infra.famillelallier.net"
@@ -41,7 +40,6 @@ $IP $KEYCLOAK_HOST
 $IP $JARVIS_HOST
 $IP $CHAT_HOST
 $IP $EA_HOST
-$IP $OBSIDIAN_HOST
 $IP $PREFECT_HOST
 $IP $VAULT_HOST
 $IP $HEAVEN_HOST
@@ -61,7 +59,6 @@ $IP $KEYCLOAK_HOST
 $IP $JARVIS_HOST
 $IP $CHAT_HOST
 $IP $EA_HOST
-$IP $OBSIDIAN_HOST
 $IP $PREFECT_HOST
 $IP $VAULT_HOST
 $IP $HEAVEN_HOST

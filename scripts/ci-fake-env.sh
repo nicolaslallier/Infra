@@ -40,7 +40,6 @@ rand_hex() { od -An -tx1 -N"${1:-16}" /dev/urandom | tr -d ' \n'; }
 b64_32() { head -c 32 /dev/urandom | base64 | tr -d '\n' | tr -- '+/' '-_'; }
 
 cookie_a="$(b64_32 | tr -d '=')"
-cookie_b="$(b64_32 | tr -d '=')"
 cookie_c="$(b64_32 | tr -d '=')"
 cookie_d="$(b64_32 | tr -d '=')"
 
@@ -64,7 +63,6 @@ set_key() {
 
 set_key LAN_IP 127.0.0.1
 set_key JARVIS_OAUTH_COOKIE_SECRET "$cookie_a"
-set_key EA_OBSIDIAN_OAUTH_COOKIE_SECRET "$cookie_b"
 set_key S3_ADMIN_OAUTH_COOKIE_SECRET "$cookie_c"
 set_key PREFECT_OAUTH_COOKIE_SECRET "$cookie_d"
 set_key PREFECT_AUTH_STRING "admin:$(rand_hex 16)"

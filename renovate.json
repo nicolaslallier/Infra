@@ -27,10 +27,9 @@
   ],
   "packageRules": [
     {
-      "description": "Store-format images (pgvector, neo4j, openbao, seaweedfs) are bumped across majors by hand, never by Renovate; neo4j's yearly calendar version (2026.x to 2027.x) counts as a major.",
+      "description": "Store-format images (pgvector, openbao, seaweedfs) are bumped across majors by hand, never by Renovate.",
       "matchPackageNames": [
         "pgvector/pgvector",
-        "neo4j",
         "openbao/openbao",
         "chrislusf/seaweedfs"
       ],

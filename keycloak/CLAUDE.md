@@ -5,9 +5,7 @@ Moved out of the root CLAUDE.md so it loads only when working here.
 ## Jarvis: Keycloak login gate (oauth2-proxy)
 
 `jarvis.famillelallier.net` (and its `.infra.` alias) is one of the two
-application vhosts in this repo that require a login — the other is
-Obsidian, which runs the same recipe against a different realm through its
-own `oauth2-proxy-ea` container (see the `obsidian` service above). Every
+application vhosts in this repo that require a login. Every
 other backend app listed in "Single-ingress rule" above is reachable by
 anyone who can resolve its hostname. The gate is the standard
 `oauth2-proxy` + NGINX `auth_request` recipe:
@@ -127,18 +125,6 @@ EA vhost itself: the EA API and its `/mcp` transport verify the JWT
 themselves (EA `docs/adr/0032`), so `nginx/conf.d/ea.conf` needs no change
 and this realm adds no NGINX location *there*. Keycloak is still reached
 the normal way, at `https://keycloak.famillelallier.net`.
-
-The realm does have a fourth client that *is* an oauth2-proxy gate,
-`ea-obsidian` — but it fronts Obsidian, not EA (see the `obsidian` service
-above). It is the one client here with no `ea-api` audience mapper, because
-nothing behind that gate calls the EA API; the token is only ever proof
-that the person is an `ea` realm user. It carries its own
-`ea-obsidian-audience` mapper instead, as `jarvis` does: oauth2-proxy's
-keycloak-oidc provider rejects a token whose `aud` lacks its client id,
-and without the mapper Keycloak stamps only `account` there (a bare 500
-on `/oauth2/callback`, logged as `audience ... [account] does not match`). Its single redirect URI is
-`https://obsidian.infra.famillelallier.net/oauth2/callback` — the same
-exact-callback rule as every other client in this file, no trailing `*`.
 
 The realm also serves a second application, DarkAngel (the `DarkAngel`
 repo, vhost `nginx/conf.d/darkangel.conf`), through `darkangel-spa`: a
