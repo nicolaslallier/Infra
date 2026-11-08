@@ -185,7 +185,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
                 "docker compose --env-file .env -f docker-compose.platform.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.portainer.yml config -q && "
                 "docker compose --env-file .runner.env -f docker-compose.runners.yml config -q && "
-                "docker compose --env-file /dev/null -f docker-compose.dev.yml config -q && "
+                "docker compose --env-file .env -f docker-compose.dev.yml config -q && "
                 "SESSION=x REPO_URL=x GH_TOKEN=x SSH_PUBKEYS=x S3_ACCESS_KEY=x S3_SECRET_KEY=x "
                 "docker compose --env-file /dev/null -f dev/session.compose.yml config -q",
             ],

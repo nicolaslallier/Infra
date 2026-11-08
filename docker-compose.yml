@@ -55,6 +55,13 @@ services:
         # TLS-terminates and proxies it (nginx/conf.d/keycloak.conf).
         aliases:
           - keycloak.famillelallier.net
+          # The data stack runs on the Mac mini (docker-compose.data.yml):
+          # these names keep s3:8333, rabbitmq:5672 and http://ntfy working
+          # for apps on this host's infra-net, relayed by stream.d/s3.conf,
+          # stream.d/rabbitmq.conf and conf.d/ntfy.conf.
+          - s3
+          - rabbitmq
+          - ntfy
 
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:1.4.2@sha256:6edfb73afd11f2d83ea4e8007f5068c3ffaa38078a6b0ad1339e5bd2f637aacd
