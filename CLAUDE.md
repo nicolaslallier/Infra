@@ -931,6 +931,19 @@ postgres dump holds every app's data, so nothing is world-readable.
   Prefect UI -> Blocks -> Secret `openbao-backup-token`, then trigger
   `backup/nightly` once from the Prefect UI so the backup alerts clear. The snapshot is
   encrypted with the seal key, so back up `openbao/seal.key` separately.
+- **DNS** (Technitium, on another host) is fetched over HTTP: `GET
+  /api/settings/backup` at `BACKUP_DNS_ADDR` (default
+  `http://192.168.2.253:5380`, the `DNS_IP` alias) into `dns/dns-<stamp>.zip`
+  (zones, settings, accounts; no stats or query logs). Technitium answers
+  errors with HTTP 200 and JSON, so anything that is not a zip fails the
+  target. The token is the Secret block `dns-backup-token`. It travels in
+  clear HTTP on the LAN (the console has no TLS, same as the admin login), so
+  it belongs to a dedicated user, not `admin`. Owner steps, once: Technitium
+  console -> Administration -> Users: user `backup` in a group with only the
+  Settings permission the backup endpoint needs; Sessions -> Create Token
+  for it; paste it into Prefect UI -> Blocks -> Secret
+  `dns-backup-token`, then trigger `backup/nightly` once. Restore: console ->
+  Settings -> Restore Settings with that zip.
 - **Metric:** `backup.prom` under `metrics/` carries
   `infra_backup_last_success_timestamp_seconds{target=...}` for node-exporter's
   textfile collector (`prefect-flows` creates `metrics/` at start); a failed
