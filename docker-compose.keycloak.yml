@@ -44,6 +44,10 @@ services:
       KC_HOSTNAME: https://keycloak.famillelallier.net
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
+      # One node: no clustering. Otherwise any other Keycloak on the same
+      # database (the old homelab one during a move) registers in its
+      # JDBC_PING table, cannot be reached, and /health/ready goes DOWN.
+      KC_CACHE: local
       # :8080 is published on the LAN, so only trust X-Forwarded-* from the
       # homelab (nginx's traffic leaves Docker Desktop from the host's IP);
       # anyone else hitting :8080 directly cannot spoof scheme or client IP.
