@@ -1,8 +1,8 @@
-# The "auth" stack: the oauth2-proxies that gate the internal UIs (see
-# stacks.conf, and CLAUDE.md "Portainer-managed stack"). Keycloak itself is
-# its own stack on the Mac mini (docker-compose.keycloak.yml); the proxies
-# reach it at https://keycloak.famillelallier.net, the network alias nginx
-# (infra stack) holds on infra-net, and nginx relays it to the mini.
+# The "auth" stack: the oauth2-proxies that gate the internal UIs, on the
+# Mac mini (Portainer environment 7, see stacks.conf, and CLAUDE.md
+# "Portainer-managed stack"), next to the keycloak stack. nginx (homelab)
+# calls them on :4180-4182 for every gated request. Nothing here
+# bind-mounts the host checkout: a remote environment has none.
 name: auth
 
 services:
@@ -10,9 +10,8 @@ services:
   # redeploy -- which force-recreates everything -- never pulls a surprise.
   # The tag is for humans; the digest is what is pulled. Bump both together.
   # Nginx auth_request backend for the Jarvis vhost's Keycloak login gate
-  # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself and
-  # publishes no host port — it's reached only from the nginx container,
-  # over infra-net, at oauth2-proxy:4180. Its own upstream is a dummy
+  # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself: nginx calls
+  # it from the homelab at 192.168.2.67:4180. Its own upstream is a dummy
   # ("static://202") because it's never used as a reverse proxy here,
   # only as the thing nginx's auth_request/oauth2/ locations call into.
   oauth2-proxy:
@@ -20,14 +19,18 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # The public URL, through nginx's alias on infra-net (Keycloak is on
-      # the Mac mini, not on infra-net). nginx's TLS is trusted through the
-      # CA bundle mounted below.
+      # No OIDC discovery: the discovery document points every endpoint at
+      # https://keycloak.famillelallier.net, which is nginx on the homelab
+      # with a self-signed cert this image does not trust. So the browser
+      # goes to the public login URL, while token and key calls go straight
+      # to the keycloak stack on this host (:8080). The issuer is the public
+      # URL: it is what Keycloak (KC_HOSTNAME) writes in every token, so it
+      # is verified, without the old skip-issuer escape hatch.
       OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/jarvis
-      # ponytail: kept from when the issuer URL was internal (http://keycloak:8080)
-      # and never matched KC_HOSTNAME. It now matches; drop this on all three
-      # proxies once the move has settled.
-      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_LOGIN_URL: https://keycloak.famillelallier.net/realms/jarvis/protocol/openid-connect/auth
+      OAUTH2_PROXY_REDEEM_URL: http://192.168.2.67:8080/realms/jarvis/protocol/openid-connect/token
+      OAUTH2_PROXY_OIDC_JWKS_URL: http://192.168.2.67:8080/realms/jarvis/protocol/openid-connect/certs
       OAUTH2_PROXY_CLIENT_ID: jarvis
       # No :? guard on the client secret, unlike the cookie key below:
       # Keycloak generates it when it imports the realm, so the first deploy
@@ -51,8 +54,10 @@ services:
       # /oauth2/* (sign-in/callback/logout) are used. See jarvis.conf.
       OAUTH2_PROXY_UPSTREAMS: static://202
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
-      # Trust X-Forwarded-* from NGINX (the only thing that can reach this
-      # container) instead of the raw infra-net connection.
+      # Trust X-Forwarded-* from NGINX instead of the raw connection.
+      # ponytail: any LAN device reaching :4180-4182 can spoof these too;
+      # redirects stay pinned to .famillelallier.net. A firewall rule in the
+      # Colima VM allowing only LAN_IP closes it.
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       # Required for nginx.conf's auth_request_set on
       # $upstream_http_x_auth_request_user / _email.
@@ -60,20 +65,10 @@ services:
       # Single provider configured — skip the "choose a provider" screen and
       # go straight to Keycloak.
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    volumes:
-      # Token-exchange/jwks calls below route through NGINX (see the
-      # keycloak.famillelallier.net alias on the nginx service), which
-      # serves the self-signed certs/infra.crt, signed by our local
-      # certs/infra-ca.crt CA — not in this image's default trust store.
-      # --provider-ca-file isn't reliably wired into every internal HTTP
-      # client in this image (v7.6.0's keycloak-oidc token exchange still
-      # failed TLS verification with it set), so instead this replaces the
-      # container's whole system CA bundle with one that also trusts our
-      # CA (see scripts/gen-certs.sh's gen_oauth2proxy_bundle) — every Go
-      # http.Client here uses the system pool by default.
-      - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
-    networks:
-      - infra-net
+    # nginx (homelab) calls this on every gated request. LAN only, plain
+    # HTTP like Keycloak's :8080.
+    ports:
+      - "4180:4180"
     # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
 
@@ -86,9 +81,12 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Public URL + the issuer-verification flag, as on oauth2-proxy above.
+      # Public issuer, endpoints by hand: see oauth2-proxy above.
       OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/infra
-      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_LOGIN_URL: https://keycloak.famillelallier.net/realms/infra/protocol/openid-connect/auth
+      OAUTH2_PROXY_REDEEM_URL: http://192.168.2.67:8080/realms/infra/protocol/openid-connect/token
+      OAUTH2_PROXY_OIDC_JWKS_URL: http://192.168.2.67:8080/realms/infra/protocol/openid-connect/certs
       OAUTH2_PROXY_CLIENT_ID: s3-admin
       # Client secret: generated by Keycloak on realm import, so no :? guard.
       # Cookie key: needed before the first boot, so it has one.
@@ -114,11 +112,10 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    volumes:
-      # Same local-CA bundle swap as the other two instances.
-      - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
-    networks:
-      - infra-net
+    # nginx (homelab) calls this on every gated request. LAN only, plain
+    # HTTP like Keycloak's :8080.
+    ports:
+      - "4181:4180"
     # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
 
@@ -132,9 +129,12 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Public URL + the issuer-verification flag, as on oauth2-proxy above.
+      # Public issuer, endpoints by hand: see oauth2-proxy above.
       OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/infra
-      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
+      OAUTH2_PROXY_SKIP_OIDC_DISCOVERY: "true"
+      OAUTH2_PROXY_LOGIN_URL: https://keycloak.famillelallier.net/realms/infra/protocol/openid-connect/auth
+      OAUTH2_PROXY_REDEEM_URL: http://192.168.2.67:8080/realms/infra/protocol/openid-connect/token
+      OAUTH2_PROXY_OIDC_JWKS_URL: http://192.168.2.67:8080/realms/infra/protocol/openid-connect/certs
       OAUTH2_PROXY_CLIENT_ID: prefect
       # Client secret: generated by Keycloak, so no :? guard.
       # Cookie key: needed before the first boot, so it has one.
@@ -155,14 +155,9 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    volumes:
-      # Same local-CA bundle swap as the other instances.
-      - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
-    networks:
-      - infra-net
+    # nginx (homelab) calls this on every gated request. LAN only, plain
+    # HTTP like Keycloak's :8080.
+    ports:
+      - "4182:4180"
     # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
-
-networks:
-  infra-net:
-    external: true
