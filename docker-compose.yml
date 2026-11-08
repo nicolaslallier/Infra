@@ -218,65 +218,10 @@ services:
       keycloak:
         condition: service_healthy
 
-  # Second oauth2-proxy, for Obsidian, against the `ea` realm instead of
-  # `jarvis` (nginx/conf.d/obsidian.conf). A separate container rather than
-  # a second realm on the one above: an oauth2-proxy process speaks to
-  # exactly one issuer, so "who may open Obsidian" and "who may open Jarvis"
-  # are different realms and therefore different processes. Same dummy
-  # upstream, same auth_request role as the jarvis instance.
-  oauth2-proxy-ea:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
-    restart: unless-stopped
-    environment:
-      OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Internal infra-net URL + the issuer-verification escape hatch, for
-      # the same Keycloak hostname-v2 reason documented on oauth2-proxy above.
-      OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/ea
-      OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
-      OAUTH2_PROXY_CLIENT_ID: ea-obsidian
-      # Same split as the jarvis instance above: the client secret cannot
-      # exist before the realm import, the cookie key must exist before the
-      # first boot and so carries a :? guard.
-      OAUTH2_PROXY_CLIENT_SECRET: ${EA_OBSIDIAN_OAUTH_CLIENT_SECRET}
-      OAUTH2_PROXY_COOKIE_SECRET: ${EA_OBSIDIAN_OAUTH_COOKIE_SECRET:?Set EA_OBSIDIAN_OAUTH_COOKIE_SECRET in .env (openssl rand -base64 32 | tr -- '+/' '-_' -- base64url, not standard base64)}
-      # ea-obsidian enforces PKCE (pkce.code.challenge.method in
-      # ea-realm.json, as every other client in that realm does), so the
-      # proxy has to send a challenge or Keycloak rejects the code exchange.
-      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
-      # No COOKIE_DOMAINS/WHITELIST_DOMAINS, unlike the jarvis instance:
-      # sign-in, callback and the app are all on this one hostname, so the
-      # cookie stays host-scoped. obsidian.conf keeps `rd` a relative path:
-      # without a whitelist, oauth2-proxy rejects an absolute one, even for
-      # this same host.
-      # The distinct name keeps it from colliding with the jarvis proxy's
-      # own `_oauth2_proxy` cookie, which is scoped to .famillelallier.net
-      # and would otherwise be overwritten on every Obsidian login.
-      OAUTH2_PROXY_COOKIE_NAME: _oauth2_proxy_ea
-      OAUTH2_PROXY_COOKIE_SECURE: "true"
-      OAUTH2_PROXY_REDIRECT_URL: https://obsidian.infra.famillelallier.net/oauth2/callback
-      # Any human in the `ea` realm; the realm itself is the gate. To narrow
-      # it to EA editors, add OAUTH2_PROXY_ALLOWED_ROLES: ea-editor.
-      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
-      OAUTH2_PROXY_UPSTREAMS: static://202
-      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
-      OAUTH2_PROXY_REVERSE_PROXY: "true"
-      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
-      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    volumes:
-      # Same local-CA bundle swap as the jarvis instance -- its token and
-      # jwks calls go to the external keycloak.famillelallier.net hostname
-      # named in the discovery document, i.e. back through nginx's TLS.
-      - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
-    networks:
-      - infra-net
-    depends_on:
-      keycloak:
-        condition: service_healthy
-
   # Third oauth2-proxy, for the SeaweedFS admin UI, against the `infra` realm
-  # (nginx/conf.d/s3-admin.conf). Its own container for the reason
-  # oauth2-proxy-ea has one: one process, one issuer. Unlike that one it
-  # also narrows by group -- s3-admin is root on every bucket.
+  # (nginx/conf.d/s3-admin.conf). Its own container because an oauth2-proxy
+  # process speaks to exactly one issuer. It also narrows by group --
+  # s3-admin is root on every bucket.
   oauth2-proxy-infra:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
     restart: unless-stopped
@@ -379,7 +324,6 @@ services:
       - "443:443"
       - "127.0.0.1:5432:5432"
       - "127.0.0.1:5672:5672"
-      - "127.0.0.1:7687:7687"
       # Moria (stream.d/moria.conf): public, the router forwards 7777/TCP here.
       - "7777:7777"
       # Dev-session SSH (stream.d/devssh.conf): LAN only, hence LAN_IP.
@@ -413,8 +357,6 @@ services:
       keycloak:
         condition: service_started
       oauth2-proxy:
-        condition: service_started
-      oauth2-proxy-ea:
         condition: service_started
       oauth2-proxy-infra:
         condition: service_started
@@ -674,7 +616,7 @@ services:
   # --- Object storage: SeaweedFS (S3 via NGINX; no host ports) ---
 
   s3:
-    # Tag *and* digest, like neo4j: a storage-format change must not ride
+    # Tag *and* digest: a storage-format change must not ride
     # along with a redeploy.
     image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
     restart: unless-stopped
@@ -762,43 +704,6 @@ services:
       retries: 5
       start_period: 40s
 
-  neo4j:
-    # The EA repo's architecture graph (github.com/nicolaslallier/EA,
-    # docs/adr/0030 there). Tag *and* digest: Neo4j's store format moves
-    # between releases, so a redeploy must not upgrade it without a commit.
-    # Same version as the instance the data was migrated from.
-    image: neo4j:2026.07.1-community@sha256:956faa5d14b6beaa629b80c718bfd389ec12064f97e276ed9a58b0c53b25a323
-    # 14d peak 1147 MiB x1.5; above heap 512M + pagecache 256M + 512M floor.
-    mem_limit: 1792m
-    restart: unless-stopped
-    environment:
-      # Read once, on first boot against an empty volume -- changing it
-      # afterwards does not change the password (same caveat as pgAdmin).
-      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD}
-      # For the healthcheck only. Not NEO4J_-prefixed: the image turns every
-      # NEO4J_* variable into a neo4j.conf setting and refuses unknown ones.
-      HEALTHCHECK_PASSWORD: ${NEO4J_PASSWORD}
-      # Drivers re-use the advertised address; the only host path to Bolt is
-      # nginx's 127.0.0.1:7687 passthrough.
-      NEO4J_server_bolt_advertised__address: localhost:7687
-      # The image sizes itself on the whole VM otherwise, and this VM also
-      # holds Keycloak's JVM and the LGTM stack.
-      NEO4J_server_memory_pagecache_size: 256M
-      NEO4J_server_memory_heap_initial__size: 512M
-      NEO4J_server_memory_heap_max__size: 512M
-    volumes:
-      - neo4j-data:/data
-      - neo4j-logs:/logs
-    networks:
-      - infra-net
-    healthcheck:
-      # Password in the environment of this one command, not in its argv (ps).
-      test: ["CMD-SHELL", "NEO4J_USERNAME=neo4j NEO4J_PASSWORD=\"$${HEALTHCHECK_PASSWORD}\" cypher-shell 'RETURN 1' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s
-
   # --- Notifications (ntfy push; infra-net only) ---
 
   ntfy:
@@ -865,29 +770,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
-
-  obsidian:
-    # The Obsidian desktop app streamed to a browser tab, at
-    # obsidian.infra.famillelallier.net behind the Keycloak gate
-    # (nginx/conf.d/obsidian.conf). No auth of its own and a full desktop
-    # session inside, so it must never get a `ports:` entry.
-    image: lscr.io/linuxserver/obsidian:v1.13.7-ls144@sha256:c6c86336a2cf57506b0db2beb09ef4a50170808820a59c20063e669d12122dd4
-    # 14d peak 684 MiB x1.5.
-    mem_limit: 1280m
-    restart: unless-stopped
-    environment:
-      PUID: 1000
-      PGID: 1000
-      # Daily-note dates come from this clock; UTC would roll them over at
-      # 20:00 local.
-      TZ: America/Toronto
-    volumes:
-      # Home directory: vaults, Obsidian settings, plugins.
-      - obsidian-config:/config
-    # Electron crashes on Docker's 64m default.
-    shm_size: "1gb"
-    networks:
-      - infra-net
 
   # --- Prefect (UI + API via NGINX behind oauth2-proxy-prefect; no host ports) ---
 
@@ -1052,10 +934,7 @@ volumes:
   alloy-data:
   s3-data:
   rabbitmq-data:
-  neo4j-data:
-  neo4j-logs:
   ntfy-data:
-  obsidian-config:
   openbao-data:
   # Written by the DarkAngel stack (github.com/nicolaslallier/DarkAngel), read
   # by nginx above -- external so both stacks name the same volume, the way

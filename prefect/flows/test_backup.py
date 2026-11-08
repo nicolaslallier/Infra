@@ -62,8 +62,8 @@ def test_previous_metrics_roundtrip():
     with tempfile.TemporaryDirectory() as d:
         p = Path(d) / "backup.prom"
         assert backup.read_metrics(p) == {}
-        p.write_text(backup.metrics_text({"neo4j": 5.0, "ntfy": 7.0}))
-        assert backup.read_metrics(p) == {"neo4j": 5.0, "ntfy": 7.0}
+        p.write_text(backup.metrics_text({"retired": 5.0, "ntfy": 7.0}))
+        assert backup.read_metrics(p) == {"ntfy": 7.0}
 
 
 class FakeContainer:
@@ -118,101 +118,24 @@ class FakeClient:
         return o
 
 
-def _neo4j_attrs():
-    return {
-        "Config": {"Image": "neo4j:2026.01-community"},
-        "Mounts": [{"Destination": "/data", "Name": "some_neo4j_vol"}],
-    }
-
-
 def _no_compose_labels(kw):
     assert "com.docker.compose" not in str(kw.get("labels", {}))
 
 
-def test_neo4j_restarted_on_failure():
-    c = FakeContainer(_neo4j_attrs())
-
-    def boom():
-        raise RuntimeError("dump failed")
-
-    client = FakeClient({"neo4j": c}, run=boom)
-    backup._docker = lambda: client
-    with tempfile.TemporaryDirectory() as d:
-        backup.BACKUP_DIR = d
-        try:
-            backup.dump_neo4j.fn()
-        except RuntimeError:
-            pass
-        else:
-            raise AssertionError("expected RuntimeError")
-    assert c.stopped == 1 and c.started == 1
-    _no_compose_labels(client.run_calls[0][2])
-
-
-def test_neo4j_success_names_volume_from_container():
-    c = FakeContainer(_neo4j_attrs())
-    client = FakeClient({"neo4j": c})
-    backup._docker = lambda: client
-    with tempfile.TemporaryDirectory() as d:
-        backup.BACKUP_DIR = d
-        calls = []
-
-        def fake_dump():
-            # what neo4j-admin leaves behind: <db>.dump in the --to-path dir
-            db = client.run_calls[-1][1][2]
-            calls.append(db)
-            (Path(d) / "neo4j" / ".tmp" / f"{db}.dump").write_bytes(b"x")
-
-        client._run = fake_dump
-        out = backup.dump_neo4j.fn()
-        assert calls == ["neo4j", "system"]
-        assert out.exists() and out.name.startswith("neo4j-") and out.suffix == ".dump"
-        assert list((Path(d) / "neo4j-system").glob("neo4j-system-*.dump"))
-        assert not list((Path(d) / "neo4j" / ".tmp").iterdir())
-    image, _, kw = client.run_calls[0]
-    assert image == "neo4j:2026.01-community"
-    assert "some_neo4j_vol" in kw["volumes"] and kw["detach"] is True
-    assert "mode" not in kw["volumes"]["some_neo4j_vol"]  # must stay writable (database_lock)
-    assert all(o.removed == 1 for o in client.oneshots)
-    for _, _, kw in client.run_calls:
-        _no_compose_labels(kw)
-    assert c.started == 1
-
-
-def test_neo4j_timeout_restarts_and_removes():
-    c = FakeContainer(_neo4j_attrs())
-    client = FakeClient({"neo4j": c})
+def test_oneshot_timeout_removes_container():
+    c = FakeContainer({"Mounts": [{"Destination": "/var/lib/ntfy", "Name": "ntfy_vol"}]})
+    client = FakeClient({"ntfy": c})
     client.wait_exc = TimeoutError("read timed out")
     backup._docker = lambda: client
     with tempfile.TemporaryDirectory() as d:
         backup.BACKUP_DIR = d
         try:
-            backup.dump_neo4j.fn()
+            backup.dump_ntfy.fn()
         except RuntimeError as e:
             assert "timed out" in str(e)
         else:
             raise AssertionError("expected RuntimeError")
-    assert c.started == 1 and [o.removed for o in client.oneshots] == [1]
-
-
-def test_neo4j_no_databases_raises():
-    c = FakeContainer(_neo4j_attrs())
-    client = FakeClient({"neo4j": c})
-    backup._docker = lambda: client
-    old = backup.NEO4J_DATABASES
-    backup.NEO4J_DATABASES = ()
-    try:
-        with tempfile.TemporaryDirectory() as d:
-            backup.BACKUP_DIR = d
-            try:
-                backup.dump_neo4j.fn()
-            except RuntimeError:
-                pass
-            else:
-                raise AssertionError("expected RuntimeError")
-    finally:
-        backup.NEO4J_DATABASES = old
-    assert c.started == 1
+    assert [o.removed for o in client.oneshots] == [1]
 
 
 def test_to_prune_ignores_part():
@@ -377,11 +300,11 @@ def test_never_succeeded_target_exports_zero():
         def fail():
             raise RuntimeError("x")
 
-        saved = (backup.dump_postgres, backup.dump_neo4j, backup.dump_ntfy, backup.dump_openbao)
+        saved = (backup.dump_postgres, backup.dump_ntfy, backup.dump_openbao)
         import logging
 
         backup.get_run_logger = lambda: logging.getLogger('t')
-        backup.dump_postgres = backup.dump_neo4j = backup.dump_ntfy = backup.dump_openbao = fail
+        backup.dump_postgres = backup.dump_ntfy = backup.dump_openbao = fail
         try:
             try:
                 backup.backup.fn()
@@ -389,7 +312,7 @@ def test_never_succeeded_target_exports_zero():
             except RuntimeError as e:
                 assert 'backup failed for' in str(e), e
         finally:
-            backup.dump_postgres, backup.dump_neo4j, backup.dump_ntfy, backup.dump_openbao = saved
+            backup.dump_postgres, backup.dump_ntfy, backup.dump_openbao = saved
         m = backup.read_metrics(Path(d) / "metrics" / "backup.prom")
         assert m == {t: 0.0 for t in backup.TARGETS}, m
 

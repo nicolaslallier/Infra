@@ -10,7 +10,7 @@
 #      .env.example keeps growing -- so a variable added with a new service
 #      is simply absent here. Compose interpolates an absent variable as an
 #      empty string and deploys anyway, and the service says nothing about
-#      .env: oauth2-proxy-ea, handed an empty EA_OBSIDIAN_OAUTH_COOKIE_SECRET,
+#      .env: oauth2-proxy, handed an empty JARVIS_OAUTH_COOKIE_SECRET,
 #      dies with "invalid configuration: missing setting: cookie-secret" and
 #      crash-loops.
 #   2. A value still at the `change-me` placeholder, or empty.
@@ -65,9 +65,7 @@ REQUIRED=(
 	DARKANGEL_S3_SECRET_KEY
 	RABBITMQ_DEFAULT_PASS
 	MORIA_AMQP_PASSWORD
-	NEO4J_PASSWORD
 	JARVIS_OAUTH_COOKIE_SECRET
-	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
 	S3_ADMIN_OAUTH_COOKIE_SECRET
 	PREFECT_AUTH_STRING
 	PREFECT_S3_SECRET_KEY
@@ -83,7 +81,6 @@ REQUIRED=(
 # not just for being filled in.
 COOKIE_SECRETS=(
 	JARVIS_OAUTH_COOKIE_SECRET
-	EA_OBSIDIAN_OAUTH_COOKIE_SECRET
 	S3_ADMIN_OAUTH_COOKIE_SECRET
 	PREFECT_OAUTH_COOKIE_SECRET
 )
@@ -93,7 +90,6 @@ COOKIE_SECRETS=(
 # realm (and therefore the secret) comes to exist.
 POST_BOOT=(
 	JARVIS_OAUTH_CLIENT_SECRET:oauth2-proxy:jarvis:jarvis
-	EA_OBSIDIAN_OAUTH_CLIENT_SECRET:oauth2-proxy-ea:ea:ea-obsidian
 	S3_ADMIN_OAUTH_CLIENT_SECRET:oauth2-proxy-infra:infra:s3-admin
 	PREFECT_OAUTH_CLIENT_SECRET:oauth2-proxy-prefect:infra:prefect
 )

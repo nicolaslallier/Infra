@@ -1500,7 +1500,7 @@
     },
     {
       "type": "row",
-      "title": "Logs (every service, incl. DNS, Neo4j, pgAdmin, oauth2-proxy, LGTM, Portainer)",
+      "title": "Logs (every service, incl. DNS, pgAdmin, oauth2-proxy, LGTM, Portainer)",
       "collapsed": false,
       "panels": [],
       "gridPos": {

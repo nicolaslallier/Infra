@@ -165,7 +165,7 @@ because the failure it prevents surfaces somewhere other than `.env`:
   is simply absent from a long-lived `.env`. Compose interpolates an absent
   variable as an **empty string and deploys anyway**, so the symptom is a
   container dying on its own config with nothing naming `.env`:
-  `oauth2-proxy-ea`, handed an empty `EA_OBSIDIAN_OAUTH_COOKIE_SECRET`,
+  `oauth2-proxy`, handed an empty `JARVIS_OAUTH_COOKIE_SECRET`,
   logs `invalid configuration: missing setting: cookie-secret` and
   crash-loops. The check diffs the assigned keys of the two files and prints
   the missing lines ready to append. Keys assigned only inside a comment in
@@ -181,8 +181,7 @@ because the failure it prevents surfaces somewhere other than `.env`:
   three different mistakes.
 - **oauth2-proxy cookie keys of the wrong length *or alphabet*.**
   oauth2-proxy accepts only a 16, 24 or 32 byte `cookie-secret` and dies at
-  startup otherwise, so `JARVIS_OAUTH_COOKIE_SECRET` /
-  `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` are checked rather than just checked
+  startup otherwise, so the `*_OAUTH_COOKIE_SECRET` keys are checked rather than just checked
   for being filled in. The check mirrors `pkg/encryption.SecretBytes`
   rather than asking "is this base64 of 32 bytes", because the container
   does not: it decodes with Go's `base64.RawURLEncoding` — the **URL-safe**
