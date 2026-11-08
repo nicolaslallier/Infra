@@ -23,7 +23,7 @@ set +a
 : "${EXAMINER_SEED_PASSWORD:?Set EXAMINER_SEED_PASSWORD in .env}"
 
 kc() {
-  docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
+  docker compose -f docker-compose.auth.yml exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
 }
 
 kc config credentials --server http://localhost:8080 --realm master \

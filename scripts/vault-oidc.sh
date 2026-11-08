@@ -31,7 +31,7 @@ VAULT_URL="https://vault.infra.famillelallier.net"
 ISSUER="https://keycloak.famillelallier.net/realms/infra"
 GROUP="openbao-admin"
 
-kc() { docker compose exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
+kc() { docker compose -f docker-compose.auth.yml exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
 bao() { ./scripts/vault-cli.sh "$@"; }
 
 # --- 1. Keycloak ------------------------------------------------------------

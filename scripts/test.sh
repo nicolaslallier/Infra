@@ -35,7 +35,7 @@ fi
 # image tag Renovate bumps, fastapi from inside that image (cached per image
 # ref, digest included, so the image is only started when the pin moves). Left
 # floating, uv picks a newer fastapi that prefect's server API won't import under.
-PREFECT_IMAGE="$(grep -m1 -oE 'prefecthq/prefect:[^"[:space:]]+' docker-compose.yml)"
+PREFECT_IMAGE="$(grep -m1 -oE 'prefecthq/prefect:[^"[:space:]]+' docker-compose.platform.yml)"
 PREFECT_VERSION="$(sed -E 's/^prefecthq\/prefect:([0-9.]+).*/\1/' <<<"$PREFECT_IMAGE")"
 fastapi_cache="$cache/fastapi-$(tr -c 'A-Za-z0-9._-' '_' <<<"$PREFECT_IMAGE")"
 if [ ! -s "$fastapi_cache" ]; then

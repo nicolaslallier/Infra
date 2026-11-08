@@ -1,0 +1,190 @@
+# The "platform" stack: the LLM gateway (LiteLLM), the Ollama metrics
+# proxies and Prefect (server + flows), split out of the infra stack (see
+# stacks.conf, and CLAUDE.md "Portainer-managed stack"). No volumes of its
+# own; prefect-flows writes the nightly backups to infra-backups (external,
+# created by `make app-volumes`).
+name: platform
+
+services:
+  # --- Ollama metrics proxy (no host ports) ---
+  # Ollama runs on a Mac outside this stack and has no /metrics of its own.
+  # Every client on infra-net (LibreChat, prefect-flows) reaches it through
+  # this proxy, which relays each request as-is and counts tokens, latency
+  # and loaded models per model -- traffic that bypasses it is not counted.
+  # The image is built by `make app-images`, not pulled (see the Makefile).
+  # A proxy watches exactly one Ollama, so each machine running one gets its
+  # own; Prometheus tells them apart by a `host` label (job ollama) named like
+  # that machine's `instance` in the macos/windows jobs. ollama-proxy itself
+  # is mac-infra, the default every client uses.
+  ollama-proxy: &ollama-proxy
+    image: infra-ollama-proxy:2762bfb
+    pull_policy: never
+    restart: unless-stopped
+    environment: &ollama-proxy-env
+      OLLAMA_HOST: ${OLLAMA_UPSTREAM_URL:-http://192.168.2.35:11434}
+      # Same port as Ollama, so a client switches by changing the host only.
+      PORT: "11434"
+      # Both "repairs" rewrite responses and are on by default; off, so a
+      # client sees exactly what Ollama sent.
+      OLLAMA_SANITIZE_UTF8_RESPONSE: "false"
+      OLLAMA_PROMOTE_REASONING_TO_CONTENT: "false"
+    networks:
+      - infra-net
+
+  # The Windows laptop this stack runs on. By LAN address, which it answers
+  # on; host.docker.internal would also work but only while that stays true.
+  ollama-proxy-laptop:
+    <<: *ollama-proxy
+    environment:
+      <<: *ollama-proxy-env
+      OLLAMA_HOST: http://192.168.2.10:11434
+
+  # --- Prefect (UI + API via NGINX behind oauth2-proxy-prefect; no host ports) ---
+
+  prefect-server:
+    image: prefecthq/prefect:3.8.7-python3.12@sha256:f15a7bda40608ee890ff97e963ec3403dc25d633810a4ef1fff93ff303f4ef5f
+    # /api/health is exempt from the auth string (the rest 401s), so no secret in the probe.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4200/api/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    command: ["prefect", "server", "start", "--host", "0.0.0.0"]
+    environment:
+      # Database/role `prefect`, provisioned like any other app
+      # (APP_DATABASES). The password sits inside a URL: keep it url-safe.
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:${PREFECT_DB_PASSWORD}@postgres:5432/prefect
+      # Not optional. prefect-flows holds the Docker socket and a
+      # deployment's pull steps can run shell commands, so an open API would
+      # be root on the daemon for every container on infra-net -- a path
+      # nginx and oauth2-proxy are not on. The UI prompts for the same string.
+      PREFECT_SERVER_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?Set PREFECT_AUTH_STRING in .env (user:password)}
+      # Where the browser finds the API; the default would be 0.0.0.0:4200.
+      PREFECT_UI_API_URL: https://prefect.infra.famillelallier.net/api
+      # Prefect 3.8.7 resolves SQLAlchemy 2.1, whose bulk insert rejects the
+      # hybrid property the scheduler service writes: it logs "Can't evaluate
+      # bulk DML statement" every minute and never creates a scheduled run
+      # (manual runs still work). Installed by the image's entrypoint at start.
+      # ponytail: drop once a Prefect release pins sqlalchemy itself.
+      EXTRA_PIP_PACKAGES: "sqlalchemy<2.1"
+      # Production logged 540 prefect logins in 2 min (~4.5/s). Prefect's
+      # default is pool 5 + overflow 10, and overflow connections are opened
+      # per burst and closed on return: that is the churn. Pool 20, overflow
+      # 0 keeps them long-lived and hard-caps each engine at 20. Production
+      # showed 7 idle prefect connections on a pool of 5, so at least two
+      # engines (one per event loop): worst case ~40+, against a
+      # max_connections of 100 shared with grafana, litellm, keycloak, ...
+      # Requests above the cap wait for a pooled connection, up to SQLAlchemy's
+      # pool_timeout (30 s; Prefect's ..._SQLALCHEMY_POOL_TIMEOUT setting
+      # defaults to 30 but its Postgres engine does not pass it on).
+      PREFECT_SERVER_DATABASE_SQLALCHEMY_POOL_SIZE: "20"
+      PREFECT_SERVER_DATABASE_SQLALCHEMY_MAX_OVERFLOW: "0"
+    networks:
+      - infra-net
+
+  prefect-flows:
+    image: prefecthq/prefect:3.8.7-python3.12@sha256:f15a7bda40608ee890ff97e963ec3403dc25d633810a4ef1fff93ff303f4ef5f
+    restart: unless-stopped
+    # serve.py registers every deployment with its schedule and runs flows as
+    # subprocesses of this container: no work pool, no worker, no deploy
+    # step. If the API is not up yet it exits, and the restart is the retry
+    # (prefect-server's healthcheck uses /api/health, which the auth string
+    # exempts, so it needs no secret; this container does not depend on it).
+    working_dir: /opt/prefect/flows
+    command: ["python", "serve.py"]
+    environment:
+      # Installed by the image's entrypoint on every start; no custom image.
+      EXTRA_PIP_PACKAGES: "docker boto3"
+      PREFECT_API_URL: http://prefect-server:4200/api
+      PREFECT_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?Set PREFECT_AUTH_STRING in .env (user:password)}
+      BACKUP_DIR: /backups
+      BACKUP_PG_USER: ${POSTGRES_USER}
+      BACKUP_KEEP: "3"
+      # organize-inbox. Not PREFECT_*: Prefect reads that namespace as its
+      # own settings.
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama-proxy:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.8:27b-mlx}
+      ORGANIZER_S3_ENDPOINT: http://s3:8333
+      ORGANIZER_S3_BUCKET: obsidian
+      # provision-s3.sh makes the access key the app name.
+      ORGANIZER_S3_ACCESS_KEY: prefect
+      ORGANIZER_S3_SECRET_KEY: ${PREFECT_S3_SECRET_KEY:?Set PREFECT_S3_SECRET_KEY in .env (openssl rand -hex 24), then make s3-provision app=prefect bucket=obsidian}
+      ORGANIZER_VAULT_PREFIX: ${ORGANIZER_VAULT_PREFIX:-}
+      # sort-mail. Its OAuth credentials are the gmail-sorter-oauth Secret
+      # block, never an env var: .env reaches every container wholesale.
+      SORTER_MAX_THREADS: "20"
+      SORTER_LABEL_PREFIX: Tri/
+    # This is the one Prefect container that gets the Docker socket, for
+    # pr-validation's sibling-container checks. Understand the trade before
+    # extending it: the socket is root on the daemon, so any flow can do
+    # anything to any container on this host. What stands between that and
+    # the rest of infra-net is PREFECT_AUTH_STRING on prefect-server.
+    volumes:
+      - ${INFRA_DIR:-.}/prefect/flows:/opt/prefect/flows:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Checks run as *sibling* containers, so their bind mounts are resolved
+      # by the daemon against the host -- a workspace at an ordinary temp path
+      # in here would be invisible to them and Docker would auto-create an
+      # empty directory in its place. Mounting it at the same path on both
+      # sides is what makes the nested `-v` agree. Keep the two identical.
+      - /tmp/infra-ci:/tmp/infra-ci
+      # Backup flows write /backups/<target>/ and metrics/backup.prom.
+      - infra-backups:/backups
+    # The socket is root-owned inside Docker Desktop's VM. If a check reports
+    # permission denied on /var/run/docker.sock, `ls -l` it from inside this
+    # container and add that gid here.
+    group_add:
+      - "0"
+    networks:
+      - infra-net
+    depends_on:
+      - prefect-server
+
+  litellm:
+    # LLM gateway: OpenAI- and Anthropic-format API (Claude Code, opencode,
+    # scripts) in front of exo on the Macs and Ollama. The -database image
+    # ships Prisma, which LiteLLM needs for its admin UI, virtual keys and
+    # spend tracking -- without a DATABASE_URL the UI login answers "Not
+    # connected to DB". Database/role `litellm`, provisioned like any other
+    # app (APP_DATABASES / make provision-app app=litellm).
+    # Pinned by tag *and* digest: this container holds the master key and the
+    # DB salt, and main-stable moves under every redeploy. Upgrade on purpose.
+    image: ghcr.io/berriai/litellm-database:v1.83.14-stable@sha256:da4ab06d9d57da205263877425544d6df8e78147737b0dd8dc1e9e93a6d8ac2e
+    # liveliness needs no key.
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    # 14d peak 1176 MiB x1.5 (only ~1 day of history).
+    mem_limit: 1792m
+    restart: unless-stopped
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    environment:
+      # The password sits inside a URL: keep it url-safe (hex).
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD}@postgres:5432/litellm
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      # Encrypts provider credentials stored in the DB. Never change it once
+      # models have been added in the UI: they become undecryptable.
+      LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?Set LITELLM_SALT_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      UI_USERNAME: ${LITELLM_UI_USERNAME:-admin}
+      UI_PASSWORD: ${LITELLM_UI_PASSWORD:?Set LITELLM_UI_PASSWORD in .env}
+      # exo's OpenAI endpoint. Macs are reached by LAN address, never by
+      # host.docker.internal (that is the Windows Docker host).
+      EXO_API_BASE: ${EXO_API_BASE:-http://192.168.2.35:52415/v1}
+      STORE_MODEL_IN_DB: "True"
+    volumes:
+      - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+
+volumes:
+  infra-backups:
+    external: true
