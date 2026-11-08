@@ -111,6 +111,7 @@ selftest() {
   [ "$(stack_paths b "$tmp.conf" | tr '\n' ' ')" = ". :(exclude)a.yml :(exclude)a/ " ] || die "selftest: stack_paths b"
   rm -f "$tmp.conf"
   [ "$(compose_services docker-compose.dns.yml)" = dns ] || die "selftest: compose_services docker-compose.dns.yml"
+  [ "$(compose_services docker-compose.openbao.yml)" = openbao ] || die "selftest: compose_services docker-compose.openbao.yml"
   [ "$(compose_services docker-compose.postgres.yml | tr '\n' ' ')" = "postgres pgadmin postgres-exporter " ] \
     || die "selftest: compose_services docker-compose.postgres.yml"
   echo "portainer-stack.sh: selftest ok"
