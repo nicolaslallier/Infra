@@ -171,6 +171,7 @@ for s in $(STACKS); do \
   before=$$(echo $$before); \
   rc=0; STACK=$$s ./scripts/portainer-stack.sh $(1) || rc=$$?; \
   [ $$rc != 3 ] || continue; [ $$rc = 0 ] || exit $$rc; \
+  if [ "$$(awk -v s=$$s '!/^\#/ && $$1 == s { print $$3 }' stacks.conf)" != - ]; then echo "$$s: remote environment, health gate skipped (check it in Portainer)"; continue; fi; \
   [ "$(WAIT_HEALTHY)" = 0 ] || BEFORE_IDS="$$before" WAIT_PROJECT=$$s ./scripts/wait-healthy.sh $(or $(WAIT_HEALTHY_TIMEOUT),600); \
 done
 endef

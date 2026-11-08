@@ -22,8 +22,10 @@ set +a
 : "${NURSE_SEED_PASSWORD:?Set NURSE_SEED_PASSWORD in .env}"
 : "${EXAMINER_SEED_PASSWORD:?Set EXAMINER_SEED_PASSWORD in .env}"
 
+# Keycloak runs on the Mac mini: run this on the mini, or with DOCKER_HOST /
+# DOCKER_CONTEXT pointed at its Colima daemon.
 kc() {
-  docker compose -f docker-compose.auth.yml exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"
+  docker exec -i keycloak-keycloak-1 /opt/keycloak/bin/kcadm.sh "$@"
 }
 
 kc config credentials --server http://localhost:8080 --realm master \
