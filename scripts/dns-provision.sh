@@ -30,7 +30,9 @@ set +a
 : "${LAN_IP:?dns-provision.sh: LAN_IP not set in .env}"
 : "${DNS_ADMIN_PASSWORD:?dns-provision.sh: DNS_ADMIN_PASSWORD not set in .env}"
 
-BASE="http://${LAN_IP}:5380"
+# The console listens on DNS_IP (the alias on whichever host runs dns),
+# else LAN_IP. The A records below still point at LAN_IP (nginx).
+BASE="http://${DNS_IP:-$LAN_IP}:5380"
 
 # Send the long-lived .env secret over stdin (--data-urlencode "pass@-"),
 # not on the command line, so it can't be read from another local user's
