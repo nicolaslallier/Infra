@@ -26,9 +26,32 @@ model_list:
       api_base: http://ollama-proxy:11434
       order: 2
 
+  # Embeddings for the MCP semantic tool filter (litellm_settings below):
+  # the Ollama on .10 (192.168.2.10, the Windows homelab host the stack runs
+  # on), through ollama-proxy-laptop (its metrics proxy, despite the name).
+  # Small and multilingual (the tools and the prompts are French/English).
+  # Pull it on .10 first: `ollama pull qwen3-embedding:0.6b`.
+  - model_name: qwen3-embedding:0.6b
+    litellm_params:
+      model: ollama/qwen3-embedding:0.6b
+      api_base: http://ollama-proxy-laptop:11434
+    model_info:
+      mode: embedding
+
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true
+  # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
+  # carries MCP tools, keep only the top_k whose name + description are
+  # closest to the last user message. The index of the registry's tools is
+  # built at startup; on any failure the request keeps all its tools.
+  # embedding_model is a model_name from model_list above. A value saved in
+  # the UI is stored in the DB and wins over this one.
+  mcp_semantic_tool_filter:
+    enabled: true
+    embedding_model: qwen3-embedding:0.6b
+    top_k: 10
+    similarity_threshold: 0.3
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
