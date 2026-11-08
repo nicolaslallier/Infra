@@ -290,7 +290,7 @@ aws sts assume-role-with-web-identity --endpoint-url https://s3.infra.famillelal
 ```
 
 Use `S3WriteRole` / `S3AdminRole` for the other groups; each role's trust
-policy in `seaweedfs/iam.json.tmpl` requires both the `infra` issuer and a
+policy in the `seaweedfs-iam` config (`docker-compose.data.yml`) requires both the `infra` issuer and a
 matching `groups` claim (`s3-admin` → `S3AdminRole` and below,
 `s3-readwrite` → `S3WriteRole` and `S3ReadOnlyRole`, `s3-readonly` →
 `S3ReadOnlyRole` only), so a user in no group, or asking for a role above
@@ -1000,7 +1000,7 @@ successful snapshot update).
 |---|---|---|---|
 | Push | `ntfy` | `http://ntfy` | `https://ntfy.infra.famillelallier.net` |
 
-`ntfy` is deny-all (`ntfy/server.yml`): no topic is readable or writable
+`ntfy` is deny-all (the `ntfy-server` config in `docker-compose.data.yml`): no topic is readable or writable
 without a user or token. Its users, ACLs and tokens live in the `ntfy-data`
 volume. The NGINX vhost is deliberately not behind oauth2-proxy, since phones
 and apps authenticate with a token or Basic auth.
