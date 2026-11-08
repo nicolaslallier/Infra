@@ -173,8 +173,51 @@ services:
       UI_USERNAME: ${LITELLM_UI_USERNAME:-admin}
       UI_PASSWORD: ${LITELLM_UI_PASSWORD:?Set LITELLM_UI_PASSWORD in .env}
       STORE_MODEL_IN_DB: "True"
+      # The pg_vector vector store provider (vector_store_registry in
+      # config.yaml) reads these: litellm-pgvector below.
+      PG_VECTOR_API_BASE: http://litellm-pgvector:8000
+      PG_VECTOR_API_KEY: ${LITELLM_PGVECTOR_API_KEY:?Set LITELLM_PGVECTOR_API_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
     volumes:
       - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - infra-net
+
+  litellm-pgvector:
+    # LiteLLM has no pgvector driver of its own: its pg_vector provider calls
+    # this OpenAI-compatible vector store API (BerriAI/litellm-pgvector),
+    # which runs the similarity search in Postgres. Here it reads Jarvis's
+    # RAG chunks (file_chunks, 768-d nomic-embed-text-v1.5) through the
+    # read-only views of litellm/rag.sql (make provision-litellm-rag), as the
+    # role litellm_rag; Jarvis remains the only writer. On infra-net only, no
+    # NGINX vhost: clients go through LiteLLM (vector_store_ids /
+    # /v1/vector_stores/{id}/search).
+    # Built by `make app-images` from the commit in the Makefile
+    # (LITELLM_PGVECTOR_REF), not pulled: keep the tag in step with it.
+    image: infra-litellm-pgvector:5bd8f3a
+    pull_policy: never
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 768m
+    environment:
+      # ?schema= is the search_path: the views, not Jarvis's tables.
+      DATABASE_URL: postgresql://litellm_rag:${LITELLM_RAG_DB_PASSWORD:?Set LITELLM_RAG_DB_PASSWORD in .env (openssl rand -hex 24)}@postgres:5432/jarvis?schema=litellm_rag
+      SERVER_API_KEY: ${LITELLM_PGVECTOR_API_KEY:?Set LITELLM_PGVECTOR_API_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      # Queries must be embedded by the very model Jarvis embedded the
+      # chunks with, or the distances mean nothing: LM Studio's
+      # nomic-embed-text-v1.5 on .10, the same endpoint and model Jarvis's
+      # ingest uses (EMBEDDING_LMSTUDIO_* in the Jarvis repo). Called
+      # directly (openai/ = OpenAI-compatible), not through LiteLLM, so this
+      # container needs no LiteLLM key.
+      EMBEDDING__MODEL: openai/${JARVIS_EMBEDDING_MODEL:-text-embedding-nomic-embed-text-v1.5}
+      EMBEDDING__BASE_URL: ${JARVIS_EMBEDDING_BASE_URL:-http://host.docker.internal:1234/v1}
+      # LM Studio ignores it; the client refuses an empty one.
+      EMBEDDING__API_KEY: lm-studio
+      EMBEDDING__DIMENSIONS: "768"
     networks:
       - infra-net
 
