@@ -1,5 +1,5 @@
 # The Colima VMs, scraped by the `colima-node` (:9100) and `colima-cadvisor`
-# (:8088) jobs in ../prometheus.yml. The exporters themselves are the
+# (:9338) jobs in ../prometheus.yml. The exporters themselves are the
 # colima-studio / colima-mini stacks (docker-compose.colima.yml, stacks.conf).
 #
 # One entry per VM, by its LAN address (bridged, DHCP reservation). The

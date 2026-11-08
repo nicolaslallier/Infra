@@ -274,7 +274,7 @@ never orphans another app that's still attached to it):
   (`node_exporter` on darwin)" below.
 - **Colima VMs** — the Mac Studio's (192.168.2.66) and the Mac mini's
   (192.168.2.67) Linux VMs run the Linux node-exporter (:9100) and cadvisor
-  (:8088) from `docker-compose.colima.yml`, deployed as two stacks,
+  (:9338) from `docker-compose.colima.yml`, deployed as two stacks,
   `colima-studio` (environment 6) and `colima-mini` (environment 7).
   Prometheus scrapes them as jobs `colima-node` / `colima-cadvisor` from
   `monitoring/prometheus/targets/colima.yml`; dashboard `colima.json`

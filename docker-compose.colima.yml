@@ -58,6 +58,7 @@ services:
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
     ports:
-      # Not 8080: the Mac mini's VM publishes Keycloak there.
-      - "8088:8080"
+      # Neither 8080 (Keycloak on the Mac mini's VM) nor 8088 (DarkAngel's
+      # nginx on the Mac Studio's VM, nginx/conf.d/darkangel.conf).
+      - "9338:8080"
     mem_limit: 256m

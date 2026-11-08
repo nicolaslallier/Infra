@@ -166,7 +166,7 @@ scrape_configs:
       - source_labels: [__address__]
         regex: ([^:]+)
         target_label: __address__
-        replacement: ${1}:8088
+        replacement: ${1}:9338
       - source_labels: [hostname]
         regex: (.+)
         target_label: instance
