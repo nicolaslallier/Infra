@@ -334,8 +334,11 @@ DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
 postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
 rabbitmq, ntfy), `monitoring` (`docker-compose.monitoring.yml`: the LGTM
-stack, cadvisor, node-exporter), then
-`infra` (`docker-compose.yml`, everything else). More stacks follow, each
+stack, cadvisor, node-exporter), `auth` (`docker-compose.auth.yml`:
+keycloak, the oauth2-proxies), `platform` (`docker-compose.platform.yml`:
+litellm, the ollama-proxies, prefect) and `infra` (`docker-compose.yml`:
+nginx and nginx-exporter, deployed before auth so the
+keycloak.famillelallier.net alias the oauth2-proxies use is up). More stacks follow, each
 meant to be able to run on another Portainer-managed machine.
 `make up` / `pull` / `down` walk the list top to bottom, deploying a stack and
 waiting for it to be healthy (`WAIT_PROJECT=<stack>` for `wait-healthy.sh`)

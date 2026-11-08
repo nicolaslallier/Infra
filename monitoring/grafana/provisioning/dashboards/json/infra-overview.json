@@ -1553,7 +1553,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (compose_service) (rate({compose_project=~\"infra|portainer|dns|openbao|postgres|data|monitoring\"}[5m]))",
+          "expr": "sum by (compose_service) (rate({compose_project=~\"infra|portainer|dns|openbao|postgres|data|auth|platform|monitoring\"}[5m]))",
           "legendFormat": "{{compose_service}}",
           "refId": "A"
         }
@@ -1602,7 +1602,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (compose_service) (count_over_time({compose_project=~\"infra|portainer|dns|openbao|postgres|data|monitoring\"} |~ \"(?i)(error|fatal|panic)\" [5m]))",
+          "expr": "sum by (compose_service) (count_over_time({compose_project=~\"infra|portainer|dns|openbao|postgres|data|auth|platform|monitoring\"} |~ \"(?i)(error|fatal|panic)\" [5m]))",
           "legendFormat": "{{compose_service}}",
           "refId": "A"
         }

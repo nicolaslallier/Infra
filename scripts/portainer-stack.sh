@@ -41,7 +41,7 @@ stack_paths() { # <stack> [conf]
 
 # Top-level service names of a compose file (no docker compose needed).
 compose_services() { # <file>
-  awk '/^services:/ { f = 1; next } /^[^ #]/ { f = 0 } f && /^  [a-z0-9_-]+:$/ { sub(/:$/, ""); print $1 }' "$1"
+  awk '/^services:/ { f = 1; next } /^[^ #]/ { f = 0 } f && /^  [a-z0-9_-]+:( &[A-Za-z0-9_-]+)?$/ { sub(/:.*/, ""); print $1 }' "$1"
 }
 
 # Before a stack is first created: stop and remove any container of the same
@@ -115,6 +115,10 @@ selftest() {
   [ "$(compose_services docker-compose.data.yml | tr '\n' ' ')" = "s3 s3-admin rabbitmq ntfy " ] || die "selftest: compose_services docker-compose.data.yml"
   [ "$(compose_services docker-compose.monitoring.yml | tr '\n' ' ')" = "prometheus loki tempo alloy grafana cadvisor node-exporter " ] \
     || die "selftest: compose_services docker-compose.monitoring.yml"
+  [ "$(compose_services docker-compose.auth.yml | tr '\n' ' ')" = "keycloak oauth2-proxy oauth2-proxy-infra oauth2-proxy-prefect " ] \
+    || die "selftest: compose_services docker-compose.auth.yml"
+  [ "$(compose_services docker-compose.platform.yml | tr '\n' ' ')" = "ollama-proxy ollama-proxy-laptop prefect-server prefect-flows litellm " ] \
+    || die "selftest: compose_services docker-compose.platform.yml"
   [ "$(compose_services docker-compose.postgres.yml | tr '\n' ' ')" = "postgres pgadmin postgres-exporter " ] \
     || die "selftest: compose_services docker-compose.postgres.yml"
   echo "portainer-stack.sh: selftest ok"
