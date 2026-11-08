@@ -1,4 +1,4 @@
-"""Nightly backup of postgres, ntfy and openbao into the infra-backups volume.
+"""Nightly backup of postgres, ntfy, openbao and dns into the infra-backups volume.
 
 Layout under BACKUP_DIR (/backups): <target>/<target>-<UTC stamp>.<ext>, plus
 metrics/backup.prom for node-exporter's textfile collector. Heaven snapshots
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import re
+import urllib.parse
 import urllib.request
 import zlib
 from collections import deque
@@ -33,7 +34,7 @@ BACKUP_KEEP = int(os.environ.get("BACKUP_KEEP", "3"))
 METRIC = "infra_backup_last_success_timestamp_seconds"
 BACKUP_STEP_TIMEOUT = int(os.environ.get("BACKUP_STEP_TIMEOUT", "900"))
 BACKUP_VOLUME = "infra-backups"
-TARGETS = ("postgres", "ntfy", "openbao")
+TARGETS = ("postgres", "ntfy", "openbao", "dns")
 
 
 # --- pure helpers ------------------------------------------------------------
@@ -235,6 +236,39 @@ def dump_openbao() -> Path:
     return path
 
 
+@task(name="dump-dns")
+def dump_dns() -> Path:
+    # Technitium's "Backup Settings" zip (zones, settings, accounts), over HTTP
+    # because the dns stack runs on another host (the Mac mini, DNS_IP). The
+    # API token is the Secret block `dns-backup-token`; Technitium takes it as
+    # a query parameter, so the URL is never logged.
+    addr = os.environ.get("BACKUP_DNS_ADDR", "http://192.168.2.253:5380")
+    token = Secret.load("dns-backup-token").get()
+    query = urllib.parse.urlencode(
+        {"token": token, "zones": "true", "dnsSettings": "true", "authConfig": "true",
+         "scopes": "true", "apps": "true", "allowedZones": "true", "blockedZones": "true",
+         "blockLists": "true", "logSettings": "true", "stats": "false", "logs": "false"}
+    )
+    req = urllib.request.Request(f"{addr}/api/settings/backup?{query}")
+    path = Path(BACKUP_DIR) / dump_name("dns", "zip", _now())
+    with urllib.request.urlopen(req, timeout=BACKUP_STEP_TIMEOUT) as r:
+        write_atomic(path, _zip_checked(iter(lambda: r.read(1 << 20), b"")))
+    return path
+
+
+def _zip_checked(chunks: Iterable[bytes]) -> Iterator[bytes]:
+    # Technitium answers errors (bad token...) with HTTP 200 and a JSON body;
+    # only a zip is a backup
+    first = True
+    for c in chunks:
+        if first and not c.startswith(b"PK\x03\x04"):
+            raise RuntimeError(f"dns backup: not a zip: {c[:200].decode(errors='replace')}")
+        first = False
+        yield c
+    if first:
+        raise RuntimeError("dns backup: empty response")
+
+
 # --- flow --------------------------------------------------------------------
 
 
@@ -256,7 +290,7 @@ def backup() -> dict[str, str]:
     last = {t: 0.0 for t in TARGETS} | read_metrics(prom)
     results: dict[str, str] = {}
     failed = []
-    for target, fn in zip(TARGETS, (dump_postgres, dump_ntfy, dump_openbao)):
+    for target, fn in zip(TARGETS, (dump_postgres, dump_ntfy, dump_openbao, dump_dns)):
         try:
             path = fn()
             last[target] = _now().timestamp()
