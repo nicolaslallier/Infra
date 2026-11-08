@@ -31,6 +31,13 @@ pub struct Stack {
 }
 
 impl Client {
+    /// The client for the s3 container's environment (s3_endpoint_id).
+    pub fn for_s3(cfg: &Config) -> Result<Client, String> {
+        let mut c = Client::new(cfg)?;
+        c.endpoint = cfg.s3_endpoint_id.unwrap_or(cfg.endpoint_id);
+        Ok(c)
+    }
+
     pub fn new(cfg: &Config) -> Result<Client, String> {
         let mut b = Http::builder()
             // Stopping a stack waits for the session's final sync (up to 120s).

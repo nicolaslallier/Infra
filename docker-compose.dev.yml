@@ -1,16 +1,21 @@
-# Dev-session plumbing, its own compose project ("dev"): the egress proxy and
-# the SSH gateway. The sessions themselves are one Portainer stack each
+# Dev-session plumbing, Portainer stack "dev" on the Mac Studio (stacks.conf,
+# environment 6): the egress proxy and the SSH gateway. The sessions
+# themselves are one Portainer stack each on the same environment
 # (dev/session.compose.yml, created by the devbox CLI). See CLAUDE.md
-# "Dev sessions". Driven by `make dev-up` / -down / -logs / -status.
+# "Dev sessions".
 #
-# No bind mounts: configs are baked into the images, so this works over the
-# ssh DOCKER_HOST the Makefile sets (the build context is sent; files are not).
+# Nothing here is on infra-net (it lives on 192.168.2.10): nginx there reaches
+# the gateway on DEV_SSH_IP:2222, the proxy reaches s3 on S3_LAN_IP:8333.
+# No bind mounts: configs are baked into the images (`make dev-image` builds
+# them from GitHub), so the stack can deploy to a remote Portainer environment.
 name: dev
 
 services:
   dev-egress:
-    build: dev/egress
+    # Built on the Mac Studio by `make dev-image` (Portainer's Git stacks do
+    # not reliably build), never pulled.
     image: dev-egress:1
+    pull_policy: never
     container_name: dev-egress
     restart: unless-stopped
     read_only: true
@@ -23,13 +28,15 @@ services:
       test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3128/squid-internal-mgr/info"]
       interval: 30s
       timeout: 5s
-    # infra-net is not internal: it is both the route out and the way to
-    # s3:8333 (squid.conf decides which).
-    networks: [dev-net, infra-net]
+    # dev-out is the route out, to the internet and to s3 on the LAN
+    # (squid.conf decides which); "s3" resolves to the data stack's host.
+    extra_hosts:
+      - "s3:${S3_LAN_IP:?Set S3_LAN_IP in .env}"
+    networks: [dev-net, dev-out]
 
   dev-gateway:
-    build: dev/gateway
     image: dev-gateway:1
+    pull_policy: never
     container_name: dev-gateway
     restart: unless-stopped
     read_only: true
@@ -47,8 +54,12 @@ services:
       timeout: 5s
     volumes:
       - gateway-keys:/etc/ssh/keys
-    # infra-net: so nginx reaches it. dev-net: so it reaches the sessions.
-    networks: [dev-net, infra-net]
+    # nginx on 192.168.2.10 passes LAN_IP:2222 here (stream.d/devssh.conf).
+    # Bound to the Mac Studio VM's LAN address only, never 0.0.0.0.
+    ports:
+      - "${DEV_SSH_IP:?Set DEV_SSH_IP in .env}:2222:22"
+    # dev-out: so the published port has a non-internal network to land on.
+    networks: [dev-net, dev-out]
 
 volumes:
   gateway-keys:
@@ -58,5 +69,4 @@ networks:
   dev-net:
     name: dev-net
     internal: true
-  infra-net:
-    external: true
+  dev-out:

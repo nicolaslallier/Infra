@@ -48,8 +48,8 @@ enum Cmd {
 }
 
 const COMPOSE: &str = include_str!("../../session.compose.yml");
-/// Compose project and service of the SeaweedFS container in the infra stack.
-const S3_PROJECT: &str = "infra";
+/// Compose project and service of the SeaweedFS container (the data stack).
+const S3_PROJECT: &str = "data";
 
 fn main() {
     let cli = Cli::parse();
@@ -131,7 +131,7 @@ fn create(cfg: &config::Config, name: &str, repo: Option<String>, mut plugins: V
     }
 
     let secret = s3::new_secret()?;
-    pt.exec_in_service(S3_PROJECT, "s3", s3::CREATE, &[("N", name), ("K", &secret)])
+    portainer::Client::for_s3(cfg)?.exec_in_service(S3_PROJECT, "s3", s3::CREATE, &[("N", name), ("K", &secret)])
         .map_err(|e| format!("creating the S3 identity devbox-{name}: {e}"))?;
     let env = session::stack_env(cfg, &session::NewSession { name, repo: &slug, token: &token, plugins: &plugins, pubkeys: &pubkeys, s3_secret: &secret });
     pt.create_stack(&format!("dev-{name}"), COMPOSE, &env)?;
@@ -230,7 +230,7 @@ fn delete(cfg: &config::Config, name: &str, yes: bool) -> Result<(), String> {
             eprintln!("warning: {e}");
         }
     }
-    if let Err(e) = pt.exec_in_service(S3_PROJECT, "s3", s3::DELETE, &[("N", name)]) {
+    if let Err(e) = portainer::Client::for_s3(cfg).and_then(|c| c.exec_in_service(S3_PROJECT, "s3", s3::DELETE, &[("N", name)])) {
         eprintln!("warning: S3 identity devbox-{name} not removed: {e}");
     }
     if let Ok(dir) = ssh_dir() {

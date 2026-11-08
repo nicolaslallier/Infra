@@ -26,10 +26,15 @@ build() { # <tag> <git-url#ref>
   ok "id $(jq -r '.Id[7:19]' <<<"$img"), $(jq -r '(.Size / 1048576 | floor)' <<<"$img") MB, created $(jq -r .Created <<<"$img")"
 }
 
-# `make dev-image`: only the dev-session image, from the Infra repo on GitHub
-# (DEV_IMAGE_REF, default main -- so dev/image must be merged first).
-if [ "${1:-}" = dev ]; then
-  build "devbox-session:1" "https://github.com/nicolaslallier/Infra.git#${DEV_IMAGE_REF:-main}:dev/image"
+# `make dev-image`: the dev images (session, egress proxy, SSH gateway), from
+# the Infra repo on GitHub (DEV_IMAGE_REF, default main -- so dev/ must be
+# merged first), on the dev environment (PORTAINER_ENDPOINT_ID, the Makefile's
+# DEV_ENDPOINT). `dev-plumbing`: only the proxy and the gateway.
+if [ "${1:-}" = dev ] || [ "${1:-}" = dev-plumbing ]; then
+  git="https://github.com/nicolaslallier/Infra.git#${DEV_IMAGE_REF:-main}"
+  [ "$1" = dev-plumbing ] || build "devbox-session:1" "$git:dev/image"
+  build "dev-egress:1" "$git:dev/egress"
+  build "dev-gateway:1" "$git:dev/gateway"
   exit 0
 fi
 

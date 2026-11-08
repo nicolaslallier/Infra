@@ -15,7 +15,7 @@ SHELL := bash
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runners-up runners-down runners-restart runners-logs runners-status runners-pull \
 	runners-env \
-	dev-image dev-up dev-down dev-logs dev-status dev-test
+	dev-image dev-up dev-down dev-test
 
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
@@ -72,8 +72,8 @@ OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
 app-images: ## Build the images the stack references but cannot pull (via Portainer's API)
 	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) ./scripts/portainer-images.sh
 
-dev-image: ## Build the dev-session image devbox-session:1 on the daemon from main (DEV_IMAGE_REF=<ref>; FORCE=1 rebuilds an existing tag)
-	@INFRA_HOST=$(INFRA_HOST) FORCE=$(FORCE) ./scripts/portainer-images.sh dev
+dev-image: ## Build the dev images (session, proxy, gateway) on the Mac Studio from main (DEV_IMAGE_REF=<ref>; FORCE=1 rebuilds existing tags)
+	@INFRA_HOST=$(INFRA_HOST) PORTAINER_ENDPOINT_ID=$(DEV_ENDPOINT) FORCE=$(FORCE) ./scripts/portainer-images.sh dev
 
 certs: ## Generate TLS certs (FORCE=1 to regenerate)
 	@./scripts/gen-certs.sh $(if $(filter 1,$(FORCE)),--force,)
@@ -276,25 +276,25 @@ runners-status: ## Per repo: the container here, and what GitHub has registered
 	@./scripts/runner-status.sh
 
 # Dev-session plumbing (docker-compose.dev.yml): egress proxy + SSH gateway,
-# its own compose project like the runner. The sessions themselves are
-# Portainer stacks made by the devbox CLI. See CLAUDE.md "Dev sessions".
-DEV_COMPOSE := docker compose -p dev -f docker-compose.dev.yml
+# Portainer stack `dev` on the Mac Studio (stacks.conf). The sessions
+# themselves are Portainer stacks made by the devbox CLI on the same
+# environment. See CLAUDE.md "Dev sessions".
+DEV_ENDPOINT := 6
 
 # The key file is baked into the gateway image: refuse a private key anywhere
 # in it, and any non-comment line that is not a public key (ssh-/ecdsa-/sk-).
-dev-up: check-env ## Build and start the dev-session egress proxy and SSH gateway
+# The images are built from GitHub main: merge a key change first.
+dev-up: check-env ## Rebuild the dev proxy and gateway images from main and (re)deploy the dev stack
 	@rc=0; awk '/PRIVATE KEY/ { priv = 1 } /^[[:space:]]*(#|$$)/ { next } \
 		{ n++; if ($$0 !~ /^(ssh-|ecdsa-|sk-)/) bad = 1 } \
 		END { exit priv ? 2 : (n > 0 && !bad) ? 0 : 1 }' dev/gateway/authorized_keys || rc=$$?; \
 	[ "$$rc" != 2 ] || { echo "make dev-up: dev/gateway/authorized_keys holds a PRIVATE key -- only the .pub line goes there" >&2; exit 1; }; \
 	[ "$$rc" = 0 ] || { echo "make dev-up: dev/gateway/authorized_keys has no key, or a line that is not one -- add your ~/.ssh/id_*.pub line(s)" >&2; exit 1; }
-	$(DEV_COMPOSE) up -d --build
+	@INFRA_HOST=$(INFRA_HOST) PORTAINER_ENDPOINT_ID=$(DEV_ENDPOINT) FORCE=1 ./scripts/portainer-images.sh dev-plumbing
+	STACK=dev ./scripts/portainer-stack.sh up
 
-dev-down: ## Stop the dev-session proxy and gateway (sessions lose SSH and egress)
-	$(DEV_COMPOSE) down
-
-dev-logs: ## Tail the dev-session proxy and gateway logs
-	$(DEV_COMPOSE) logs -f
+dev-down: ## Stop the dev stack (sessions lose SSH and egress; keeps volumes)
+	STACK=dev ./scripts/portainer-stack.sh down
 
 # Builds the image and runs the session/image checks on THIS machine's
 # daemon (they need to bind-mount nothing, but must not touch the live one),
@@ -305,8 +305,6 @@ dev-test: ## Dev sessions: CLI unit tests, then image and state checks on the lo
 	DOCKER_HOST= ./scripts/dev-image-check.sh
 	DOCKER_HOST= ./scripts/dev-session-check.sh
 
-dev-status: ## Dev plumbing and session containers on the daemon
-	@docker ps -a --filter name=^dev- --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
 
 ##@ App provisioning
 provision-app: check-env ## Add an app DB/role (app=<name>)

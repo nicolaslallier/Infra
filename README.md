@@ -1072,8 +1072,8 @@ Once, on the stack (after this is merged):
 
 ```bash
 # your public key(s) into dev/gateway/authorized_keys, commit, then:
-make dev-image                      # builds devbox-session:1 from main (FORCE=1 rebuilds)
-make dev-up                         # egress proxy + SSH gateway
+make dev-image                      # builds the dev images on the Mac Studio from main (FORCE=1 rebuilds)
+make dev-up                         # stack `dev` (egress proxy + SSH gateway) on the Mac Studio
 ```
 
 Nothing else: `devbox create` makes the `devbox` bucket and each session's
@@ -1088,8 +1088,9 @@ Windows: `%APPDATA%\famillelallier\devbox\config\`), mode 600:
 portainer_url = "https://portainer.infra.famillelallier.net"
 ca_cert = "/Users/me/OpenCode/Infra/certs/infra-ca.crt"   # a copy of the stack's CA
 api_key = "ptr_..."            # Portainer -> My account -> Access tokens
-endpoint_id = 3                # Portainer's environment id
-ssh_host = "192.168.2.10"      # LAN_IP
+endpoint_id = 6                # the Mac Studio, where sessions run
+s3_endpoint_id = 7             # where the data stack's s3 runs, if elsewhere
+ssh_host = "192.168.2.10"      # LAN_IP (nginx passes :2222 to the Mac Studio)
 pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
 # extra_pubkeys = ["ssh-ed25519 AAAA... me@windows-pc"]   # your other machines
 # catalogs = ["anthropics/claude-plugins-official", "me/my-plugins"]
