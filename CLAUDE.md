@@ -673,7 +673,17 @@ default is 10 minutes, which silently drops idle Postgres connections
 (pooled connections, an idle `psql` session) and shows up as confusing
 "connection reset" errors far from the actual cause.
 
-### DarkAngel: NGINX serves the SPA itself
+### DarkAngel: runs on the Mac Studio
+
+DarkAngel now runs on the Mac Studio (192.168.2.66) with its own nginx on
+:8088. `nginx/conf.d/darkangel.conf` only terminates TLS and proxies there.
+From this stack it uses Postgres (`${LAN_IP}:5432`, stream.d/postgres.conf)
+and Prometheus' query API (`${LAN_IP}:8480`, conf.d/darkangel-lan.conf,
+everything else 404); Keycloak and S3 it reaches on the Mac mini. The
+`darkangel-web` volume and the section below are left over from when this
+NGINX served the SPA; they can go once the move is settled.
+
+### DarkAngel (before the move): NGINX served the SPA itself
 
 DarkAngel (github.com/nicolaslallier/DarkAngel) is the one app this NGINX
 serves files for rather than proxies to. Every other app ships its own web
