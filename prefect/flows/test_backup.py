@@ -300,11 +300,11 @@ def test_never_succeeded_target_exports_zero():
         def fail():
             raise RuntimeError("x")
 
-        saved = (backup.dump_postgres, backup.dump_ntfy, backup.dump_openbao)
+        saved = (backup.dump_postgres, backup.dump_ntfy, backup.dump_openbao, backup.dump_dns)
         import logging
 
         backup.get_run_logger = lambda: logging.getLogger('t')
-        backup.dump_postgres = backup.dump_ntfy = backup.dump_openbao = fail
+        backup.dump_postgres = backup.dump_ntfy = backup.dump_openbao = backup.dump_dns = fail
         try:
             try:
                 backup.backup.fn()
@@ -312,9 +312,52 @@ def test_never_succeeded_target_exports_zero():
             except RuntimeError as e:
                 assert 'backup failed for' in str(e), e
         finally:
-            backup.dump_postgres, backup.dump_ntfy, backup.dump_openbao = saved
+            backup.dump_postgres, backup.dump_ntfy, backup.dump_openbao, backup.dump_dns = saved
         m = backup.read_metrics(Path(d) / "metrics" / "backup.prom")
         assert m == {t: 0.0 for t in backup.TARGETS}, m
+
+
+def _dns_run(body):
+    import io
+    import urllib.request
+
+    seen = []
+
+    class S:
+        @staticmethod
+        def load(name):
+            assert name == "dns-backup-token"
+            return type("T", (), {"get": lambda self: "tok"})()
+
+    def urlopen(req, timeout=None):
+        assert timeout, "every request needs a timeout"
+        seen.append(req.full_url)
+        return io.BytesIO(body)
+
+    backup.Secret = S
+    urllib.request.urlopen = urlopen
+    return seen
+
+
+def test_dns_writes_zip():
+    seen = _dns_run(b"PK\x03\x04zipbytes")
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+        out = backup.dump_dns.fn()
+        assert out.suffix == ".zip" and out.read_bytes() == b"PK\x03\x04zipbytes"
+    assert seen[0].startswith("http://192.168.2.253:5380/api/settings/backup?token=tok&zones=true"), seen
+
+
+def test_dns_error_json_leaves_no_file():
+    _dns_run(b'{"status":"invalid-token"}')
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+        try:
+            backup.dump_dns.fn()
+            raise AssertionError("should have raised")
+        except RuntimeError as e:
+            assert "invalid-token" in str(e), e
+        assert not list((Path(d) / "dns").glob("*"))
 
 
 if __name__ == "__main__":
