@@ -22,6 +22,14 @@ model_list:
       model: ollama_chat/qwen3.8:27b-mlx
       api_base: http://ollama-proxy:11434
 
+  # Ollama on 192.168.2.40, used by the dev sessions' Claude Code (the CLI's
+  # [llm] model). Reached by LAN address: .10's containers use the router's
+  # DNS, which knows no homelab names.
+  - model_name: qwen3.8:27b
+    litellm_params:
+      model: ollama_chat/qwen3.8:27b
+      api_base: http://192.168.2.40:11434
+
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true
