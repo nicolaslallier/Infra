@@ -1,0 +1,17 @@
+# The Colima VMs, scraped by the `colima-node` (:9100) and `colima-cadvisor`
+# (:8088) jobs in ../prometheus.yml. The exporters themselves are the
+# colima-studio / colima-mini stacks (docker-compose.colima.yml, stacks.conf).
+#
+# One entry per VM, by its LAN address (bridged, DHCP reservation). The
+# `hostname` label becomes `instance`, and `mac` names the Mac the VM runs
+# on, matching that Mac's `instance` in the `macos` job. No port here: each
+# job appends its own (relabel_configs), so one list serves both.
+- targets: ["192.168.2.66"]
+  labels:
+    hostname: colima-studio
+    mac: mac-infra
+
+- targets: ["192.168.2.67"]
+  labels:
+    hostname: colima-mini
+    mac: mac-mini

@@ -272,6 +272,14 @@ never orphans another app that's still attached to it):
   `macos`, distinct from the `node` job (the node-exporter container, which
   describes Docker Desktop's Linux VM). See "macOS machines
   (`node_exporter` on darwin)" below.
+- **Colima VMs** — the Mac Studio's (192.168.2.66) and the Mac mini's
+  (192.168.2.67) Linux VMs run the Linux node-exporter (:9100) and cadvisor
+  (:8088) from `docker-compose.colima.yml`, deployed as two stacks,
+  `colima-studio` (environment 6) and `colima-mini` (environment 7).
+  Prometheus scrapes them as jobs `colima-node` / `colima-cadvisor` from
+  `monitoring/prometheus/targets/colima.yml`; dashboard `colima.json`
+  ("Colima VMs"). A query on `node_*` or `container_*` without a `job=`
+  matcher now mixes these in, so pin the job.
 
 `postgres` has no LAN/browser-facing hostname — that's deliberate, not an
 oversight. `pgadmin` (`pgadmin.famillelallier.net`), `keycloak`

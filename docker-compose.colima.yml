@@ -1,0 +1,63 @@
+# Exporters for the Colima VMs, so Grafana sees inside them (dashboard
+# colima.json, "Colima VMs"). One file, two Portainer stacks (stacks.conf):
+#   colima-studio  environment 6, the Mac Studio's VM (192.168.2.66)
+#   colima-mini    environment 7, the Mac mini's VM   (192.168.2.67)
+# No `name:` on purpose: each stack's project is its Portainer stack name.
+#
+# Each VM is a Linux guest, so this is the Linux node-exporter and cadvisor,
+# the same pair the monitoring stack runs for the homelab's Docker VM. The
+# Mac around each VM is a separate target (job `macos`, darwin node_exporter
+# on the Mac's own address); these describe the VM: the CPUs, memory and
+# disk Colima gave it, and the containers in it.
+#
+# Both publish on the VM's LAN address and Prometheus on the homelab scrapes
+# them as jobs `colima-node` and `colima-cadvisor`
+# (monitoring/prometheus/targets/colima.yml). Unauthenticated, read-only
+# metrics, the same posture as seaweedfs's or rabbitmq's /metrics; the
+# router forwards neither port.
+#
+# A remote stack mounts nothing from the checkout (portainer-stack.sh refuses
+# INFRA_DIR), and neither service needs to: every mount is the VM's own.
+
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.9.1@sha256:d00a542e409ee618a4edc67da14dd48c5da66726bbd5537ab2af9c1dfc442c8a
+    restart: unless-stopped
+    command:
+      - --path.rootfs=/host
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run|var/lib/docker/.+)($$|/)
+    volumes:
+      - /:/host:ro
+    pid: host
+    ports:
+      # 9100 on the VM's address: the Mac's own node_exporter is on the
+      # Mac's address (.35 / .65), so the two never collide.
+      - "9100:9100"
+    mem_limit: 128m
+
+  cadvisor:
+    # Same image and mounts as the monitoring stack's cadvisor
+    # (docker-compose.monitoring.yml): the socket alone, never /var/run.
+    image: ghcr.io/google/cadvisor:v0.60.5@sha256:763aecf1c32c2be8a1a75f9abfc2fc461005c9dbbaa39cb356b354aac1296dbe
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    command:
+      # Per-container series only for what the dashboard charts; the
+      # default set multiplies the series count for nothing.
+      - --docker_only=true
+      - --housekeeping_interval=15s
+      - --disable_metrics=accelerator,advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,perf_event,process,referenced_memory,resctrl,sched,tcp,udp
+    volumes:
+      - /:/rootfs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    ports:
+      # Not 8080: the Mac mini's VM publishes Keycloak there.
+      - "8088:8080"
+    mem_limit: 256m

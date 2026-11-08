@@ -136,3 +136,39 @@ scrape_configs:
         target_label: instance
       - regex: hostname
         action: labeldrop
+
+  # The Colima VMs (Mac Studio's, Mac mini's): Linux node-exporter and
+  # cadvisor running *inside* each VM (stacks colima-studio / colima-mini,
+  # docker-compose.colima.yml). Distinct jobs from `node`/`cadvisor` (the
+  # homelab's Docker VM) and `macos` (the Macs themselves) for the same
+  # reason `macos` is distinct: they emit the same metric names. Both jobs
+  # read one target list and append their own port.
+  - job_name: colima-node
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/colima.yml"]
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: ([^:]+)
+        target_label: __address__
+        replacement: ${1}:9100
+      - source_labels: [hostname]
+        regex: (.+)
+        target_label: instance
+      - regex: hostname
+        action: labeldrop
+
+  - job_name: colima-cadvisor
+    file_sd_configs:
+      - files: ["/etc/prometheus/targets/colima.yml"]
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: ([^:]+)
+        target_label: __address__
+        replacement: ${1}:8088
+      - source_labels: [hostname]
+        regex: (.+)
+        target_label: instance
+      - regex: hostname
+        action: labeldrop
