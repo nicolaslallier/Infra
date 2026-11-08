@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Drive the "infra" stack through Portainer's API. Portainer CE deploys
-# docker-compose.yml from GitHub main; the files that compose bind-mounts
-# come from this checkout (INFRA_DIR). See CLAUDE.md "Portainer-managed
-# stack".
+# Drive one stack listed in stacks.conf (STACK, default infra) through
+# Portainer's API. Portainer CE deploys the stack's compose file from GitHub
+# main; the files that compose bind-mounts come from this checkout
+# (INFRA_DIR). See CLAUDE.md "Portainer-managed stack".
 #
-# Usage: scripts/portainer-stack.sh up|pull|down|delete|status|selftest
+# Usage: [STACK=<name>] scripts/portainer-stack.sh up|pull|down|delete|status|selftest
 #   up      create the stack, or pull main and redeploy it
 #   pull    redeploy, re-pulling every image
 #   down    stop the stack (volumes kept)
@@ -13,13 +13,18 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-STACK=infra
+STACK="${STACK:-infra}"
 REPO_URL=https://github.com/nicolaslallier/Infra
 REF=refs/heads/main
 CURL_IMAGE=curlimages/curl:8.5.0
 GIT_IMAGE=alpine/git:v2.49.1
 
 die() { printf 'portainer-stack.sh: %b\n' "$*" >&2; exit 1; }
+
+# stacks.conf row for a stack: "<compose-file> <environment>". Fails if absent.
+stack_row() { # <stack> [conf]
+  awk -v s="$1" '!/^#/ && $1 == s { print $2, $3; f = 1; exit } END { exit !f }' "${2:-stacks.conf}"
+}
 
 # .env -> Portainer's [{name,value}] stack env: KEY=VALUE lines only, minus
 # any PORTAINER_* settings (those belong in .portainer.env and are never
@@ -59,6 +64,12 @@ selftest() {
   rm -rf "$tmp"
   want='[{"name":"A","value":"1"},{"name":"URL","value":"postgres://u:p@h/db?x=y"},{"name":"EMPTY","value":""},{"name":"INFRA_DIR","value":"/repo"}]'
   [ "$got" = "$want" ] || die "selftest: env_json\n  got:  $got\n  want: $want"
+  printf '%s\n' '# a  b.yml  -' 'a  a.yml  -' 'ab ab.yml  lab' >"$tmp.conf"
+  [ "$(stack_row a "$tmp.conf")" = "a.yml -" ] || die "selftest: stack_row a"
+  [ "$(stack_row ab "$tmp.conf")" = "ab.yml lab" ] || die "selftest: stack_row ab"
+  ! stack_row b "$tmp.conf" >/dev/null || die "selftest: stack_row matched a commented row"
+  rm -f "$tmp.conf"
+  [ "$(stack_row infra)" = "docker-compose.yml -" ] || die "selftest: stacks.conf has no local infra row"
   echo "portainer-stack.sh: selftest ok"
 }
 
@@ -150,8 +161,14 @@ cmd="${1:-}"
 case "$cmd" in
   selftest) selftest; exit 0 ;;
   up|pull|down|delete|status) ;;
-  *) die "usage: scripts/portainer-stack.sh up|pull|down|delete|status|selftest" ;;
+  *) die "usage: [STACK=<name>] scripts/portainer-stack.sh up|pull|down|delete|status|selftest" ;;
 esac
+
+row="$(stack_row "$STACK")" || die "no stack '$STACK' in stacks.conf"
+read -r COMPOSE_FILE ENVIRONMENT <<<"$row"
+# ponytail: local environment only; the host-checkout sync (sync_host_checkout)
+# has to target the other machine before a stack can be deployed there.
+[ "$ENVIRONMENT" = - ] || die "stack '$STACK': environment '$ENVIRONMENT' -- only the local one ('-') is supported yet"
 
 # status only reads and needs only the API key, so it may run from a
 # worktree (which has no .env).
@@ -188,10 +205,10 @@ case "$cmd" in
     # that daemon is remote (set by the Makefile); $PWD otherwise.
     env="$(env_json .env "$(daemon_dir "${PORTAINER_INFRA_DIR:-$PWD}")")"
     if [ -z "$sid" ]; then
-      [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make up' first"
-      body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --argjson env "$env" \
+      [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make up stack=$STACK' first"
+      body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --arg compose "$COMPOSE_FILE" --argjson env "$env" \
         '{Name: $name, RepositoryURL: $url, RepositoryReferenceName: $ref,
-          ComposeFile: "docker-compose.yml", RepositoryAuthentication: false, Env: $env}')"
+          ComposeFile: $compose, RepositoryAuthentication: false, Env: $env}')"
       api POST "/stacks/create/standalone/repository?endpointId=$eid" "$body" >/dev/null
       echo "portainer-stack.sh: created stack '$STACK' from $REPO_URL ($REF)"
     else
@@ -216,10 +233,11 @@ case "$cmd" in
     ;;
   status)
     git fetch -q origin main 2>/dev/null || echo "portainer-stack.sh: git fetch failed; origin/main may be stale" >&2
-    jq -r --arg main "$(git rev-parse origin/main)" --arg stack "$STACK" '
+    ours="$(awk '!/^#/ && NF { print $1 }' stacks.conf | jq -R . | jq -sc .)"
+    jq -r --arg main "$(git rev-parse origin/main)" --argjson ours "$ours" '
       .[] | (.GitConfig.ConfigHash // "") as $h
       | [.Name, (if .Status == 1 then "running" else "stopped" end), (if $h == "" then "-" else $h[0:7] end),
-         (if .Name == $stack then (if $h == $main then "= origin/main" else "behind origin/main (\($main[0:7]))" end) else "" end)]
+         (if (.Name | IN($ours[])) then (if $h == $main then "= origin/main" else "behind origin/main (\($main[0:7]))" end) else "" end)]
       | @tsv' <<<"$stacks"
     ;;
   delete)

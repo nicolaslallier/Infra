@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Post-deploy gate: wait until every container of the `infra` compose project
-# has been recreated and is up. Read-only -- never starts, stops or restarts
-# anything.
+# Post-deploy gate: wait until every container of one compose project
+# (WAIT_PROJECT, default infra) has been recreated and is up. Read-only --
+# never starts, stops or restarts anything.
 #
-#   BEFORE_IDS="<id> <id> ..." ./scripts/wait-healthy.sh [timeout_seconds=600]
+#   BEFORE_IDS="<id> <id> ..." [WAIT_PROJECT=<stack>] ./scripts/wait-healthy.sh [timeout_seconds=600]
 #
 # Why this exists: Portainer's redeploy API returns before the containers are
 # recreated, and a compose run that aborts half way (a dependency going
@@ -19,7 +19,8 @@ set -uo pipefail
 
 timeout=${1:-600}
 before=" ${BEFORE_IDS:-} "
-label=com.docker.compose.project=infra
+project=${WAIT_PROJECT:-infra}
+label=com.docker.compose.project=$project
 
 # One line per container: id|name|state|health|last health log (json, one line).
 # `index .State "Health"`, not `.State.Health`: with {{.Id}} in the format the
@@ -33,7 +34,7 @@ check() {
   total=0 healthy=0 bad=""
   local ids out id name state health log
   ids=$(docker ps -a -q --no-trunc --filter "label=$label") || return 2
-  [ -n "$ids" ] || { bad="  (no containers found for project infra)"; return 1; }
+  [ -n "$ids" ] || { bad="  (no containers found for project $project)"; return 1; }
   # shellcheck disable=SC2086 # ids are hex, one word each
   if ! out=$(docker inspect --format "$fmt" $ids 2>/dev/null); then
     # a container vanished between ps and inspect (mid-recreate): poll again
@@ -67,7 +68,7 @@ while :; do
   created=""
   check; rc=$?
   if [ "$rc" -eq 0 ]; then
-    echo "wait-healthy: all $total infra containers recreated and up ($healthy healthy)"
+    echo "wait-healthy: all $total $project containers recreated and up ($healthy healthy)"
     exit 0
   fi
   [ "$rc" -eq 2 ] && { echo "wait-healthy: cannot reach the Docker daemon" >&2; exit 1; }
@@ -75,7 +76,7 @@ while :; do
   sleep 5
 done
 
-echo "wait-healthy: infra not healthy after ${timeout}s:" >&2
+echo "wait-healthy: $project not healthy after ${timeout}s:" >&2
 printf '%s' "$bad" >&2
 [ -n "$created" ] && echo "hint: docker start $created" >&2
 exit 1

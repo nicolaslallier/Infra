@@ -145,6 +145,9 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 	echo "== runners-stack selftest"
 	if out="$(cd "$ws" && bash scripts/runners-stack.sh selftest 2>&1)"; then pass "runners-stack.sh selftest"; else fail "runners-stack.sh selftest" "$out"; fi
 
+	echo "== portainer-stack selftest"
+	if out="$(cd "$ws" && bash scripts/portainer-stack.sh selftest 2>&1)"; then pass "portainer-stack.sh selftest"; else fail "portainer-stack.sh selftest" "$out"; fi
+
 	echo "== PR workflow"
 	wf=.github/workflows/test.yml
 	if [ -f "$wf" ] && uv_py --with pyyaml python - "$PWD/$wf" <<-'PY'

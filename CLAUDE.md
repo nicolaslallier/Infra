@@ -366,6 +366,16 @@ Portainer's API through `scripts/portainer-stack.sh`; nobody runs
 `docker compose up` for this stack any more. GitOps polling is off on
 purpose.
 
+`stacks.conf` lists the stacks the script deploys, in order (one row per
+stack: name, compose file, Portainer environment). Today it holds `infra`
+alone; the split into several stacks, each able to run on another
+Portainer-managed machine, is planned in phases (first phase: this list).
+`make up` / `pull` / `down` walk the list top to bottom, deploying a stack and
+waiting for it to be healthy (`WAIT_PROJECT=<stack>` for `wait-healthy.sh`)
+before the next; `stack=<name>` restricts them to one. Only the local
+environment (`-`) is accepted until the host-checkout sync can target
+another machine.
+
 Things that look odd and are load-bearing:
 
 - **`${INFRA_DIR:-.}` on every repo bind mount.** Portainer runs compose
