@@ -31,7 +31,9 @@ VAULT_URL="https://vault.infra.famillelallier.net"
 ISSUER="https://keycloak.famillelallier.net/realms/infra"
 GROUP="openbao-admin"
 
-kc() { docker compose -f docker-compose.auth.yml exec -T keycloak /opt/keycloak/bin/kcadm.sh "$@"; }
+# Keycloak runs on the Mac mini: run this on the mini, or with DOCKER_HOST /
+# DOCKER_CONTEXT pointed at its Colima daemon.
+kc() { docker exec -i keycloak-keycloak-1 /opt/keycloak/bin/kcadm.sh "$@"; }
 bao() { ./scripts/vault-cli.sh "$@"; }
 
 # --- 1. Keycloak ------------------------------------------------------------

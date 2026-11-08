@@ -115,7 +115,9 @@ selftest() {
   [ "$(compose_services docker-compose.data.yml | tr '\n' ' ')" = "s3 s3-admin rabbitmq ntfy " ] || die "selftest: compose_services docker-compose.data.yml"
   [ "$(compose_services docker-compose.monitoring.yml | tr '\n' ' ')" = "prometheus loki tempo alloy grafana cadvisor node-exporter " ] \
     || die "selftest: compose_services docker-compose.monitoring.yml"
-  [ "$(compose_services docker-compose.auth.yml | tr '\n' ' ')" = "keycloak oauth2-proxy oauth2-proxy-infra oauth2-proxy-prefect " ] \
+  [ "$(compose_services docker-compose.keycloak.yml)" = keycloak ] || die "selftest: compose_services docker-compose.keycloak.yml"
+  ! grep -q INFRA_DIR docker-compose.keycloak.yml || die "selftest: docker-compose.keycloak.yml mounts from the checkout but deploys remotely"
+  [ "$(compose_services docker-compose.auth.yml | tr '\n' ' ')" = "oauth2-proxy oauth2-proxy-infra oauth2-proxy-prefect " ] \
     || die "selftest: compose_services docker-compose.auth.yml"
   [ "$(compose_services docker-compose.platform.yml | tr '\n' ' ')" = "ollama-proxy ollama-proxy-laptop prefect-server prefect-flows litellm " ] \
     || die "selftest: compose_services docker-compose.platform.yml"
@@ -217,9 +219,13 @@ esac
 
 row="$(stack_row "$STACK")" || die "no stack '$STACK' in stacks.conf"
 read -r COMPOSE_FILE ENVIRONMENT <<<"$row"
-# ponytail: local environment only; the host-checkout sync (sync_host_checkout)
-# has to target the other machine before a stack can be deployed there.
-[ "$ENVIRONMENT" = - ] || die "stack '$STACK': environment '$ENVIRONMENT' -- only the local one ('-') is supported yet"
+# A remote environment (a Portainer environment id) gets no host-checkout
+# sync, so its compose file must not bind-mount anything from the checkout.
+if [ "$ENVIRONMENT" != - ]; then
+  [[ "$ENVIRONMENT" =~ ^[0-9]+$ ]] || die "stack '$STACK': environment '$ENVIRONMENT' is neither '-' nor a Portainer environment id"
+  ! grep -q 'INFRA_DIR' "$COMPOSE_FILE" \
+    || die "stack '$STACK': $COMPOSE_FILE mounts from the checkout (INFRA_DIR), which only the local environment has"
+fi
 
 # status only reads and needs only the API key, so it may run from a
 # worktree (which has no .env).
@@ -241,17 +247,23 @@ if [ -z "${PORTAINER_API_KEY:-}" ] || [ "$PORTAINER_API_KEY" = change-me ]; then
   die "set PORTAINER_API_KEY in .portainer.env (Portainer -> My account -> Access tokens)"
 fi
 
-eid="${PORTAINER_ENDPOINT_ID:-$(api GET /endpoints | jq -r '[.[] | select(.Type == 1)][0].Id // empty')}"
+if [ "$ENVIRONMENT" = - ]; then
+  eid="${PORTAINER_ENDPOINT_ID:-$(api GET /endpoints | jq -r '[.[] | select(.Type == 1)][0].Id // empty')}"
+else
+  eid="$ENVIRONMENT"
+fi
 [ -n "$eid" ] || die "no local Docker environment found in Portainer"
 stacks="$(api GET /stacks)"
-stack="$(jq -c --arg n "$STACK" 'first(.[] | select(.Name == $n)) // empty' <<<"$stacks")"
+# Matched on the environment too: the same name can exist on two hosts
+# mid-migration (the old one stopped, kept until it is deleted).
+stack="$(jq -c --arg n "$STACK" --argjson e "$eid" 'first(.[] | select(.Name == $n and .EndpointId == $e)) // empty' <<<"$stacks")"
 sid=""
 [ -z "$stack" ] || sid="$(jq -r .Id <<<"$stack")"
 
 case "$cmd" in
   up|pull)
     check_synced
-    sync_host_checkout
+    [ "$ENVIRONMENT" != - ] || sync_host_checkout
     # ONLY_IF_CHANGED=1 (CI's push deploys): skip a stack when nothing it owns
     # changed between the commit Portainer last deployed it at and HEAD. Exit
     # 3 tells the Makefile there is nothing to wait for. A stack that does not
@@ -270,7 +282,7 @@ case "$cmd" in
     env="$(env_json .env "$(daemon_dir "${PORTAINER_INFRA_DIR:-$PWD}")")"
     if [ -z "$sid" ]; then
       [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make up stack=$STACK' first"
-      take_over_services
+      [ "$ENVIRONMENT" != - ] || take_over_services
       body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --arg compose "$COMPOSE_FILE" --argjson env "$env" \
         '{Name: $name, RepositoryURL: $url, RepositoryReferenceName: $ref,
           ComposeFile: $compose, RepositoryAuthentication: false, Env: $env}')"

@@ -1,85 +1,14 @@
-# The "auth" stack: Keycloak and the oauth2-proxies that gate the internal
-# UIs, split out of the infra stack (see stacks.conf, and CLAUDE.md
-# "Portainer-managed stack"). Keycloak keeps its database in the postgres
-# stack. The oauth2-proxies reach Keycloak at keycloak.famillelallier.net,
-# the network alias nginx (infra stack) holds on infra-net.
+# The "auth" stack: the oauth2-proxies that gate the internal UIs (see
+# stacks.conf, and CLAUDE.md "Portainer-managed stack"). Keycloak itself is
+# its own stack on the Mac mini (docker-compose.keycloak.yml); the proxies
+# reach it at https://keycloak.famillelallier.net, the network alias nginx
+# (infra stack) holds on infra-net, and nginx relays it to the mini.
 name: auth
 
 services:
   # Every image is pinned tag@digest (the multi-arch index digest), so a
   # redeploy -- which force-recreates everything -- never pulls a surprise.
   # The tag is for humans; the digest is what is pulled. Bump both together.
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.7.0@sha256:0f198be292568439d700cdbfb893e69a6009bb43a94a06a945b1d3d506c76b13
-    # 14d peak 1722 MiB x1.5; the JVM sizes its heap from this limit.
-    mem_limit: 2816m
-    restart: unless-stopped
-    # --import-realm loads keycloak/realm-import/*.json on every boot; it's
-    # a no-op for a realm that already exists, so this is safe to leave on
-    # permanently (idempotent, same spirit as postgres/initdb's app
-    # provisioning script).
-    command: ["start", "--import-realm"]
-    environment:
-      KC_DB: postgres
-      KC_DB_URL_HOST: postgres
-      KC_DB_URL_PORT: "5432"
-      KC_DB_URL_DATABASE: keycloak
-      KC_DB_USERNAME: keycloak
-      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
-      # Full URL (not a bare hostname) so scheme+port are pinned to the
-      # public https/443 route regardless of which request (internal
-      # oauth2-proxy call on :8080, or external NGINX one) triggers a
-      # discovery-document lookup. A bare hostname makes Keycloak's
-      # hostname-v2 logic resolve scheme/port from that request instead,
-      # which leaked http://keycloak.famillelallier.net:8080 (the internal
-      # scheme/port) into browser-facing URLs like authorization_endpoint —
-      # nothing listens on host port 8080 externally, so the browser got
-      # ERR_CONNECTION_REFUSED.
-      KC_HOSTNAME: https://keycloak.famillelallier.net
-      KC_HTTP_ENABLED: "true"
-      KC_PROXY_HEADERS: xforwarded
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
-      KC_HEALTH_ENABLED: "true"
-      KC_METRICS_ENABLED: "true"
-      # Continues nginx's traceparent, so a login shows up as nginx ->
-      # keycloak spans in one trace; also prints traceId=... in its logs.
-      KC_TRACING_ENABLED: "true"
-      KC_TRACING_ENDPOINT: http://alloy:4317
-    volumes:
-      - ${INFRA_DIR:-.}/keycloak/realm-import:/opt/keycloak/data/import:ro
-    networks:
-      - infra-net
-    # No depends_on postgres: it is another stack (docker-compose.postgres.yml),
-    # deployed and gated healthy before this one (stacks.conf order).
-    # KC_HEALTH_ENABLED above exposes /health/ready on the management
-    # interface (:9000). The image ships no curl/wget (RHEL-based, stripped
-    # down since Keycloak 23), but /bin/sh is bash under the hood, so a raw
-    # /dev/tcp probe works without extra tooling. This exists so oauth2-proxy
-    # (below) can depend_on service_healthy instead of service_started --
-    # without it, oauth2-proxy starts as soon as this container process
-    # launches, long before Keycloak's HTTP listener is actually up, fails
-    # its one-shot OIDC discovery, and crash-loops on DNS "no such host" /
-    # "connection refused" until a restart happens to land after Keycloak
-    # finishes booting (which can take a minute-plus for JVM start + realm
-    # import).
-    healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          exec 3<>/dev/tcp/127.0.0.1/9000 &&
-          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
-          cat <&3 | grep -q '200 OK'
-      # A warm boot logs "started in ~10s", but four oauth2-proxies
-      # depend_on this being healthy and compose aborts the whole deploy
-      # ("Container infra-keycloak-1 Error") when it is not, leaving nginx
-      # in `Created`. A cold boot (JVM + DB schema/realm import after
-      # postgres was recreated) is several times slower, so allow ~6 min.
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 120s
-
   # Nginx auth_request backend for the Jarvis vhost's Keycloak login gate
   # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself and
   # publishes no host port — it's reached only from the nginx container,
@@ -91,19 +20,13 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Internal infra-net hostname, not the public keycloak.famillelallier.net
-      # URL — both containers share infra-net, so there's no need to hairpin
-      # back out through NGINX (no need to hairpin through NGINX's TLS from
-      # inside infra-net). If login ever fails with an "issuer did
-      # not match" error (a known Keycloak hostname-v2 quirk when the OIDC
-      # discovery document is fetched via this internal URL instead of the
-      # external KC_HOSTNAME), the documented escape hatch is setting
-      # OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION=true below — not
-      # enabled by default since it relaxes a real security check.
-      OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/jarvis
-      # Escape hatch documented above: Keycloak's discovery doc reports the
-      # external KC_HOSTNAME as issuer, which never matches the internal
-      # OIDC_ISSUER_URL used to fetch it, so strict verification always fails.
+      # The public URL, through nginx's alias on infra-net (Keycloak is on
+      # the Mac mini, not on infra-net). nginx's TLS is trusted through the
+      # CA bundle mounted below.
+      OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/jarvis
+      # ponytail: kept from when the issuer URL was internal (http://keycloak:8080)
+      # and never matched KC_HOSTNAME. It now matches; drop this on all three
+      # proxies once the move has settled.
       OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
       OAUTH2_PROXY_CLIENT_ID: jarvis
       # No :? guard on the client secret, unlike the cookie key below:
@@ -151,9 +74,8 @@ services:
       - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
     networks:
       - infra-net
-    depends_on:
-      keycloak:
-        condition: service_healthy
+    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    # while Keycloak is down; restart: unless-stopped retries until it is up.
 
   # Third oauth2-proxy, for the SeaweedFS admin UI, against the `infra` realm
   # (nginx/conf.d/s3-admin.conf). Its own container because an oauth2-proxy
@@ -164,9 +86,8 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Internal infra-net URL + the issuer-verification escape hatch, for
-      # the same Keycloak hostname-v2 reason documented on oauth2-proxy above.
-      OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/infra
+      # Public URL + the issuer-verification flag, as on oauth2-proxy above.
+      OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/infra
       OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
       OAUTH2_PROXY_CLIENT_ID: s3-admin
       # Client secret: generated by Keycloak on realm import, so no :? guard.
@@ -198,9 +119,8 @@ services:
       - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
     networks:
       - infra-net
-    depends_on:
-      keycloak:
-        condition: service_healthy
+    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    # while Keycloak is down; restart: unless-stopped retries until it is up.
 
   # Fourth oauth2-proxy, for the Prefect UI (nginx/conf.d/prefect.conf),
   # against the `infra` realm like oauth2-proxy-infra -- its own container
@@ -212,9 +132,8 @@ services:
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
-      # Internal infra-net URL + the issuer-verification escape hatch, for
-      # the same Keycloak hostname-v2 reason documented on oauth2-proxy above.
-      OAUTH2_PROXY_OIDC_ISSUER_URL: http://keycloak:8080/realms/infra
+      # Public URL + the issuer-verification flag, as on oauth2-proxy above.
+      OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/infra
       OAUTH2_PROXY_INSECURE_OIDC_SKIP_ISSUER_VERIFICATION: "true"
       OAUTH2_PROXY_CLIENT_ID: prefect
       # Client secret: generated by Keycloak, so no :? guard.
@@ -241,9 +160,8 @@ services:
       - ${INFRA_DIR:-.}/certs/oauth2proxy-ca-bundle.crt:/etc/ssl/certs/ca-certificates.crt:ro
     networks:
       - infra-net
-    depends_on:
-      keycloak:
-        condition: service_healthy
+    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    # while Keycloak is down; restart: unless-stopped retries until it is up.
 
 networks:
   infra-net:

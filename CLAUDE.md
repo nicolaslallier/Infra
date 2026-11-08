@@ -334,17 +334,22 @@ DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
 postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
 rabbitmq, ntfy), `monitoring` (`docker-compose.monitoring.yml`: the LGTM
-stack, cadvisor, node-exporter), `auth` (`docker-compose.auth.yml`:
-keycloak, the oauth2-proxies), `platform` (`docker-compose.platform.yml`:
+stack, cadvisor, node-exporter), `keycloak` (`docker-compose.keycloak.yml`:
+Keycloak alone, on the Mac mini, environment 7: nginx relays
+keycloak.famillelallier.net to 192.168.2.67:8080, Prometheus scrapes :9000,
+and it reaches Postgres through nginx on `LAN_IP:5432`), `auth`
+(`docker-compose.auth.yml`: the oauth2-proxies, kept next to nginx), `platform` (`docker-compose.platform.yml`:
 litellm, the ollama-proxies, prefect) and `infra` (`docker-compose.yml`:
 nginx and nginx-exporter, deployed before auth so the
 keycloak.famillelallier.net alias the oauth2-proxies use is up). More stacks follow, each
 meant to be able to run on another Portainer-managed machine.
 `make up` / `pull` / `down` walk the list top to bottom, deploying a stack and
 waiting for it to be healthy (`WAIT_PROJECT=<stack>` for `wait-healthy.sh`)
-before the next; `stack=<name>` restricts them to one. Only the local
-environment (`-`) is accepted until the host-checkout sync can target
-another machine.
+before the next; `stack=<name>` restricts them to one. A stack on another
+machine names its Portainer environment id instead of `-`; it must not
+bind-mount anything from the checkout (no `INFRA_DIR`: only the local
+host's checkout is synced), and its health gate is skipped (wait-healthy.sh
+only sees the local daemon).
 
 - **CI redeploys only what a push touched.** `ci-deploy.sh up` sets
   `ONLY_IF_CHANGED=1`: a stack is skipped when nothing in its paths column
