@@ -918,9 +918,12 @@ postgres dump holds every app's data, so nothing is world-readable.
   `http://192.168.2.253:5380`, the `DNS_IP` alias) into `dns/dns-<stamp>.zip`
   (zones, settings, accounts; no stats or query logs). Technitium answers
   errors with HTTP 200 and JSON, so anything that is not a zip fails the
-  target. The token is the Secret block `dns-backup-token`. Owner steps, once:
-  Technitium console -> Administration -> Sessions -> Create Token (user
-  `admin`, name `backup`), paste it into Prefect UI -> Blocks -> Secret
+  target. The token is the Secret block `dns-backup-token`. It travels in
+  clear HTTP on the LAN (the console has no TLS, same as the admin login), so
+  it belongs to a dedicated user, not `admin`. Owner steps, once: Technitium
+  console -> Administration -> Users: user `backup` in a group with only the
+  Settings permission the backup endpoint needs; Sessions -> Create Token
+  for it; paste it into Prefect UI -> Blocks -> Secret
   `dns-backup-token`, then trigger `backup/nightly` once. Restore: console ->
   Settings -> Restore Settings with that zip.
 - **Metric:** `backup.prom` under `metrics/` carries
