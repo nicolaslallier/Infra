@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Create/update litellm_rag in the jarvis database: the read-only role and the
-# views litellm-pgvector serves Jarvis's RAG chunks from (litellm/rag.sql).
-# Needs Jarvis's migrations applied first (file_chunks, files). Idempotent.
+# Create/update LiteLLM's vector database: database + role `litellm_rag`
+# (the generic per-app provisioning, password LITELLM_RAG_DB_PASSWORD, with
+# the vector extension), then the tables litellm-pgvector uses
+# (litellm/rag.sql). Idempotent; run it before the first deploy of
+# litellm-pgvector, which cannot start without them.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,8 +21,10 @@ set +a
 
 : "${LITELLM_RAG_DB_PASSWORD:?Set LITELLM_RAG_DB_PASSWORD in .env}"
 
-docker compose -f docker-compose.postgres.yml exec -T postgres \
-  psql -X -q -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d jarvis \
-  -v ragpass="$LITELLM_RAG_DB_PASSWORD" < litellm/rag.sql
+./scripts/provision-app.sh litellm_rag </dev/null
 
-echo "provision-litellm-rag.sh: role litellm_rag and views litellm_rag.{vector_stores,embeddings} are ready in 'jarvis'"
+docker compose -f docker-compose.postgres.yml exec -T postgres \
+  psql -X -q -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d litellm_rag \
+  < litellm/rag.sql
+
+echo "provision-litellm-rag.sh: database 'litellm_rag' is ready (store 'second-brain')"

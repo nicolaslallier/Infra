@@ -38,20 +38,20 @@ model_list:
     model_info:
       mode: embedding
 
-# Vector stores (RAG): Jarvis's pgvector chunks, through litellm-pgvector
-# (docker-compose.platform.yml; it reads PG_VECTOR_API_BASE/_KEY from the
-# environment). A client passes the id in a chat request --
-# "vector_store_ids": ["jarvis-files"], or a file_search tool with it -- and
-# LiteLLM searches first and adds the hits to the prompt; or it searches
-# directly: POST /v1/vector_stores/jarvis-files/search {"query": "..."}.
-# Search only: Jarvis is the one that ingests and embeds.
+# Vector stores (RAG): LiteLLM's own pgvector database (litellm_rag),
+# through litellm-pgvector (docker-compose.platform.yml; LiteLLM reads
+# PG_VECTOR_API_BASE/_KEY from the environment). A client passes the id in a
+# chat request -- "vector_store_ids": ["second-brain"], or a file_search tool
+# with it -- and LiteLLM searches first and adds the hits to the prompt; or
+# it searches directly: POST /v1/vector_stores/second-brain/search
+# {"query": "..."}. Content is embedded with qwen3-embedding:0.6b above.
 vector_store_registry:
-  - vector_store_name: jarvis-files
+  - vector_store_name: second-brain
     litellm_params:
-      vector_store_id: jarvis-files
+      vector_store_id: second-brain
       custom_llm_provider: pg_vector
       api_base: http://litellm-pgvector:8000
-      vector_store_description: "Jarvis : documents téléversés (PDF, notes, images décrites), découpés et indexés"
+      vector_store_description: "Second cerveau : notes et documents indexés (qwen3-embedding, pgvector)"
 
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
