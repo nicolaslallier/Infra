@@ -937,8 +937,9 @@ and the plumbing in `docker-compose.dev.yml` (Portainer stack `dev`,
 on the Mac Studio (Portainer environment 6, Colima VM `192.168.2.66`, arm64),
 off `infra-net`: nginx on 192.168.2.10 passes `${LAN_IP}:2222` to
 `DEV_SSH_IP:2222`, and the proxy reaches s3 as `s3.famillelallier.net:8333`
-(squid's `append_domain`; a DNS record that follows the data stack, so no
-host is named here). The CLI runs `weed shell` on whichever Portainer
+(squid's `dns_defnames` + the proxy's `dns_search`; a DNS record that follows
+the data stack, so no host is named here -- not `append_domain`, which
+rewrites the Host header that S3's signature covers). The CLI runs `weed shell` on whichever Portainer
 environment has the running `data/s3` container. Neither project is part of the
 `infra` stack, so `make up` never recreates a session -- but it does recreate
 nginx, which drops every session's SSH (see tmux below). `make dev-test` runs

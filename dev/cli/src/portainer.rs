@@ -22,6 +22,8 @@ struct RawStack {
     /// 1 active, 2 inactive.
     #[serde(rename = "Status")]
     status: u8,
+    #[serde(rename = "EndpointId")]
+    endpoint: u32,
 }
 
 pub struct Stack {
@@ -108,7 +110,9 @@ impl Client {
             .map_err(|e| format!("list stacks: {e}"))?;
         Ok(raw
             .into_iter()
-            .filter(|s| s.name.starts_with("dev-"))
+            // This environment's only: a session moved to another host
+            // leaves its stopped stack behind under the same name.
+            .filter(|s| s.endpoint == self.endpoint && s.name.starts_with("dev-"))
             .map(|s| Stack { id: s.id, name: s.name, running: s.status == 1 })
             .collect())
     }
