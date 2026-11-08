@@ -35,6 +35,23 @@ pub struct Config {
     pub mem_limit: String,
     #[serde(default = "default_cpus")]
     pub cpus: String,
+    /// Claude Code in new sessions talks to this LLM gateway (LiteLLM)
+    /// instead of Anthropic. Unset: the session's own Claude login.
+    #[serde(default)]
+    pub llm: Option<Llm>,
+}
+
+#[derive(Deserialize)]
+pub struct Llm {
+    /// e.g. https://litellm.infra.famillelallier.net (squid allows that name).
+    pub base_url: String,
+    /// A LiteLLM virtual key -- never the master key.
+    pub api_key: String,
+    /// The gateway's model name; empty keeps Claude Code's default.
+    #[serde(default)]
+    pub model: String,
+    /// PEM of the CA behind base_url's certificate (certs/infra-ca.crt).
+    pub ca_cert: Option<PathBuf>,
 }
 
 fn default_ssh_port() -> u16 { 2222 }
@@ -58,6 +75,7 @@ impl std::fmt::Debug for Config {
             .field("catalogs", &self.catalogs)
             .field("max_active", &self.max_active)
             .field("mem_limit", &self.mem_limit)
+            .field("llm", &self.llm.as_ref().map(|l| &l.base_url))
             .field("cpus", &self.cpus)
             .finish()
     }

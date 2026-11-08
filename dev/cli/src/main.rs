@@ -133,7 +133,8 @@ fn create(cfg: &config::Config, name: &str, repo: Option<String>, mut plugins: V
     let secret = s3::new_secret()?;
     portainer::Client::locate(cfg, S3_PROJECT, "s3")?.exec_in_service(S3_PROJECT, "s3", s3::CREATE, &[("N", name), ("K", &secret)])
         .map_err(|e| format!("creating the S3 identity devbox-{name}: {e}"))?;
-    let env = session::stack_env(cfg, &session::NewSession { name, repo: &slug, token: &token, plugins: &plugins, pubkeys: &pubkeys, s3_secret: &secret });
+    let mut env = session::stack_env(cfg, &session::NewSession { name, repo: &slug, token: &token, plugins: &plugins, pubkeys: &pubkeys, s3_secret: &secret });
+    env.extend(session::llm_env(cfg)?);
     pt.create_stack(&format!("dev-{name}"), COMPOSE, &env)?;
     println!("Session {name} created for {slug}.");
 
