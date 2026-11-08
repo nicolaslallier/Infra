@@ -248,8 +248,8 @@ case "$cmd" in
     # 3 tells the Makefile there is nothing to wait for. A stack that does not
     # exist yet, or a commit git does not know, deploys. stack_paths is left
     # unquoted on purpose: one pathspec per word, none with spaces or globs.
-    # shellcheck disable=SC2046
     deployed="$(jq -r '.GitConfig.ConfigHash // empty' <<<"${stack:-null}")"
+    # shellcheck disable=SC2046
     if [ "${ONLY_IF_CHANGED:-}" = 1 ] && [ "$cmd" = up ] && [ -n "$deployed" ] \
       && changed="$(git diff --name-only "$deployed" HEAD -- $(stack_paths "$STACK") 2>/dev/null)" \
       && [ -z "$changed" ]; then
