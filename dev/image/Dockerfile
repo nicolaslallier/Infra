@@ -11,6 +11,9 @@ FROM node:22-bookworm-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8
 # Pinned: installed as root, so its auto-updater cannot update it anyway
 # (DISABLE_AUTOUPDATER below). Bump here to upgrade.
 ARG CLAUDE_CODE_VERSION=2.1.319
+# opencode, the agent the LLM gateway sessions use (config written by the
+# entrypoint when ANTHROPIC_BASE_URL is set). Pinned, autoupdate off.
+ARG OPENCODE_VERSION=1.19.5
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -20,7 +23,7 @@ RUN apt-get update \
  && echo "deb [signed-by=/usr/share/keyrings/githubcli.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
  && apt-get update && apt-get install -y --no-install-recommends gh \
  && rm -rf /var/lib/apt/lists/* \
- && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+ && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "opencode-ai@${OPENCODE_VERSION}" \
  && npm cache clean --force \
  # The base image's uid 1000 is "node"; rename it rather than add a second user.
  && usermod -l dev -d /home/dev -m node && groupmod -n dev node \
