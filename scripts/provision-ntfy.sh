@@ -7,7 +7,7 @@
 #
 # Idempotent for the user and the ACL (an existing user is left alone). Every
 # run mints a NEW token, printed once on stdout as the only line there; older
-# tokens stay valid until revoked (`docker compose exec ntfy ntfy token list`
+# tokens stay valid until revoked (`docker compose -f docker-compose.data.yml exec ntfy ntfy token list`
 # / `ntfy token remove`). Progress goes to stderr so `tok=$(...)` captures just
 # the token. The user's password is random and never shown: the app uses the
 # token, and a human who needs the account resets it with `ntfy user change-pass`.
@@ -32,7 +32,7 @@ password="$(openssl rand -hex 24)"
 # neither the password nor anything else lands in an argv (ps). ntfy reads the
 # new user's password from NTFY_PASSWORD when stdin is not a terminal.
 export NTFYP_APP="$app" NTFYP_PREFIX="$prefix" NTFY_PASSWORD="$password"
-docker compose exec -T -e NTFYP_APP -e NTFYP_PREFIX -e NTFY_PASSWORD \
+docker compose -f docker-compose.data.yml exec -T -e NTFYP_APP -e NTFYP_PREFIX -e NTFY_PASSWORD \
   ntfy sh -eu -s <<'EOF2'
 # Do not parse `ntfy user list` (human-readable, not a stable format): try
 # the add and treat "already exists" as success. Anything else is a real

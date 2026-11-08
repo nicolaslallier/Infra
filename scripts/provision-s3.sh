@@ -42,7 +42,7 @@ fi
 # `-e NAME` with no value: docker takes it from this process's environment,
 # so the secret never appears in an argv (ps).
 export S3P_APP="$app" S3P_BUCKET="$bucket" S3P_SECRET="$secret" S3P_VERSIONED="$versioned"
-docker compose exec -T -e S3P_APP -e S3P_BUCKET -e S3P_SECRET -e S3P_VERSIONED \
+docker compose -f docker-compose.data.yml exec -T -e S3P_APP -e S3P_BUCKET -e S3P_SECRET -e S3P_VERSIONED \
   s3 sh -eu -s <<'EOF'
 ws() { printf '%s\n' "$1" | weed shell -master=s3:9333; }
 

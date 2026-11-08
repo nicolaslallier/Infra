@@ -35,7 +35,7 @@ pass="$(grep -E "^${var_name}=" .env | tail -n1 | cut -d= -f2-)"
 # shell builtin.
 export RMQP_APP="$app" RMQP_PASS="$pass"
 # shellcheck disable=SC2086
-${RMQ_EXEC:-docker compose exec -T} -e RMQP_APP -e RMQP_PASS "${RMQ_TARGET:-rabbitmq}" sh -eu -s <<'EOF2'
+${RMQ_EXEC:-docker compose -f docker-compose.data.yml exec -T} -e RMQP_APP -e RMQP_PASS "${RMQ_TARGET:-rabbitmq}" sh -eu -s <<'EOF2'
 rabbitmqctl add_vhost "$RMQP_APP" >/dev/null
 if rabbitmqctl -q list_users | cut -f1 | grep -qx "$RMQP_APP"; then
   printf '%s\n' "$RMQP_PASS" | rabbitmqctl change_password "$RMQP_APP" >/dev/null

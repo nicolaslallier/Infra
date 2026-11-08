@@ -1,0 +1,143 @@
+# The "data" stack: object storage (SeaweedFS s3 + s3-admin), the message
+# broker (RabbitMQ) and push notifications (ntfy) -- the stateful services
+# the apps use -- split out of the infra stack (see stacks.conf, and
+# CLAUDE.md "Portainer-managed stack"). Same infra-net and service names, so
+# apps still reach s3:8333, rabbitmq:5672 and http://ntfy.
+#
+# The volumes are the infra stack's own, declared external by name (a
+# missing one fails the deploy instead of starting empty). On a fresh
+# machine: docker volume create infra_s3-data infra_rabbitmq-data infra_ntfy-data
+name: data
+
+services:
+  # --- Object storage: SeaweedFS (S3 via NGINX; no host ports) ---
+
+  s3:
+    # Tag *and* digest: a storage-format change must not ride
+    # along with a redeploy.
+    image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    restart: unless-stopped
+    # Renders the IAM template into the container's /tmp (the STS signing key
+    # never touches the host), then hands over to the image's own
+    # entrypoint, which drops root to the `seaweed` user -- replacing the
+    # entrypoint outright would run weed as root. `$$` keeps Compose from
+    # interpolating the key into this command line; the shell reads it from
+    # the environment.
+    #   -ip=s3 -ip.bind=0.0.0.0  weed binds the detected container IP by
+    #     default, which breaks the loopback healthcheck and `weed shell
+    #     -master=...`; `s3` is the address s3-admin reaches the master on.
+    #   -s3.port.iceberg/lance=0  catalog listeners we don't use.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        sed "s|__S3_STS_SIGNING_KEY__|$$S3_STS_SIGNING_KEY|"
+        /etc/seaweedfs/iam.json.tmpl > /tmp/iam.json &&
+        exec /entrypoint.sh server -ip=s3 -ip.bind=0.0.0.0 -s3
+        -s3.iam.config=/tmp/iam.json -s3.port.iceberg=0 -s3.port.lance=0
+        -metricsPort=9324
+    environment:
+      # The admin identity. It must exist from the very first boot: with no
+      # identity at all, SeaweedFS S3 serves every request anonymously.
+      AWS_ACCESS_KEY_ID: ${S3_ADMIN_ACCESS_KEY:?Set S3_ADMIN_ACCESS_KEY in .env}
+      AWS_SECRET_ACCESS_KEY: ${S3_ADMIN_SECRET_KEY:?Set S3_ADMIN_SECRET_KEY in .env}
+      S3_STS_SIGNING_KEY: ${S3_STS_SIGNING_KEY:?Set S3_STS_SIGNING_KEY in .env (openssl rand -base64 32)}
+    volumes:
+      - s3-data:/data
+      - ${INFRA_DIR:-.}/seaweedfs/iam.json.tmpl:/etc/seaweedfs/iam.json.tmpl:ro
+    networks:
+      - infra-net
+    healthcheck:
+      # /healthz answers 200 without S3 auth.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8333/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  s3-admin:
+    # SeaweedFS's web admin. The OSS build has no login of its own we would
+    # want (Keycloak OIDC is Enterprise-only), so it binds infra-net
+    # unauthenticated -- the same posture the filer UI (:8888) already has
+    # there -- and its only host path is nginx/conf.d/s3-admin.conf behind
+    # oauth2-proxy-infra. -allowInsecureBind is how weed admin is told that
+    # on purpose. -dataDir=/data is the image's anonymous volume:
+    # maintenance-task state is not worth a named one.
+    image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    restart: unless-stopped
+    command: ["admin", "-master=s3:9333", "-ip=0.0.0.0", "-allowInsecureBind",
+              "-dataDir=/data", "-iceberg.port=0", "-lance.port=0"]
+    networks:
+      - infra-net
+    depends_on:
+      s3:
+        condition: service_healthy
+
+  # --- Message broker (AMQP via NGINX stream; management UI via NGINX http) ---
+
+  rabbitmq:
+    image: rabbitmq:4.3.5-management@sha256:57bddb6fbc3498b5d8b5a14dc6f4506073ebcf94c66ba2a7678c335faa8dd631
+    restart: unless-stopped
+    # Load-bearing. RabbitMQ keys its database by node name, rabbit@<hostname>,
+    # and a container's default hostname is its id -- new on every `make up`,
+    # since every deploy force-recreates every container. Without this pin each
+    # deploy boots an empty database beside the old one in rabbitmq-data, and
+    # every vhost/user `make rabbitmq-provision` made (moria) is gone.
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      # management + prometheus plugins (image already ships both; this file
+      # is what actually enables them on boot).
+      - ${INFRA_DIR:-.}/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    networks:
+      - infra-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # --- Notifications (ntfy push; infra-net only) ---
+
+  ntfy:
+    # Push notifications. Config is ntfy/server.yml (committed: the drift
+    # guard refuses untracked files). Auth is deny-all; one user + token per
+    # app via `make ntfy-provision`. Publishes no host port: apps use
+    # http://ntfy, phones and browsers go through NGINX (ntfy.conf).
+    # Tag *and* digest (the manifest-list digest the registry returns).
+    image: binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      # Message cache + the auth database (users, ACLs, tokens).
+      - ntfy-data:/var/lib/ntfy
+      - ${INFRA_DIR:-.}/ntfy/server.yml:/etc/ntfy/server.yml:ro
+    networks:
+      infra-net:
+        aliases:
+          - ntfy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost/v1/health | grep -q '\"healthy\":true' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  infra-net:
+    external: true
+
+volumes:
+  s3-data:
+    external: true
+    name: infra_s3-data
+  rabbitmq-data:
+    external: true
+    name: infra_rabbitmq-data
+  ntfy-data:
+    external: true
+    name: infra_ntfy-data

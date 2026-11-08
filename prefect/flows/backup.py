@@ -196,7 +196,7 @@ def dump_postgres() -> Path:
 @task(name="dump-ntfy")
 def dump_ntfy() -> Path:
     client = _docker()
-    container = _container(client, "ntfy")
+    container = _container(client, "ntfy", project="data")
     src = _volume(container, "/var/lib/ntfy")
     base = Path(BACKUP_DIR)
     (base / "ntfy").mkdir(parents=True, exist_ok=True)
