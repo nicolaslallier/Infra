@@ -24,6 +24,10 @@ services:
       start_period: 60s
     # 14d peak 528 MiB x1.5.
     mem_limit: 1024m
+    # Names like data.famillelallier.net (the host of the data stack) live in
+    # Technitium, not in this host's DNS: Docker's resolver forwards there.
+    dns:
+      - ${DNS_IP:?Set DNS_IP in .env}
     restart: unless-stopped
     command:
       - --config.file=/etc/prometheus/prometheus.yml

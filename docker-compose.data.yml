@@ -314,7 +314,7 @@ configs:
       auth-default-access: "deny-all"
 
       # /metrics on the main listener needs admin credentials under deny-all, so it
-      # gets its own listener. Prometheus scrapes 192.168.2.67:9090/metrics (job `ntfy`)
+      # gets its own listener. Prometheus scrapes data.famillelallier.net:9090/metrics (job `ntfy`)
       # anonymously; the port is LAN-only (no router forward) and the NGINX vhost 404s /metrics.
       enable-metrics: true
       metrics-listen-http: ":9090"
