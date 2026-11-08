@@ -1345,15 +1345,19 @@ or a mounted config file — safe to re-run any time zones/records need to
 be recreated (e.g. after a `dns-config` volume wipe). It creates scoped
 zones, **never** a `Primary` zone for `famillelallier.net` itself — an
 `infra.famillelallier.net` apex + wildcard (covers every `.infra.` app, no
-per-app DNS config), plus one apex zone per non-`.infra.` hostname. The
+per-app DNS config), plus one apex zone per non-`.infra.` hostname, plus a
+**`Forwarder`** zone for `famillelallier.net` holding only
+`*.famillelallier.net -> LAN_IP` (any new name resolves on the LAN without a
+new zone; everything else in the parent is forwarded to `UPSTREAM_DNS`). The
 list lives in `scripts/dns-provision.sh`.
 
 DNS zone authority is absolute — owning a `Primary` zone for the whole
 `famillelallier.net` parent would make Technitium authoritative for every
 name under it, including `beacon.famillelallier.net` /
 `dev.famillelallier.net`, which exist outside this repo and must keep
-resolving wherever they already do. **Never collapse the scoped zones
-above into one wildcard covering all of `famillelallier.net`.**
+resolving wherever they already do, plus the Google Workspace MX and
+SPF/DKIM TXT records. **The parent zone stays a `Forwarder` zone, never a
+`Primary` one**: names and types it doesn't hold go to the public DNS.
 
 The Technitium web console (port 5380) is published directly rather than
 fronted through NGINX like pgAdmin. This is deliberate: fronting it
