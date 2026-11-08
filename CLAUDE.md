@@ -338,7 +338,8 @@ stack, cadvisor, node-exporter), `keycloak` (`docker-compose.keycloak.yml`:
 Keycloak alone, on the Mac mini, environment 7: nginx relays
 keycloak.famillelallier.net to 192.168.2.67:8080, Prometheus scrapes :9000,
 and it reaches Postgres through nginx on `LAN_IP:5432`), `auth`
-(`docker-compose.auth.yml`: the oauth2-proxies, kept next to nginx), `platform` (`docker-compose.platform.yml`:
+(`docker-compose.auth.yml`: the oauth2-proxies, also on the Mac mini; nginx
+auth_requests them on 192.168.2.67:4180-4182), `platform` (`docker-compose.platform.yml`:
 litellm, the ollama-proxies, prefect) and `infra` (`docker-compose.yml`:
 nginx and nginx-exporter, deployed before auth so the
 keycloak.famillelallier.net alias the oauth2-proxies use is up). More stacks follow, each
