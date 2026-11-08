@@ -27,9 +27,10 @@ model_list:
       order: 2
 
   # Embeddings for the MCP semantic tool filter (litellm_settings below):
-  # the Windows laptop's Ollama (192.168.2.10), through its metrics proxy.
+  # the Ollama on .10 (192.168.2.10, the Windows homelab host the stack runs
+  # on), through ollama-proxy-laptop (its metrics proxy, despite the name).
   # Small and multilingual (the tools and the prompts are French/English).
-  # Pull it on the laptop first: `ollama pull qwen3-embedding:0.6b`.
+  # Pull it on .10 first: `ollama pull qwen3-embedding:0.6b`.
   - model_name: qwen3-embedding:0.6b
     litellm_params:
       model: ollama/qwen3-embedding:0.6b
