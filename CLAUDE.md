@@ -139,7 +139,9 @@ never orphans another app that's still attached to it):
 - **`litellm`** — `ghcr.io/berriai/litellm-database`, the LLM gateway, at
   `litellm.infra.famillelallier.net` (NGINX → `litellm:4000`; admin UI at
   `/ui`). OpenAI- and Anthropic-format API in front of Ollama on the
-  MacBook (by LAN address) and, through `ollama-proxy`, on the Mac Studio. Config is
+  MacBook (by LAN address) and, through `ollama-proxy`, on the Mac Studio. The MCP
+  semantic tool filter ("Enable Semantic Filtering") embeds with
+  `qwen3-embedding:0.6b` on the laptop's Ollama via `ollama-proxy-laptop`. Config is
   `litellm/config.yaml`; secrets (`LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`,
   `LITELLM_UI_PASSWORD`) come from `.env`. Database/role `litellm`, provisioned
   like any other app; without it the UI login fails with "Not connected to DB".
