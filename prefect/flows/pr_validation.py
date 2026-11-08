@@ -180,6 +180,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
                 "docker compose --env-file .env -f docker-compose.dns.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.openbao.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.data.yml config -q && "
+                "docker compose --env-file .env -f docker-compose.monitoring.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.portainer.yml config -q && "
                 "docker compose --env-file .runner.env -f docker-compose.runners.yml config -q && "
                 "docker compose --env-file /dev/null -f docker-compose.dev.yml config -q && "
