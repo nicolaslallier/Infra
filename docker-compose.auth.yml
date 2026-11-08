@@ -6,6 +6,9 @@
 # proxies on :4180-4182 for every gated request. Nothing here bind-mounts
 # the host checkout: a remote environment has none.
 name: auth
+# No networks: block: every service is on the stack's default network, so
+# `keycloak` resolves only to this stack's container (infra-net lives on the
+# homelab and does not exist here).
 
 services:
   # Every image is pinned tag@digest (the multi-arch index digest), so a
@@ -91,9 +94,8 @@ services:
       start_period: 120s
 
   # Nginx auth_request backend for the Jarvis vhost's Keycloak login gate
-  # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself and
-  # publishes no host port — it's reached only from the nginx container,
-  # over infra-net, at oauth2-proxy:4180. Its own upstream is a dummy
+  # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself: nginx calls
+  # it from the homelab at 192.168.2.67:4180. Its own upstream is a dummy
   # ("static://202") because it's never used as a reverse proxy here,
   # only as the thing nginx's auth_request/oauth2/ locations call into.
   oauth2-proxy:
@@ -148,8 +150,6 @@ services:
     # HTTP like Keycloak's :8080.
     ports:
       - "4180:4180"
-    networks:
-      - infra-net
     depends_on:
       keycloak:
         condition: service_healthy
@@ -198,8 +198,6 @@ services:
     # HTTP like Keycloak's :8080.
     ports:
       - "4181:4180"
-    networks:
-      - infra-net
     depends_on:
       keycloak:
         condition: service_healthy
@@ -244,12 +242,6 @@ services:
     # HTTP like Keycloak's :8080.
     ports:
       - "4182:4180"
-    networks:
-      - infra-net
     depends_on:
       keycloak:
         condition: service_healthy
-
-networks:
-  infra-net:
-    external: true
