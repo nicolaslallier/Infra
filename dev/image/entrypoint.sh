@@ -104,12 +104,30 @@ if [ -n "${LLM_CA_B64:-}" ]; then
   export NODE_EXTRA_CA_CERTS=~/.llm-ca.pem
 fi
 
+# opencode on the same gateway, as an OpenAI-compatible provider: LiteLLM's
+# /v1, the same key and model, the CA through NODE_EXTRA_CA_CERTS (bun reads
+# it too). No models.dev fetch and no autoupdate: neither is on the egress
+# allow-list.
+if [ -n "${ANTHROPIC_BASE_URL:-}" ]; then
+  mkdir -p ~/.config/opencode
+  jq -n --arg url "${ANTHROPIC_BASE_URL%/}/v1" --arg model "${ANTHROPIC_MODEL:-}" '{
+    "$schema": "https://opencode.ai/config.json",
+    autoupdate: false,
+    share: "disabled",
+    provider: {litellm: {npm: "@ai-sdk/openai-compatible", name: "LiteLLM",
+      options: {baseURL: $url, apiKey: "{env:ANTHROPIC_AUTH_TOKEN}"},
+      models: {($model): {name: $model}}}},
+    model: ("litellm/" + $model)
+  }' > ~/.config/opencode/opencode.json
+  export OPENCODE_DISABLE_MODELS_FETCH=1 OPENCODE_DISABLE_AUTOUPDATE=1
+fi
+
 # Variables an SSH login should see (sshd does not pass the container env on).
 # The ANTHROPIC_* ones only when set: an empty ANTHROPIC_BASE_URL is not
 # "unset" to Claude Code.
 {
   env | grep -E '^(GH_TOKEN|SESSION|STATE|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|CLAUDE_CONFIG_DIR|DISABLE_AUTOUPDATER|NPM_CONFIG_PREFIX|PATH)='
-  env | grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|NODE_EXTRA_CA_CERTS)=.' || true
+  env | grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|NODE_EXTRA_CA_CERTS|OPENCODE_[A-Z_]+)=.' || true
 } > ~/.ssh/environment
 chmod 600 ~/.ssh/environment
 
