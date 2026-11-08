@@ -328,8 +328,10 @@ Portainer's API through `scripts/portainer-stack.sh`; nobody runs
 purpose.
 
 `stacks.conf` lists the stacks the script deploys, in order (one row per
-stack: name, compose file, Portainer environment, owned paths): `postgres`
-(`docker-compose.postgres.yml`: postgres, pgadmin, postgres-exporter), then
+stack: name, compose file, Portainer environment, owned paths): `dns`
+(`docker-compose.dns.yml`: Technitium, so a merge no longer cuts the LAN's
+DNS), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
+postgres-exporter), then
 `infra` (`docker-compose.yml`, everything else). More stacks follow, each
 meant to be able to run on another Portainer-managed machine.
 `make up` / `pull` / `down` walk the list top to bottom, deploying a stack and

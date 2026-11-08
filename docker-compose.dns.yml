@@ -1,0 +1,50 @@
+# The "dns" stack: Technitium, the LAN's DNS server, split out of the infra
+# stack so a merge that touches anything else no longer cuts DNS for the
+# whole house (see stacks.conf, and CLAUDE.md "Portainer-managed stack").
+# Deployed first: nothing else depends on it to start.
+#
+# The volumes are the infra stack's own, declared external by name (a
+# missing one fails the deploy instead of starting with an empty zone set).
+# On a fresh machine: docker volume create infra_dns-config infra_dns-logs
+name: dns
+
+services:
+  dns:
+    # No version tag maps to this digest (it predates 15.5.0's tag), so
+    # `latest` stays for the human and the digest does the pinning.
+    image: technitium/dns-server:latest@sha256:3580381de00ba316748abced1ad0f942aff5a625993fa5dee22a902e26d2c524
+    # TCP connect to the web console; the image has bash but no wget/curl.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5380"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    environment:
+      DNS_SERVER_DOMAIN: dns.infra.famillelallier.net
+      DNS_SERVER_ADMIN_PASSWORD: ${DNS_ADMIN_PASSWORD:?Set DNS_ADMIN_PASSWORD in .env}
+      DNS_SERVER_FORWARDERS: ${UPSTREAM_DNS:-1.1.1.1},${UPSTREAM_DNS_2:-1.0.0.1}
+      DNS_SERVER_RECURSION: AllowOnlyForPrivateNetworks
+      DNS_SERVER_LOG_FOLDER_PATH: /var/log/technitium/dns
+    ports:
+      - "${LAN_IP:?Set LAN_IP in .env}:53:53/udp"
+      - "${LAN_IP:?Set LAN_IP in .env}:53:53/tcp"
+      - "${LAN_IP:?Set LAN_IP in .env}:5380:5380/tcp"
+    volumes:
+      - dns-config:/etc/dns
+      - dns-logs:/var/log/technitium/dns
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+
+volumes:
+  dns-config:
+    external: true
+    name: infra_dns-config
+  dns-logs:
+    external: true
+    name: infra_dns-logs
