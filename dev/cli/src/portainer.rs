@@ -31,19 +31,30 @@ pub struct Stack {
 }
 
 impl Client {
-    /// A client on whichever Portainer environment runs `project/service`
+    /// A client on the one Portainer environment that runs `project/service`
     /// (the data stack's s3 moves between hosts; nothing names the host).
-    /// Environments that do not answer are skipped.
+    /// Environments that do not answer are skipped. Two matches (old and new
+    /// s3 both up mid-migration) refuse: the identity would land on one.
     pub fn locate(cfg: &Config, project: &str, service: &str) -> Result<Client, String> {
         let mut c = Client::new(cfg)?;
         let envs: Vec<Value> = c.send(c.http.get(format!("{}/endpoints", c.base)), "list environments")?.json().map_err(|e| e.to_string())?;
-        for id in envs.iter().filter_map(|e| e["Id"].as_u64()) {
-            c.endpoint = id as u32;
-            if c.container(project, service).is_ok() {
-                return Ok(c);
+        let hits: Vec<u32> = envs
+            .iter()
+            .filter_map(|e| e["Id"].as_u64())
+            .map(|id| id as u32)
+            .filter(|&id| {
+                c.endpoint = id;
+                c.container(project, service).is_ok()
+            })
+            .collect();
+        match hits[..] {
+            [id] => {
+                c.endpoint = id;
+                Ok(c)
             }
+            [] => Err(format!("no running {project}/{service} container on any Portainer environment")),
+            _ => Err(format!("{project}/{service} runs on several Portainer environments {hits:?}: stop the old one first")),
         }
-        Err(format!("no running {project}/{service} container on any Portainer environment"))
     }
 
     fn container(&self, project: &str, service: &str) -> Result<String, String> {
