@@ -41,10 +41,8 @@ esac
 : "${INFRA_HOST:?set INFRA_HOST to the LAN address of the Docker host}"
 
 # The compose project name is the working directory's basename, and the live
-# stack's volumes are prefixed infra_. `make up` reaches the vault by
-# the label com.docker.compose.project=infra (scripts/lib/bao.sh), which finds
-# nothing under any other project name -- and CLAUDE.md already requires the main
-# checkout to be named Infra for the same reason.
+# stack's volumes are prefixed infra_ -- and CLAUDE.md already requires the
+# main checkout to be named Infra for the same reason.
 case "$INFRA_CHECKOUT" in
   */Infra) ;;
   *) die "INFRA_CHECKOUT=$INFRA_CHECKOUT must end in /Infra: its basename becomes the compose project name, and the live stack is 'infra'" ;;
