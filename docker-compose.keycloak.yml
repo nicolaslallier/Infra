@@ -44,6 +44,10 @@ services:
       KC_HOSTNAME: https://keycloak.famillelallier.net
       KC_HTTP_ENABLED: "true"
       KC_PROXY_HEADERS: xforwarded
+      # :8080 is published on the LAN, so only trust X-Forwarded-* from the
+      # homelab (nginx's traffic leaves Docker Desktop from the host's IP);
+      # anyone else hitting :8080 directly cannot spoof scheme or client IP.
+      KC_PROXY_TRUSTED_ADDRESSES: ${LAN_IP:?Set LAN_IP in .env}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HEALTH_ENABLED: "true"
