@@ -27,7 +27,7 @@ if [ -z "$pass" ]; then
   exit 1
 fi
 
-docker compose exec -T \
+docker compose -f docker-compose.postgres.yml exec -T \
   -e APP_NAME="$app" \
   -e APP_PASSWORD="$pass" \
   postgres /docker-entrypoint-initdb.d/10-provision-apps.sh --single

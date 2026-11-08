@@ -162,13 +162,15 @@ STACKS = $(or $(stack),$(shell awk '!/^\#/ && NF { print $$1 }' stacks.conf))
 # the ones above it in stacks.conf are healthy. Portainer's API returns before
 # containers are recreated, so record each stack's container IDs first and let
 # wait-healthy.sh wait until none of them is left (and everything is up).
-# WAIT_HEALTHY=0 skips.
+# WAIT_HEALTHY=0 skips. Exit 3 from portainer-stack.sh is a stack
+# ONLY_IF_CHANGED=1 left alone: nothing to wait for.
 define deploy_and_wait
 for s in $(STACKS); do \
   before=$$(docker ps -a -q --no-trunc --filter label=com.docker.compose.project=$$s) \
     || { echo "deploy aborted: cannot list $$s containers (docker ps failed); an empty BEFORE_IDS would let the gate pass on the old stack" >&2; exit 1; }; \
   before=$$(echo $$before); \
-  STACK=$$s ./scripts/portainer-stack.sh $(1); \
+  rc=0; STACK=$$s ./scripts/portainer-stack.sh $(1) || rc=$$?; \
+  [ $$rc != 3 ] || continue; [ $$rc = 0 ] || exit $$rc; \
   [ "$(WAIT_HEALTHY)" = 0 ] || BEFORE_IDS="$$before" WAIT_PROJECT=$$s ./scripts/wait-healthy.sh $(or $(WAIT_HEALTHY_TIMEOUT),600); \
 done
 endef
@@ -205,7 +207,7 @@ shell: ## Open a shell in a service (s=<service>)
 	docker compose exec "$(s)" sh
 
 psql: ## Open a psql shell as the superuser
-	docker compose exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
+	docker compose -f docker-compose.postgres.yml exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
 
 PORTAINER_COMPOSE := docker compose -f docker-compose.portainer.yml
 

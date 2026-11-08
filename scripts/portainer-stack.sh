@@ -26,6 +26,42 @@ stack_row() { # <stack> [conf]
   awk -v s="$1" '!/^#/ && $1 == s { print $2, $3; f = 1; exit } END { exit !f }' "${2:-stacks.conf}"
 }
 
+# The git pathspecs a stack owns, one per line: its paths column, or for "*"
+# everything minus what the other stacks claim.
+stack_paths() { # <stack> [conf]
+  awk -v s="$1" '
+    /^#/ || !NF { next }
+    $1 == s { for (i = 4; i <= NF; i++) own[++n] = $i; next }
+    { for (i = 4; i <= NF; i++) if ($i != "*") other[++m] = $i }
+    END {
+      if (n == 1 && own[1] == "*") { print "."; for (i = 1; i <= m; i++) print ":(exclude)" other[i] }
+      else for (i = 1; i <= n; i++) print own[i]
+    }' "${2:-stacks.conf}"
+}
+
+# Top-level service names of a compose file (no docker compose needed).
+compose_services() { # <file>
+  awk '/^services:/ { f = 1; next } /^[^ #]/ { f = 0 } f && /^  [a-z0-9_-]+:$/ { sub(/:$/, ""); print $1 }' "$1"
+}
+
+# Before a stack is first created: stop and remove any container of the same
+# services still running under the infra project (the stack it is being split
+# out of). Two postgres containers on one data volume corrupt the cluster, and
+# Portainer never removes containers a redeploy no longer defines. Volumes are
+# left alone. docker stop -t 120 gives Postgres time for a clean shutdown.
+take_over_services() {
+  local svc ids
+  [ "$STACK" != infra ] || return 0
+  for svc in $(compose_services "$COMPOSE_FILE"); do
+    ids="$(docker ps -aq --filter label=com.docker.compose.project=infra --filter "label=com.docker.compose.service=$svc")" \
+      || die "cannot list infra containers (docker ps failed)"
+    [ -n "$ids" ] || continue
+    echo "portainer-stack.sh: removing infra's $svc container before stack '$STACK' takes it over"
+    # shellcheck disable=SC2086 # container ids, one word each
+    docker stop -t 120 $ids >/dev/null && docker rm $ids >/dev/null || die "could not remove infra's $svc container"
+  done
+}
+
 # .env -> Portainer's [{name,value}] stack env: KEY=VALUE lines only, minus
 # any PORTAINER_* settings (those belong in .portainer.env and are never
 # handed to containers -- filtered here too, as defence in depth) and any
@@ -70,6 +106,12 @@ selftest() {
   ! stack_row b "$tmp.conf" >/dev/null || die "selftest: stack_row matched a commented row"
   rm -f "$tmp.conf"
   [ "$(stack_row infra)" = "docker-compose.yml -" ] || die "selftest: stacks.conf has no local infra row"
+  printf '%s\n' '# x  x.yml - nope/' 'a  a.yml  -  a.yml a/' 'b  b.yml  -  *' >"$tmp.conf"
+  [ "$(stack_paths a "$tmp.conf" | tr '\n' ' ')" = "a.yml a/ " ] || die "selftest: stack_paths a"
+  [ "$(stack_paths b "$tmp.conf" | tr '\n' ' ')" = ". :(exclude)a.yml :(exclude)a/ " ] || die "selftest: stack_paths b"
+  rm -f "$tmp.conf"
+  [ "$(compose_services docker-compose.postgres.yml | tr '\n' ' ')" = "postgres pgadmin postgres-exporter " ] \
+    || die "selftest: compose_services docker-compose.postgres.yml"
   echo "portainer-stack.sh: selftest ok"
 }
 
@@ -201,11 +243,25 @@ case "$cmd" in
   up|pull)
     check_synced
     sync_host_checkout
+    # ONLY_IF_CHANGED=1 (CI's push deploys): skip a stack when nothing it owns
+    # changed between the commit Portainer last deployed it at and HEAD. Exit
+    # 3 tells the Makefile there is nothing to wait for. A stack that does not
+    # exist yet, or a commit git does not know, deploys. stack_paths is left
+    # unquoted on purpose: one pathspec per word, none with spaces or globs.
+    deployed="$(jq -r '.GitConfig.ConfigHash // empty' <<<"${stack:-null}")"
+    # shellcheck disable=SC2046
+    if [ "${ONLY_IF_CHANGED:-}" = 1 ] && [ "$cmd" = up ] && [ -n "$deployed" ] \
+      && changed="$(git diff --name-only "$deployed" HEAD -- $(stack_paths "$STACK") 2>/dev/null)" \
+      && [ -z "$changed" ]; then
+      echo "portainer-stack.sh: stack '$STACK' unchanged since ${deployed:0:7}, not redeployed"
+      exit 3
+    fi
     # PORTAINER_INFRA_DIR: this checkout's path as the daemon sees it, when
     # that daemon is remote (set by the Makefile); $PWD otherwise.
     env="$(env_json .env "$(daemon_dir "${PORTAINER_INFRA_DIR:-$PWD}")")"
     if [ -z "$sid" ]; then
       [ "$cmd" = up ] || die "stack '$STACK' does not exist yet -- 'make up stack=$STACK' first"
+      take_over_services
       body="$(jq -n --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" --arg compose "$COMPOSE_FILE" --argjson env "$env" \
         '{Name: $name, RepositoryURL: $url, RepositoryReferenceName: $ref,
           ComposeFile: $compose, RepositoryAuthentication: false, Env: $env}')"
