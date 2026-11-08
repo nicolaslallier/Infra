@@ -8,14 +8,6 @@
 # for anything that should survive a fresh database.
 
 model_list:
-  # exo cluster on the Macs, in OpenAI format (exo's Anthropic endpoint
-  # rejects role "system" messages, so clients go through LiteLLM instead).
-  - model_name: mlx-community/GLM-4.7-Flash-8bit
-    litellm_params:
-      model: openai/mlx-community/GLM-4.7-Flash-8bit
-      api_base: os.environ/EXO_API_BASE
-      api_key: "x"
-
   # Qwen 3.8: the MacBook's Ollama first (order 1; 192.168.2.40, often
   # asleep or away, hence the short timeout -- a sleeping laptop never refuses
   # the connection), the Mac Studio's through the stack's ollama-proxy next

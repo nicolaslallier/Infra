@@ -144,7 +144,7 @@ services:
 
   litellm:
     # LLM gateway: OpenAI- and Anthropic-format API (Claude Code, opencode,
-    # scripts) in front of exo on the Macs and Ollama. The -database image
+    # scripts) in front of Ollama on the Macs. The -database image
     # ships Prisma, which LiteLLM needs for its admin UI, virtual keys and
     # spend tracking -- without a DATABASE_URL the UI login answers "Not
     # connected to DB". Database/role `litellm`, provisioned like any other
@@ -172,9 +172,6 @@ services:
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY:?Set LITELLM_SALT_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
       UI_USERNAME: ${LITELLM_UI_USERNAME:-admin}
       UI_PASSWORD: ${LITELLM_UI_PASSWORD:?Set LITELLM_UI_PASSWORD in .env}
-      # exo's OpenAI endpoint. Macs are reached by LAN address, never by
-      # host.docker.internal (that is the Windows Docker host).
-      EXO_API_BASE: ${EXO_API_BASE:-http://192.168.2.35:52415/v1}
       STORE_MODEL_IN_DB: "True"
     volumes:
       - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
