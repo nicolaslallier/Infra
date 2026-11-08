@@ -14,63 +14,6 @@ services:
   # Every image is pinned tag@digest (the multi-arch index digest), so a
   # redeploy -- which force-recreates everything -- never pulls a surprise.
   # The tag is for humans; the digest is what is pulled. Bump both together.
-  postgres:
-    # pgvector/pgvector:pg18 is the official Postgres 18 image plus the
-    # pgvector extension (needed by Jarvis RAG / file_chunks embeddings).
-    # No alpine tag exists for pg18; this is Debian bookworm-based.
-    # PGDATA layout matches stock postgres:18 (/var/lib/postgresql/18/docker).
-    image: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
-    restart: unless-stopped
-    # Audit trail of who connected and when (lands in Loki via Alloy). PG18
-    # still accepts `on` for log_connections (= receipt,authentication,authorization).
-    command: ["postgres", "-c", "log_connections=on", "-c", "log_disconnections=on"]
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_INITDB_ARGS: "--data-checksums"
-      APP_DATABASES: ${APP_DATABASES}
-      MONITORING_DB_PASSWORD: ${MONITORING_DB_PASSWORD}
-    # .env under the CLI, stack.env (written by Portainer from the stack's
-    # env) under Portainer -- the per-app <APP>_DB_PASSWORD names are
-    # dynamic, so they can't be listed under environment:.
-    env_file:
-      - path: .env
-        required: false
-      - path: stack.env
-        required: false
-    volumes:
-      - pgdata:/var/lib/postgresql
-      - ${INFRA_DIR:-.}/postgres/initdb:/docker-entrypoint-initdb.d:ro
-    networks:
-      - infra-net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  pgadmin:
-    # No version tag maps to this digest (it carries only a date tag), so the
-    # major-version tag stays for the human and the digest does the pinning.
-    image: dpage/pgadmin4:9@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d
-    restart: unless-stopped
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-      PGADMIN_DISABLE_POSTFIX: "True"
-      PGADMIN_CONFIG_PROXY_X_PROTO_COUNT: "1"
-      PGADMIN_CONFIG_PROXY_X_HOST_COUNT: "1"
-      PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
-    volumes:
-      - pgadmin-data:/var/lib/pgadmin
-    networks:
-      - infra-net
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   keycloak:
     image: quay.io/keycloak/keycloak:26.7.0@sha256:0f198be292568439d700cdbfb893e69a6009bb43a94a06a945b1d3d506c76b13
     # 14d peak 1722 MiB x1.5; the JVM sizes its heap from this limit.
@@ -112,9 +55,8 @@ services:
       - ${INFRA_DIR:-.}/keycloak/realm-import:/opt/keycloak/data/import:ro
     networks:
       - infra-net
-    depends_on:
-      postgres:
-        condition: service_healthy
+    # No depends_on postgres: it is another stack (docker-compose.postgres.yml),
+    # deployed and gated healthy before this one (stacks.conf order).
     # KC_HEALTH_ENABLED above exposes /health/ready on the management
     # interface (:9000). The image ships no curl/wget (RHEL-based, stripped
     # down since Keycloak 23), but /bin/sh is bash under the hood, so a raw
@@ -350,10 +292,6 @@ services:
         aliases:
           - keycloak.famillelallier.net
     depends_on:
-      postgres:
-        condition: service_healthy
-      pgadmin:
-        condition: service_started
       keycloak:
         condition: service_started
       oauth2-proxy:
@@ -495,8 +433,6 @@ services:
     networks:
       - infra-net
     depends_on:
-      postgres:
-        condition: service_healthy
       prometheus:
         condition: service_started
       loki:
@@ -558,17 +494,6 @@ services:
     networks:
       - infra-net
     pid: host
-
-  postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:v0.17.1@sha256:38606faa38c54787525fb0ff2fd6b41b4cfb75d455c1df294927c5f611699b17
-    restart: unless-stopped
-    environment:
-      DATA_SOURCE_NAME: postgresql://monitoring:${MONITORING_DB_PASSWORD}@postgres:5432/postgres?sslmode=disable
-    networks:
-      - infra-net
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:1.4.2@sha256:6edfb73afd11f2d83ea4e8007f5068c3ffaa38078a6b0ad1339e5bd2f637aacd
@@ -815,9 +740,6 @@ services:
       PREFECT_SERVER_DATABASE_SQLALCHEMY_MAX_OVERFLOW: "0"
     networks:
       - infra-net
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   prefect-flows:
     image: prefecthq/prefect:3.8.7-python3.12@sha256:f15a7bda40608ee890ff97e963ec3403dc25d633810a4ef1fff93ff303f4ef5f
@@ -915,17 +837,12 @@ services:
       - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
     networks:
       - infra-net
-    depends_on:
-      postgres:
-        condition: service_healthy
 
 networks:
   infra-net:
     external: true
 
 volumes:
-  pgdata:
-  pgadmin-data:
   dns-config:
   dns-logs:
   prometheus-data:

@@ -64,7 +64,8 @@ Services on one external Docker network (`infra-net`, created by
 `docker-compose.yml` so the network outlives `docker compose down` and
 never orphans another app that's still attached to it):
 
-- **`postgres`** — `pgvector/pgvector:0.8.6-pg18-bookworm` (Postgres 18 + pgvector;
+- **`postgres`** (own stack, `docker-compose.postgres.yml`, with `pgadmin` and
+  `postgres-exporter`) — `pgvector/pgvector:0.8.6-pg18-bookworm` (Postgres 18 + pgvector;
   Debian bookworm — no alpine tag for pg18). Publishes no host port.
   Per-app provisioning also runs `CREATE EXTENSION IF NOT EXISTS vector`
   as the superuser in each app database, so app roles (e.g. Jarvis RAG
@@ -327,14 +328,32 @@ Portainer's API through `scripts/portainer-stack.sh`; nobody runs
 purpose.
 
 `stacks.conf` lists the stacks the script deploys, in order (one row per
-stack: name, compose file, Portainer environment). Today it holds `infra`
-alone; the split into several stacks, each able to run on another
-Portainer-managed machine, is planned in phases (first phase: this list).
+stack: name, compose file, Portainer environment, owned paths): `postgres`
+(`docker-compose.postgres.yml`: postgres, pgadmin, postgres-exporter), then
+`infra` (`docker-compose.yml`, everything else). More stacks follow, each
+meant to be able to run on another Portainer-managed machine.
 `make up` / `pull` / `down` walk the list top to bottom, deploying a stack and
 waiting for it to be healthy (`WAIT_PROJECT=<stack>` for `wait-healthy.sh`)
 before the next; `stack=<name>` restricts them to one. Only the local
 environment (`-`) is accepted until the host-checkout sync can target
 another machine.
+
+- **CI redeploys only what a push touched.** `ci-deploy.sh up` sets
+  `ONLY_IF_CHANGED=1`: a stack is skipped when nothing in its paths column
+  changed between the commit Portainer last deployed it at
+  (`GitConfig.ConfigHash`) and HEAD; `*` means everything the other stacks
+  don't claim. A vault-only change (no commit) therefore redeploys nothing:
+  run `make up stack=<name>`. `make up` by hand still deploys every stack.
+- **No `depends_on` across stacks.** The deploy order and each stack's health
+  gate replace it; services still find each other by name on `infra-net`.
+- **Taking a service over.** The first deploy of a stack stops (`-t 120`)
+  and removes any `infra` container of the same service names before
+  creating it (`take_over_services`): Portainer never removes containers a
+  redeploy no longer defines, and two postgres on one data volume corrupt it.
+- **Volumes keep their `infra_` names.** A split-out stack declares them
+  `external: true, name: infra_<volume>`, so it reuses the data without a
+  copy, a missing volume fails the deploy instead of starting empty, and
+  `make clean` (infra only) no longer deletes them.
 
 Things that look odd and are load-bearing:
 

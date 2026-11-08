@@ -94,11 +94,11 @@ def _docker():
     return docker.from_env()
 
 
-def _container(client, service: str):
+def _container(client, service: str, project: str = "infra"):
     found = client.containers.list(
         filters={
             "label": [
-                "com.docker.compose.project=infra",
+                f"com.docker.compose.project={project}",
                 f"com.docker.compose.service={service}",
             ]
         }
@@ -168,7 +168,7 @@ def _gzip_checked(chunks: Iterable[bytes]) -> Iterator[bytes]:
 @task(name="dump-postgres")
 def dump_postgres() -> Path:
     client = _docker()
-    container = _container(client, "postgres")
+    container = _container(client, "postgres", project="postgres")
     api = client.api
     exec_id = api.exec_create(
         container.id, ["pg_dumpall", "-U", BACKUP_PG_USER], user="postgres"

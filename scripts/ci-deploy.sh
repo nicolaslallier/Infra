@@ -117,5 +117,8 @@ exec docker run --rm \
     git pull --quiet --ff-only
 
     echo "ci-deploy.sh: host checkout at $(git rev-parse --short HEAD)"
+    # A push redeploys only the stacks it touched (stacks.conf paths);
+    # `pull` (the manual re-pull) still does them all.
+    [ "$1" != up ] || export ONLY_IF_CHANGED=1
     exec make "$1"
   ' sh "$cmd"

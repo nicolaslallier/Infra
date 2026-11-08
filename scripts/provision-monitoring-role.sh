@@ -18,7 +18,7 @@ set +a
 
 : "${MONITORING_DB_PASSWORD:?Set MONITORING_DB_PASSWORD in .env}"
 
-docker compose exec -T \
+docker compose -f docker-compose.postgres.yml exec -T \
   -e MONITORING_DB_PASSWORD="$MONITORING_DB_PASSWORD" \
   postgres \
   sh /docker-entrypoint-initdb.d/20-monitoring-role.sh
