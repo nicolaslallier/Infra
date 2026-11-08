@@ -1096,6 +1096,11 @@ pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
 max_active = 2                 # the Mac Studio VM has 8 GiB, shared with DarkAngel
 # mem_limit = "1536m"
 # cpus = "2"
+# [llm]                        # Claude Code in new sessions uses the LLM gateway
+# base_url = "https://litellm.infra.famillelallier.net"
+# api_key = "sk-..."           # a LiteLLM virtual key, never the master key
+# model = "qwen3.8-dev"        # Ollama on the MacBook, falls back to the Mac Studio
+# ca_cert = "/Users/me/OpenCode/Infra/certs/infra-ca.crt"
 ```
 
 Then:
