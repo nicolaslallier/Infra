@@ -7,10 +7,11 @@
 # Safe to re-run — zone creation is ignored if the zone already exists,
 # and records are added with overwrite=true.
 #
-# Deliberately does NOT touch famillelallier.net itself: beacon./dev.
-# subdomains live outside this repo and must keep resolving elsewhere.
-# Zone authority is absolute in DNS, so owning the whole parent zone
-# here would break them.
+# famillelallier.net itself is a Forwarder zone, never a Primary one: its
+# public records (Google Workspace MX, SPF/DKIM, beacon./dev.) live at the
+# public DNS provider, and a Primary zone would hide them from every LAN
+# client. The Forwarder zone answers *.famillelallier.net -> LAN_IP locally
+# and forwards every name and type it doesn't hold to UPSTREAM_DNS.
 #
 # Usage: scripts/dns-provision.sh
 set -euo pipefail
@@ -80,5 +81,11 @@ add_a_record "jarvis.famillelallier.net" "jarvis.famillelallier.net"
 
 create_zone "chat.famillelallier.net"
 add_a_record "chat.famillelallier.net" "chat.famillelallier.net"
+
+# Forwarder zone for the parent (see the header). Created after the leaf
+# zones, which stay more specific and win for their own names.
+resp="$(curl -sf "${BASE}/api/zones/create?token=${TOKEN}&zone=famillelallier.net&type=Forwarder&protocol=Udp&forwarder=${UPSTREAM_DNS:-1.1.1.1}")" || true
+echo "  zone famillelallier.net (Forwarder): $(echo "$resp" | grep -q '"status"[[:space:]]*:[[:space:]]*"ok"' && echo created || echo 'already exists (or unchanged)')"
+add_a_record "*.famillelallier.net" "famillelallier.net"
 
 echo "Done. Run 'make dns-check' to verify."
