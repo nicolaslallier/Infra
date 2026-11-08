@@ -1094,7 +1094,7 @@ ssh_host = "192.168.2.10"      # LAN_IP (nginx passes :2222 to the Mac Studio)
 pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
 # extra_pubkeys = ["ssh-ed25519 AAAA... me@windows-pc"]   # your other machines
 # catalogs = ["anthropics/claude-plugins-official", "me/my-plugins"]
-# max_active = 4
+max_active = 2                 # the Mac Studio VM has 8 GiB, shared with DarkAngel
 # mem_limit = "1536m"
 # cpus = "2"
 ```

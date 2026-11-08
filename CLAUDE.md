@@ -1015,7 +1015,8 @@ the CLI tests and the image/state checks on the local daemon.
 - **Budget**: `max_active` (4) x `mem_limit` (1536m) is 6 GiB on the Mac
   Studio's 8 GiB Colima VM, which also carries DarkAngel, so sessions have
   `oom_score_adj: 1000` (the OOM killer takes them first), `cpus` (2) and
-  `pids_limit: 1024`. Lower `max_active` if builds run in parallel.
+  `pids_limit: 1024`. The owner's config sets `max_active = 2` (the VM stays
+  at 8 GiB).
 - **The image**: Claude Code is pinned (`CLAUDE_CODE_VERSION`) with its
   auto-updater off; `npm i -g` goes to `~/.npm-global`; Debian's pip is
   PEP 668-managed (use a venv). The dev/ Dockerfiles' base digests are
