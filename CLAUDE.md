@@ -333,7 +333,8 @@ stack: name, compose file, Portainer environment, owned paths): `dns`
 DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
 postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
-rabbitmq, ntfy), then
+rabbitmq, ntfy), `monitoring` (`docker-compose.monitoring.yml`: the LGTM
+stack, cadvisor, node-exporter), then
 `infra` (`docker-compose.yml`, everything else). More stacks follow, each
 meant to be able to run on another Portainer-managed machine.
 `make up` / `pull` / `down` walk the list top to bottom, deploying a stack and
