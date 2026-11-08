@@ -2,7 +2,7 @@
 # Build the images the stack references but cannot pull, through Portainer's
 # API (see lib/portainer-api.sh): the daemon clones and builds the git ref
 # itself, so nothing is built or sent from this machine. A tag already on the
-# daemon is not rebuilt unless FORCE is set. Needs OLLAMA_PROXY_REF (the Makefile sets it).
+# daemon is not rebuilt unless FORCE is set. Needs OLLAMA_PROXY_REF and LITELLM_PGVECTOR_REF (the Makefile sets them).
 set -euo pipefail
 # shellcheck source=lib/portainer-api.sh
 . "$(dirname "$0")/lib/portainer-api.sh"
@@ -40,3 +40,5 @@ fi
 
 : "${OLLAMA_PROXY_REF:?}"
 build "infra-ollama-proxy:${OLLAMA_PROXY_REF:0:7}" "https://github.com/nicolaslallier/ollama-metrics.git#$OLLAMA_PROXY_REF"
+: "${LITELLM_PGVECTOR_REF:?}"
+build "infra-litellm-pgvector:${LITELLM_PGVECTOR_REF:0:7}" "https://github.com/BerriAI/litellm-pgvector.git#$LITELLM_PGVECTOR_REF"

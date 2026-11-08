@@ -147,6 +147,24 @@ never orphans another app that's still attached to it):
   like any other app; without it the UI login fails with "Not connected to DB".
   Publishes no host port. Not behind oauth2-proxy: API clients use bearer
   keys. Never rotate `LITELLM_SALT_KEY` once models are stored in the DB.
+- **`litellm-pgvector`** — `infra-litellm-pgvector`, built by `make app-images`
+  from a pinned commit of BerriAI/litellm-pgvector (`LITELLM_PGVECTOR_REF` in
+  the Makefile; keep the compose tag in step). LiteLLM has no pgvector driver
+  of its own: its `pg_vector` vector store provider (`vector_store_registry`
+  in `litellm/config.yaml`, store id `jarvis-files`) calls this
+  OpenAI-compatible vector store API, which searches Jarvis's RAG chunks
+  (`file_chunks`, 768-d `nomic-embed-text-v1.5`) as the read-only role
+  `litellm_rag` through views in schema `litellm_rag` of the `jarvis`
+  database (`litellm/rag.sql`, applied by `make provision-litellm-rag` once
+  Jarvis's migrations have run; idempotent). Search only: Jarvis ingests.
+  Queries are embedded by the LM Studio model Jarvis uses
+  (`JARVIS_EMBEDDING_BASE_URL`/`_MODEL`, default
+  `host.docker.internal:1234`): another model gives meaningless distances.
+  The views go through inlined SQL functions so they never block a Jarvis
+  migration on `file_chunks`, and the schema carries its own `vector`
+  domain and `<=>` operator because Prisma's `?schema=` drops `public` from
+  the search_path. Secrets: `LITELLM_PGVECTOR_API_KEY`,
+  `LITELLM_RAG_DB_PASSWORD`. infra-net only, no vhost.
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2

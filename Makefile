@@ -8,7 +8,7 @@ SHELL := bash
 .NOTPARALLEL:
 
 .PHONY: help test init net certs seal-key app-images up down restart logs ps status pull config \
-	shell psql provision-app provision-monitoring-role hosts dns-provision \
+	shell psql provision-app provision-monitoring-role provision-litellm-rag hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision rabbitmq-provision \
 	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli vault-backup-token \
@@ -69,8 +69,12 @@ app-volumes: ## Ensure the external volumes shared with app stacks exist (via Po
 # Git stacks do not reliably build. Change the commit here and the tag in
 # docker-compose.yml together; a tag already on the daemon is not rebuilt.
 OLLAMA_PROXY_REF := 2762bfb3c5d5d044a1380d17e89fd303687b2c12
+# litellm-pgvector (BerriAI/litellm-pgvector, no published image): the
+# OpenAI-compatible vector store API LiteLLM's pg_vector provider talks to.
+# Same rule: change the commit here and the tag in docker-compose.platform.yml together.
+LITELLM_PGVECTOR_REF := 5bd8f3ab1fa9129e758a2c4b17ba1c6f3047ba24
 app-images: ## Build the images the stack references but cannot pull (via Portainer's API)
-	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) ./scripts/portainer-images.sh
+	@INFRA_HOST=$(INFRA_HOST) OLLAMA_PROXY_REF=$(OLLAMA_PROXY_REF) LITELLM_PGVECTOR_REF=$(LITELLM_PGVECTOR_REF) ./scripts/portainer-images.sh
 
 dev-image: ## Build the dev images (session, proxy, gateway) on the Mac Studio from main (DEV_IMAGE_REF=<ref>; FORCE=1 rebuilds existing tags)
 	@INFRA_HOST=$(INFRA_HOST) PORTAINER_ENDPOINT_ID=$(DEV_ENDPOINT) FORCE=$(FORCE) ./scripts/portainer-images.sh dev
@@ -313,6 +317,9 @@ provision-app: check-env ## Add an app DB/role (app=<name>)
 
 provision-monitoring-role: check-env ## Create/update postgres-exporter monitoring role
 	@./scripts/provision-monitoring-role.sh
+
+provision-litellm-rag: check-env ## Create/update LiteLLM's read-only view of Jarvis's pgvector chunks
+	@./scripts/provision-litellm-rag.sh
 
 dns-provision: check-env ## Create/update DNS zones & records
 	@./scripts/dns-provision.sh

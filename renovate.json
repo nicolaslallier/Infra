@@ -20,6 +20,7 @@
   "automerge": false,
   "ignoreDeps": [
     "infra-ollama-proxy",
+    "infra-litellm-pgvector",
     "myoung34/github-runner",
     "devbox-session",
     "dev-egress",
