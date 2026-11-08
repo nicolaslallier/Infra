@@ -39,6 +39,12 @@ services:
       http_proxy: http://dev-egress:3128
       https_proxy: http://dev-egress:3128
       NO_PROXY: ""
+      # LLM gateway (the CLI's [llm] config); empty: Claude's own login.
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      ANTHROPIC_SMALL_FAST_MODEL: ${ANTHROPIC_SMALL_FAST_MODEL:-}
+      LLM_CA_PEM: ${LLM_CA_PEM:-}
     volumes:
       - work:/work
       - state:/home/dev/state

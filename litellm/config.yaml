@@ -22,9 +22,22 @@ model_list:
       model: ollama_chat/qwen3.8:27b-mlx
       api_base: http://ollama-proxy:11434
 
+  # The dev sessions' Claude Code (the devbox CLI's [llm] model): Ollama on
+  # the MacBook (192.168.2.40), which is often asleep or away -- so it falls
+  # back to the Mac Studio's copy (fallbacks below). LAN address: .10's
+  # containers use the router's DNS, which knows no homelab names. A short
+  # timeout, since a sleeping laptop never refuses the connection.
+  - model_name: qwen3.8-dev
+    litellm_params:
+      model: ollama_chat/qwen3.8:27b-mlx
+      api_base: http://192.168.2.40:11434
+      timeout: 120
+
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true
+  # qwen3.8-dev's laptop is away: the Mac Studio's copy answers instead.
+  fallbacks: [{"qwen3.8-dev": ["qwen3.8:27b-mlx"]}]
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

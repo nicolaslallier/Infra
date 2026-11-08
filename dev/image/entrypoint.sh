@@ -96,9 +96,20 @@ for p in "${plugins[@]}"; do
   [ -n "$p" ] && { bg claude plugin install "$p" || echo "WARN: plugin $p not installed" >&2; }
 done
 
+# The LLM gateway's CA (homelab CA, not in the system store): Claude Code
+# is node, which reads NODE_EXTRA_CA_CERTS.
+if [ -n "${LLM_CA_PEM:-}" ]; then
+  printf '%s\n' "$LLM_CA_PEM" > ~/.llm-ca.pem
+  export NODE_EXTRA_CA_CERTS=~/.llm-ca.pem
+fi
+
 # Variables an SSH login should see (sshd does not pass the container env on).
-env | grep -E '^(GH_TOKEN|SESSION|STATE|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|CLAUDE_CONFIG_DIR|DISABLE_AUTOUPDATER|NPM_CONFIG_PREFIX|PATH)=' \
-  > ~/.ssh/environment
+# The ANTHROPIC_* ones only when set: an empty ANTHROPIC_BASE_URL is not
+# "unset" to Claude Code.
+{
+  env | grep -E '^(GH_TOKEN|SESSION|STATE|HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|CLAUDE_CONFIG_DIR|DISABLE_AUTOUPDATER|NPM_CONFIG_PREFIX|PATH)='
+  env | grep -E '^(ANTHROPIC_BASE_URL|ANTHROPIC_AUTH_TOKEN|ANTHROPIC_MODEL|ANTHROPIC_SMALL_FAST_MODEL|NODE_EXTRA_CA_CERTS)=.' || true
+} > ~/.ssh/environment
 chmod 600 ~/.ssh/environment
 
 sync.sh loop &

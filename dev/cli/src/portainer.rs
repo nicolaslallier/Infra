@@ -22,6 +22,8 @@ struct RawStack {
     /// 1 active, 2 inactive.
     #[serde(rename = "Status")]
     status: u8,
+    #[serde(rename = "EndpointId")]
+    endpoint: u32,
 }
 
 pub struct Stack {
@@ -31,6 +33,41 @@ pub struct Stack {
 }
 
 impl Client {
+    /// A client on the one Portainer environment that runs `project/service`
+    /// (the data stack's s3 moves between hosts; nothing names the host).
+    /// Environments that do not answer are skipped. Two matches (old and new
+    /// s3 both up mid-migration) refuse: the identity would land on one.
+    pub fn locate(cfg: &Config, project: &str, service: &str) -> Result<Client, String> {
+        let mut c = Client::new(cfg)?;
+        let envs: Vec<Value> = c.send(c.http.get(format!("{}/endpoints", c.base)), "list environments")?.json().map_err(|e| e.to_string())?;
+        let hits: Vec<u32> = envs
+            .iter()
+            .filter_map(|e| e["Id"].as_u64())
+            .map(|id| id as u32)
+            .filter(|&id| {
+                c.endpoint = id;
+                c.container(project, service).is_ok()
+            })
+            .collect();
+        match hits[..] {
+            [id] => {
+                c.endpoint = id;
+                Ok(c)
+            }
+            [] => Err(format!("no running {project}/{service} container on any Portainer environment")),
+            _ => Err(format!("{project}/{service} runs on several Portainer environments {hits:?}: stop the old one first")),
+        }
+    }
+
+    fn container(&self, project: &str, service: &str) -> Result<String, String> {
+        let filters = json!({"label": [format!("com.docker.compose.project={project}"), format!("com.docker.compose.service={service}")], "status": ["running"]});
+        let list: Vec<Value> = self
+            .send(self.http.get(self.docker("/containers/json")).query(&[("filters", filters.to_string())]), "find container")?
+            .json()
+            .map_err(|e| e.to_string())?;
+        list.first().and_then(|c| c["Id"].as_str()).map(String::from).ok_or_else(|| format!("no running {project}/{service} container"))
+    }
+
     pub fn new(cfg: &Config) -> Result<Client, String> {
         let mut b = Http::builder()
             // Stopping a stack waits for the session's final sync (up to 120s).
@@ -73,7 +110,9 @@ impl Client {
             .map_err(|e| format!("list stacks: {e}"))?;
         Ok(raw
             .into_iter()
-            .filter(|s| s.name.starts_with("dev-"))
+            // This environment's only: a session moved to another host
+            // leaves its stopped stack behind under the same name.
+            .filter(|s| s.endpoint == self.endpoint && s.name.starts_with("dev-"))
             .map(|s| Stack { id: s.id, name: s.name, running: s.status == 1 })
             .collect())
     }
@@ -138,12 +177,7 @@ impl Client {
     /// for it. Detached and polled: Portainer's proxy and a hijacked exec
     /// stream do not mix.
     pub fn exec_in_service(&self, project: &str, service: &str, script: &str, env: &[(&str, &str)]) -> Result<(), String> {
-        let filters = json!({"label": [format!("com.docker.compose.project={project}"), format!("com.docker.compose.service={service}")], "status": ["running"]});
-        let list: Vec<Value> = self
-            .send(self.http.get(self.docker("/containers/json")).query(&[("filters", filters.to_string())]), "find container")?
-            .json()
-            .map_err(|e| e.to_string())?;
-        let id = list.first().and_then(|c| c["Id"].as_str()).ok_or_else(|| format!("no running {project}/{service} container"))?;
+        let id = self.container(project, service)?;
         let env: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
         let body = json!({"Cmd": ["sh", "-euc", script], "Env": env, "AttachStdout": false, "AttachStderr": false});
         let exec: Value = self.send(self.http.post(self.docker(&format!("/containers/{id}/exec"))).json(&body), "exec")?.json().map_err(|e| e.to_string())?;

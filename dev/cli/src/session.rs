@@ -33,6 +33,21 @@ pub fn stack_env(cfg: &Config, s: &NewSession) -> Vec<(String, String)> {
     .collect()
 }
 
+/// The gateway part of the stack env (`llm` in the config), read by the
+/// session's entrypoint: ANTHROPIC_* for Claude Code, LLM_CA_PEM for TLS.
+pub fn llm_env(cfg: &Config) -> Result<Vec<(String, String)>, String> {
+    let Some(l) = &cfg.llm else { return Ok(vec![]) };
+    let mut env = vec![("ANTHROPIC_BASE_URL".to_string(), l.base_url.clone()), ("ANTHROPIC_AUTH_TOKEN".to_string(), l.api_key.clone())];
+    if !l.model.is_empty() {
+        env.push(("ANTHROPIC_MODEL".into(), l.model.clone()));
+        env.push(("ANTHROPIC_SMALL_FAST_MODEL".into(), l.model.clone()));
+    }
+    if let Some(ca) = &l.ca_cert {
+        env.push(("LLM_CA_PEM".into(), std::fs::read_to_string(ca).map_err(|e| format!("llm.ca_cert {}: {e}", ca.display()))?));
+    }
+    Ok(env)
+}
+
 /// The owner's public keys, comma-joined for SSH_PUBKEYS: the creating
 /// machine's plus `extra_pubkeys`. A key holding a comma or a newline would
 /// split into garbage, so it is refused.
@@ -139,6 +154,10 @@ mod tests {
         assert_eq!(get("S3_SECRET_KEY"), "sek");
         assert_eq!(get("MEM_LIMIT"), "1536m");
         assert_eq!(get("CPUS"), "2");
+        assert!(llm_env(&cfg).unwrap().is_empty());
+        let with = Config::parse(&format!("{}\n[llm]\nbase_url = \"https://gw\"\napi_key = \"sk-v\"\nmodel = \"m\"\n", crate::config::tests::MINIMAL)).unwrap();
+        let keys: Vec<String> = llm_env(&with).unwrap().into_iter().map(|(k, _)| k).collect();
+        assert_eq!(keys, ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL"]);
     }
 
     #[test]

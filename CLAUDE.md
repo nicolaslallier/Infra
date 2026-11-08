@@ -623,7 +623,7 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
   a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
   `127.0.0.1:5672` the same way.
 - Port 2222 → NGINX's `stream{}` block (`nginx/stream.d/devssh.conf`), to
-  `dev-gateway:22`, bound to `${LAN_IP}` (never `0.0.0.0`): dev-session SSH
+  the dev gateway on the Mac Studio (`192.168.2.66:2222`), bound to `${LAN_IP}` (never `0.0.0.0`): dev-session SSH
   has to reach other LAN machines (see "Dev sessions").
 **`portainer` is the one deliberate exception.** It publishes 9443 (UI,
 TLS), 9000 (UI, plain HTTP) and 8000 (Edge-agent tunnel) itself, from
@@ -934,14 +934,21 @@ LAN. Usage is in the README ("Dev sessions"). Pieces: the `devbox` CLI
 (`dev/cli`, Rust, runs on the owner's Mac/PC), one Portainer stack per
 session (`dev/session.compose.yml`, stack `dev-<name>`, image
 `devbox-session:1` from `dev/image`, built on the daemon by `make dev-image`),
-and the plumbing in `docker-compose.dev.yml` (project `dev`, `make dev-up`):
-`dev-egress` (squid) and `dev-gateway` (sshd). Neither project is part of the
+and the plumbing in `docker-compose.dev.yml` (Portainer stack `dev`,
+`make dev-up`): `dev-egress` (squid) and `dev-gateway` (sshd). All of it runs
+on the Mac Studio (Portainer environment 6, Colima VM `192.168.2.66`, arm64),
+off `infra-net`: nginx on 192.168.2.10 passes `${LAN_IP}:2222` to
+`DEV_SSH_IP:2222`, and the proxy reaches s3 as `s3.famillelallier.net:8333`
+(squid's `dns_defnames` + the proxy's `dns_search`; a DNS record that follows
+the data stack, so no host is named here -- not `append_domain`, which
+rewrites the Host header that S3's signature covers). The CLI runs `weed shell` on whichever Portainer
+environment has the running `data/s3` container. Neither project is part of the
 `infra` stack, so `make up` never recreates a session -- but it does recreate
 nginx, which drops every session's SSH (see tmux below). `make dev-test` runs
 the CLI tests and the image/state checks on the local daemon.
 
 - **SSH is a `ProxyJump`.** nginx (`stream.d/devssh.conf`) passes
-  `${LAN_IP}:2222` to `dev-gateway:22`, user `jump`, which forwards only to
+  `${LAN_IP}:2222` to the gateway on the Mac Studio, user `jump`, which forwards only to
   port 2222 and has no shell; each session runs its own unprivileged sshd on
   2222, with every forwarding off (a forwarded agent would push past the
   one-repo token). `PermitOpen *:2222` cannot name sessions (no patterns),
@@ -971,8 +978,10 @@ the CLI tests and the image/state checks on the local daemon.
   listens on (a dev server, a debugger). Not an anti-goal; per-session
   networks would need the CLI to attach the proxy and gateway to each.
 - **No bind mounts in `docker-compose.dev.yml`**: configs are `COPY`'d into
-  the images, because `make dev-up` runs compose over the ssh `DOCKER_HOST`,
-  which sends the build context but not files to mount.
+  the images, which `make dev-image` / `dev-up` build on the Mac Studio from
+  GitHub main through Portainer's API (Git stacks do not reliably build), so
+  the stack deploys to a remote environment. Merge a `dev/` change, then
+  rebuild: CI does not.
 - **One S3 identity per session**: `devbox-<name>`, actions
   `Read/Write/List:devbox/<name>/*` (SeaweedFS action scopes; the `/*` is
   what makes them work, and `devbox/ab` is not `devbox/a`). `devbox create`
@@ -1008,10 +1017,11 @@ the CLI tests and the image/state checks on the local daemon.
   Portainer or the socket. Point `portainer_url` at the nginx vhost with
   `ca_cert` = the stack's `certs/infra-ca.crt`: `insecure_tls` hands the key
   to anyone on the LAN who can answer for Portainer's address.
-- **Budget**: `max_active` (4) x `mem_limit` (1536m) is 6 GiB on the laptop's
-  ~7.7 GiB VM, already carrying the stack, so sessions have
+- **Budget**: `max_active` (4) x `mem_limit` (1536m) is 6 GiB on the Mac
+  Studio's 8 GiB Colima VM, which also carries DarkAngel, so sessions have
   `oom_score_adj: 1000` (the OOM killer takes them first), `cpus` (2) and
-  `pids_limit: 1024`. Lower `max_active` if builds run in parallel.
+  `pids_limit: 1024`. The owner's config sets `max_active = 2` (the VM stays
+  at 8 GiB).
 - **The image**: Claude Code is pinned (`CLAUDE_CODE_VERSION`) with its
   auto-updater off; `npm i -g` goes to `~/.npm-global`; Debian's pip is
   PEP 668-managed (use a venv). The dev/ Dockerfiles' base digests are
