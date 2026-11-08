@@ -85,7 +85,8 @@ never orphans another app that's still attached to it):
   serves **anonymously** when no identity exists, so never remove it.
   Per-app bucket-scoped identities come from `make s3-provision
   app=<name> [bucket=] [versioned=1]` (`scripts/provision-s3.sh`); the IAM
-  config (Keycloak OIDC provider, STS roles) is `seaweedfs/iam.json.tmpl`,
+  config (Keycloak OIDC provider, STS roles) is the `seaweedfs-iam` config
+  inlined in `docker-compose.data.yml`,
   rendered into the container's `/tmp` at start. The filer (`:8888`) and
   master (`:9333`) UIs are unauthenticated and must never get a host path.
   Metrics on `:9324`. Break glass: `docker compose exec s3 weed shell
@@ -116,7 +117,7 @@ never orphans another app that's still attached to it):
   Portainer `MORIA_AMQP_PASSWORD` must equal it, set before deploying Moria.
 - **`ntfy`** — `binwiederhier/ntfy`, pinned by tag *and* digest.
   Push notifications, at `ntfy.infra.famillelallier.net` (NGINX → `ntfy:80`);
-  apps use `http://ntfy`. Publishes no host port. `ntfy/server.yml` sets
+  apps use `http://ntfy`. Publishes no host port. Its config (`ntfy-server`, inlined in `docker-compose.data.yml`) sets
   `auth-default-access: deny-all`: never loosen it, the API is reachable
   from every container on `infra-net`. `make ntfy-provision app=<name>
   [topic=<prefix>]` (`scripts/provision-ntfy.sh`) creates a user with
@@ -333,7 +334,12 @@ stack: name, compose file, Portainer environment, owned paths): `dns`
 DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
 postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
-rabbitmq, ntfy), `monitoring` (`docker-compose.monitoring.yml`: the LGTM
+rabbitmq, ntfy, on the Mac mini, environment 7: it publishes S3 :8333, AMQP
+:5672, the RabbitMQ UI :15672, ntfy :8090 and the metrics ports on
+192.168.2.67, never s3-admin, the filer or the master; its config files are
+inlined as compose `configs:`; on this host nginx carries the aliases `s3`,
+`rabbitmq` and `ntfy` on infra-net and relays them, so apps keep their
+URLs; the provisioning scripts run with `DOCKER_HOST` on the mini's daemon), `monitoring` (`docker-compose.monitoring.yml`: the LGTM
 stack, cadvisor, node-exporter), `keycloak` (`docker-compose.keycloak.yml`:
 Keycloak alone, on the Mac mini, environment 7: nginx relays
 keycloak.famillelallier.net to 192.168.2.67:8080, Prometheus scrapes :9000,

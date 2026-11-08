@@ -1,12 +1,21 @@
-# The "data" stack: object storage (SeaweedFS s3 + s3-admin), the message
+# The "data" stack, on the Mac mini (Portainer environment 7, Colima VM
+# 192.168.2.67): object storage (SeaweedFS s3 + s3-admin), the message
 # broker (RabbitMQ) and push notifications (ntfy) -- the stateful services
 # the apps use -- split out of the infra stack (see stacks.conf, and
-# CLAUDE.md "Portainer-managed stack"). Same infra-net and service names, so
-# apps still reach s3:8333, rabbitmq:5672 and http://ntfy.
+# CLAUDE.md "Portainer-managed stack"). It publishes its ports on the mini's
+# LAN address (the router forwards none of them). On the homelab, the infra
+# NGINX answers to the names s3, rabbitmq and ntfy on infra-net and relays
+# here, so apps there still reach s3:8333, rabbitmq:5672 and http://ntfy.
+# On the mini, apps (Moria) join the mini's own infra-net and use the same
+# names directly.
+#
+# A remote stack mounts nothing from a checkout (scripts/portainer-stack.sh
+# refuses it), so the config files are inlined as configs: at the bottom.
 #
 # The volumes are the infra stack's own, declared external by name (a
 # missing one fails the deploy instead of starting empty). On a fresh
-# machine: docker volume create infra_s3-data infra_rabbitmq-data infra_ntfy-data
+# machine: docker network create infra-net && docker volume create
+# infra_s3-data infra_rabbitmq-data infra_ntfy-data
 name: data
 
 services:
@@ -44,7 +53,12 @@ services:
       S3_STS_SIGNING_KEY: ${S3_STS_SIGNING_KEY:?Set S3_STS_SIGNING_KEY in .env (openssl rand -base64 32)}
     volumes:
       - s3-data:/data
-      - ${INFRA_DIR:-.}/seaweedfs/iam.json.tmpl:/etc/seaweedfs/iam.json.tmpl:ro
+    configs:
+      - source: seaweedfs-iam
+        target: /etc/seaweedfs/iam.json.tmpl
+    ports:
+      - "8333:8333" # S3 + STS (every request signed)
+      - "9324:9324" # metrics, for Prometheus on the homelab
     networks:
       - infra-net
     healthcheck:
@@ -60,7 +74,9 @@ services:
     # want (Keycloak OIDC is Enterprise-only), so it binds infra-net
     # unauthenticated -- the same posture the filer UI (:8888) already has
     # there -- and its only host path is nginx/conf.d/s3-admin.conf behind
-    # oauth2-proxy-infra. -allowInsecureBind is how weed admin is told that
+    # oauth2-proxy-infra. On the mini it publishes NO port: the LAN would
+    # reach it without oauth2-proxy, so s3-admin.infra answers 502 until a
+    # source-restricted path exists. -allowInsecureBind is how weed admin is told that
     # on purpose. -dataDir=/data is the image's anonymous volume:
     # maintenance-task state is not worth a named one.
     image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
@@ -89,9 +105,15 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
+    configs:
       # management + prometheus plugins (image already ships both; this file
       # is what actually enables them on boot).
-      - ${INFRA_DIR:-.}/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+      - source: rabbitmq-plugins
+        target: /etc/rabbitmq/enabled_plugins
+    ports:
+      - "5672:5672"   # AMQP (per-app users, make rabbitmq-provision)
+      - "15672:15672" # management UI, behind the homelab NGINX
+      - "15692:15692" # metrics, for Prometheus on the homelab
     networks:
       - infra-net
     healthcheck:
@@ -104,10 +126,10 @@ services:
   # --- Notifications (ntfy push; infra-net only) ---
 
   ntfy:
-    # Push notifications. Config is ntfy/server.yml (committed: the drift
-    # guard refuses untracked files). Auth is deny-all; one user + token per
-    # app via `make ntfy-provision`. Publishes no host port: apps use
-    # http://ntfy, phones and browsers go through NGINX (ntfy.conf).
+    # Push notifications. Config is inlined (configs: ntfy-server, at the
+    # bottom). Auth is deny-all; one user + token per
+    # app via `make ntfy-provision`. Apps use http://ntfy; phones and
+    # browsers go through the homelab NGINX (ntfy.conf), which reaches :8090.
     # Tag *and* digest (the manifest-list digest the registry returns).
     image: binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f
     restart: unless-stopped
@@ -115,7 +137,12 @@ services:
     volumes:
       # Message cache + the auth database (users, ACLs, tokens).
       - ntfy-data:/var/lib/ntfy
-      - ${INFRA_DIR:-.}/ntfy/server.yml:/etc/ntfy/server.yml:ro
+    configs:
+      - source: ntfy-server
+        target: /etc/ntfy/server.yml
+    ports:
+      - "8090:80"   # API, behind the homelab NGINX (deny-all auth)
+      - "9090:9090" # metrics, for Prometheus on the homelab
     networks:
       infra-net:
         aliases:
@@ -128,8 +155,182 @@ services:
       start_period: 20s
 
 networks:
+  # Created by hand on the mini (see the header): Moria joins it too.
   infra-net:
     external: true
+
+configs:
+  # SeaweedFS IAM (Keycloak OIDC provider, STS roles). The STS signing key is
+  # a placeholder the entrypoint fills in, so it never lands in this file.
+  # JWKS comes straight from Keycloak on this same VM (docker-compose.keycloak.yml).
+  seaweedfs-iam:
+    content: |
+      {
+        "sts": {
+          "tokenDuration": "1h",
+          "maxSessionLength": "12h",
+          "issuer": "seaweedfs-sts",
+          "signingKey": "__S3_STS_SIGNING_KEY__"
+        },
+        "providers": [
+          {
+            "name": "keycloak",
+            "type": "oidc",
+            "enabled": true,
+            "config": {
+              "issuer": "https://keycloak.famillelallier.net/realms/infra",
+              "clientId": "s3-sts",
+              "jwksUri": "http://192.168.2.67:8080/realms/infra/protocol/openid-connect/certs",
+              "roleMapping": {
+                "rules": [
+                  { "claim": "groups", "value": "s3-admin", "role": "arn:aws:iam::role/S3AdminRole" },
+                  { "claim": "groups", "value": "s3-readwrite", "role": "arn:aws:iam::role/S3WriteRole" },
+                  { "claim": "groups", "value": "s3-readonly", "role": "arn:aws:iam::role/S3ReadOnlyRole" }
+                ]
+              }
+            }
+          }
+        ],
+        "policies": [
+          {
+            "name": "S3AdminPolicy",
+            "document": {
+              "Version": "2012-10-17",
+              "Statement": [
+                { "Effect": "Allow", "Action": ["s3:*"], "Resource": ["arn:aws:s3:::*", "arn:aws:s3:::*/*"] }
+              ]
+            }
+          },
+          {
+            "name": "S3WritePolicy",
+            "document": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": ["s3:Get*", "s3:List*", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"],
+                  "Resource": ["arn:aws:s3:::*", "arn:aws:s3:::*/*"]
+                }
+              ]
+            }
+          },
+          {
+            "name": "S3ReadOnlyPolicy",
+            "document": {
+              "Version": "2012-10-17",
+              "Statement": [
+                { "Effect": "Allow", "Action": ["s3:Get*", "s3:List*"], "Resource": ["arn:aws:s3:::*", "arn:aws:s3:::*/*"] }
+              ]
+            }
+          }
+        ],
+        "roles": [
+          {
+            "roleName": "S3AdminRole",
+            "roleArn": "arn:aws:iam::role/S3AdminRole",
+            "attachedPolicies": ["S3AdminPolicy"],
+            "trustPolicy": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": { "Federated": "*" },
+                  "Action": ["sts:AssumeRoleWithWebIdentity"],
+                  "Condition": {
+                    "StringEquals": {
+                      "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                      "oidc:groups": ["s3-admin"]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "roleName": "S3WriteRole",
+            "roleArn": "arn:aws:iam::role/S3WriteRole",
+            "attachedPolicies": ["S3WritePolicy"],
+            "trustPolicy": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": { "Federated": "*" },
+                  "Action": ["sts:AssumeRoleWithWebIdentity"],
+                  "Condition": {
+                    "StringEquals": {
+                      "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                      "oidc:groups": ["s3-readwrite", "s3-admin"]
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "roleName": "S3ReadOnlyRole",
+            "roleArn": "arn:aws:iam::role/S3ReadOnlyRole",
+            "attachedPolicies": ["S3ReadOnlyPolicy"],
+            "trustPolicy": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": { "Federated": "*" },
+                  "Action": ["sts:AssumeRoleWithWebIdentity"],
+                  "Condition": {
+                    "StringEquals": {
+                      "oidc:iss": "https://keycloak.famillelallier.net/realms/infra",
+                      "oidc:groups": ["s3-readonly", "s3-readwrite", "s3-admin"]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+  rabbitmq-plugins:
+    content: |
+      [rabbitmq_management,rabbitmq_prometheus].
+  ntfy-server:
+    content: |
+      # ntfy server config, inlined in docker-compose.data.yml (configs:): the stack runs on
+      # the Mac mini, which has no checkout to mount from.
+
+      # Public URL phones and browsers use (NGINX vhost ntfy.conf). Apps on
+      # infra-net call http://ntfy (relayed by the homelab NGINX) instead.
+      base-url: "https://ntfy.infra.famillelallier.net"
+      listen-http: ":80"
+      # Behind NGINX: trust X-Forwarded-For for rate limiting and logs.
+      behind-proxy: true
+
+      cache-file: "/var/lib/ntfy/cache.db"
+
+      # Nothing is readable or writable without a user/token. Per-app users and
+      # write-only tokens come from `make ntfy-provision`. Do not loosen this:
+      # the API is reachable from every container on infra-net.
+      auth-file: "/var/lib/ntfy/auth.db"
+      auth-default-access: "deny-all"
+
+      # /metrics on the main listener needs admin credentials under deny-all, so it
+      # gets its own listener. Prometheus scrapes 192.168.2.67:9090/metrics (job `ntfy`)
+      # anonymously; the port is LAN-only (no router forward) and the NGINX vhost 404s /metrics.
+      enable-metrics: true
+      metrics-listen-http: ":9090"
+
+      # Attachments are off (no attachment-cache-dir): notifications are text.
+
+      # Relay through ntfy.sh so iOS and Play-Store Android get instant delivery via
+      # APNs/FCM. Only a poll request (topic hash, never the message content) goes
+      # to ntfy.sh; the messages stay on this server. Without it iOS is delayed, and
+      # the Heaven backup alerts target an iPhone.
+      upstream-base-url: "https://ntfy.sh"
+
+      # Web Push (browser) is not enabled in v1. To enable: `ntfy webpush keys`,
+      # keep the private key out of the repo (pass it as an environment variable,
+      # declared in .env.example), and set web-push-public-key,
+      # web-push-file and web-push-email-address.
 
 volumes:
   s3-data:
