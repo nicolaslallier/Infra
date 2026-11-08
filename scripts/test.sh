@@ -151,11 +151,11 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		import sys, yaml
 		d = yaml.safe_load(open(sys.argv[1]))
 		on = d.get(True, d.get("on"))  # YAML 1.1 reads a bare `on` as True
-		assert list(on) == ["pull_request"] and on["pull_request"] == {"branches": ["main"]}, on
+		assert on == {"pull_request": {"branches": ["main"]}, "push": {"branches": ["main"]}}, on
 		assert d["jobs"]["test"]["runs-on"] == "ubuntu-latest", d["jobs"]["test"]["runs-on"]
 		assert d["permissions"] == {"contents": "read"}, d["permissions"]
 	PY
-	then pass "test.yml: pull_request on main, no paths, hosted runner, read-only"; else fail "test.yml: pull_request on main, no paths, hosted runner, read-only"; fi
+	then pass "test.yml: pull_request + push on main, no paths, hosted runner, read-only"; else fail "test.yml: pull_request + push on main, no paths, hosted runner, read-only"; fi
 	if [ -f "$wf" ] && ! grep -v '^ *#' "$wf" | grep -qE 'self-hosted|secrets\.'; then pass "test.yml: no self-hosted label, no secrets"; else fail "test.yml: no self-hosted label, no secrets"; fi
 
 	echo "== runners Makefile targets"

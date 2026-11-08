@@ -11,8 +11,13 @@
 # skipped by a filter never reports and blocks the PR forever.
 name: test
 
+# The push run puts a `test` result on main's own head commit, which
+# scripts/github-harden.sh --apply requires before making `test` a required
+# check (PR runs report on the PR's commits, never on the merge commit).
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 permissions:
