@@ -29,8 +29,9 @@ services:
       interval: 30s
       timeout: 5s
     # dev-out is the route out, to the internet and to s3 on the LAN
-    # (squid.conf decides which; s3 is s3.famillelallier.net, which follows
-    # the data stack).
+    # (squid.conf decides which). "s3" resolves as s3.famillelallier.net,
+    # which follows the data stack (squid's dns_defnames).
+    dns_search: [famillelallier.net]
     networks: [dev-net, dev-out]
 
   dev-gateway:
