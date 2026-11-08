@@ -29,7 +29,7 @@ translation. Consequence: this flow assumes prefect-flows and the daemon share
 a filesystem. It does not work against a remote DOCKER_HOST.
 
 Setup, once:
-  - docker socket + workspace mount on prefect-flows (docker-compose.yml)
+  - docker socket + workspace mount on prefect-flows (docker-compose.platform.yml)
   - a Secret block `infra-ci-github-token` (a PAT with pull_requests:write),
     created in the Prefect UI
 """
@@ -56,7 +56,7 @@ GITHUB_API = "https://api.github.com"
 # new one on every night's run. Invisible in the rendered comment.
 COMMENT_MARKER = "<!-- infra-pr-validation -->"
 
-# IMG_NGINX and IMG_PROMETHEUS mirror docker-compose.yml's pins: a check that
+# IMG_NGINX and IMG_PROMETHEUS mirror the pins in docker-compose.yml (nginx) and docker-compose.monitoring.yml (prometheus): a check that
 # stops matching the image the stack deploys is worse than none. Bump them
 # together with the compose file -- Renovate does not touch this file. The
 # rest are throwaway tooling containers and follow their tag.
