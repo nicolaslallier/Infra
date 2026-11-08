@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `Infra` is the shared "common group" backing stack for sibling application
 repos (`Jarvis` and others): NGINX, PostgreSQL 18, pgAdmin, Keycloak,
-SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao, Portainer, a Technitium DNS server, and an LGTM
+SeaweedFS (S3), RabbitMQ, OpenBao, Portainer, a Technitium DNS server, and an LGTM
 monitoring stack (Grafana, Prometheus, Loki, Tempo, Alloy + exporters), run via
 Docker Compose.
 Application repos are meant to stay in their own repositories and connect in
@@ -56,7 +56,7 @@ exercising it, per the checks below.
 ## Architecture
 
 Every image is pinned `tag@sha256` (the index digest). Renovate (`renovate.json`) proposes bumps on
-Saturdays before 6am, never automerges, blocks majors for pgvector/neo4j/openbao/seaweedfs, and
+Saturdays before 6am, never automerges, blocks majors for pgvector/openbao/seaweedfs, and
 ignores the runner image and `infra-ollama-proxy`; merging a Renovate PR redeploys the whole stack.
 
 Services on one external Docker network (`infra-net`, created by
@@ -76,8 +76,8 @@ never orphans another app that's still attached to it):
   same generic per-app provisioning as any other app — see "Per-app
   database provisioning" below), not a bundled DB of its own. Metrics
   enabled on the management interface (`:9000/metrics`).
-- **`s3`** — `chrislusf/seaweedfs:4.47`, pinned by tag *and* digest like
-  `neo4j`. One `weed server -s3` container; publishes no host
+- **`s3`** — `chrislusf/seaweedfs:4.47`, pinned by tag *and* digest (a
+  store-format change must not ride along with a redeploy). One `weed server -s3` container; publishes no host
   port. S3 (and STS) on `:8333`, fronted by NGINX at
   `s3.infra.famillelallier.net`; apps on `infra-net` use `http://s3:8333`.
   Auth is on from first boot via the `S3_ADMIN_*` env identity — SeaweedFS
@@ -113,13 +113,6 @@ never orphans another app that's still attached to it):
   app=moria`. `make up`/`pull`/`config` fail until `MORIA_AMQP_PASSWORD` is
   in the vault (patch it, `make vault-env`, `make up`); the Moria stack's
   Portainer `MORIA_AMQP_PASSWORD` must equal it, set before deploying Moria.
-- **`neo4j`** — `neo4j:<version>-community`, pinned by tag *and* digest
-  because a store-format upgrade must not ride along with a redeploy. The
-  EA repo's architecture graph (its `docs/adr/0030`). Publishes no host
-  port: Bolt goes through NGINX's stream passthrough at `127.0.0.1:7687`;
-  apps on `infra-net` use `neo4j:7687`. The browser (`:7474`) is not
-  exposed. `NEO4J_PASSWORD` is read once, on first boot against an empty
-  `neo4j-data` volume — and `make clean` deletes that volume like the rest.
 - **`ntfy`** — `binwiederhier/ntfy`, pinned by tag *and* digest.
   Push notifications, at `ntfy.infra.famillelallier.net` (NGINX → `ntfy:80`);
   apps use `http://ntfy`. Publishes no host port. `ntfy/server.yml` sets
@@ -196,39 +189,6 @@ never orphans another app that's still attached to it):
   (`KC_TRACING_ENABLED`), so one id shows nginx → keycloak → its SQL
   queries in Tempo. A vhost that sets its own `add_header` loses the
   inherited `X-Trace-Id` and must repeat it.
-- **`obsidian`** — `lscr.io/linuxserver/obsidian`, the Obsidian desktop
-  app streamed to a browser at `obsidian.infra.famillelallier.net`
-  (port `3000`, one long-lived WebSocket; vaults in the `obsidian-config`
-  volume). Publishes no host port. It has no auth of its own and is a whole
-  desktop session, so `nginx/conf.d/obsidian.conf` gates it with an
-  `oauth2-proxy`/`auth_request` recipe — but against the **`ea`** realm,
-  via a **second** proxy container, `oauth2-proxy-ea`, and its own
-  confidential client `ea-obsidian`. The second container is not
-  duplication to be tidied away: an oauth2-proxy process is bound to one
-  issuer, so "who may open Obsidian" (the `ea` realm) and "who may open
-  Jarvis" (the `jarvis` realm) cannot share one. Everything happens on the
-  Obsidian hostname — `REDIRECT_URL` is
-  `https://obsidian.infra.famillelallier.net/oauth2/callback` — so unlike
-  the Jarvis gate it needs no `COOKIE_DOMAINS` and no
-  `WHITELIST_DOMAINS`, and its cookie is host-scoped. It still carries a
-  distinct `OAUTH2_PROXY_COOKIE_NAME` (`_oauth2_proxy_ea`), because the
-  Jarvis proxy's `_oauth2_proxy` cookie *is* scoped to
-  `.famillelallier.net` and would otherwise be clobbered on every Obsidian
-  login. Consequence: any `ea` realm user gets Obsidian, and an Obsidian
-  session is not a Jarvis session (different realm, different cookie, no
-  SSO). `ea-obsidian` enforces PKCE like every other client in that realm,
-  hence `OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256`. oauth2-proxy reads the
-  `email` claim, so an `ea` user without an email address cannot log in,
-  and one whose **Email verified** is off gets a bare 500 on
-  `/oauth2/callback` (logged as `email in id_token (...) isn't verified`).
-  Vault data is synced into the S3 store (bucket `obsidian`, versioned) by
-  the in-app **Remotely Save** plugin against `http://s3:8333`, using the
-  identity `obsidian` scoped to that bucket
-  (`make s3-provision app=obsidian versioned=1`). The working copy stays on
-  the `obsidian-config` volume: Obsidian watches the filesystem, so a
-  FUSE/s3fs mount of the bucket as `/config` is not an option (it also
-  needs `SYS_ADMIN`). The bucket is the durable copy and the one other
-  devices sync from.
 - **`prefect-*`** — `prefecthq/prefect:3.8.7-python3.12`, at
   `prefect.infra.famillelallier.net` (NGINX → `prefect-server:4200`, gated
   by a **fourth** oauth2-proxy, `oauth2-proxy-prefect`: realm `infra`, client
@@ -355,7 +315,7 @@ import. Full rationale per check in `scripts/CLAUDE.md`.
 
 ### Runtime: Docker Desktop
 
-Docker Desktop on the deploy host, the Windows laptop (12 CPU / ~7.7 GiB VM; the old Mac setup was 6 CPU / 12 GB / 100 GB, disk image on `/Volumes/Docker`). `neo4j`, `keycloak`, `litellm`, `prometheus`, `obsidian` and `loki` carry `mem_limit:` ceilings sized ~1.5× each service's measured 14-day peak, deliberately not budgeted to sum under the VM; the Grafana rule `Container OOM-killed` fires if one is hit. Details — `check-docker.sh` exit codes, `LAN_IP` semantics, Colima migration — live in `scripts/CLAUDE.md`.
+Docker Desktop on the deploy host, the Windows laptop (12 CPU / ~7.7 GiB VM; the old Mac setup was 6 CPU / 12 GB / 100 GB, disk image on `/Volumes/Docker`). `keycloak`, `litellm`, `prometheus` and `loki` carry `mem_limit:` ceilings sized ~1.5× each service's measured 14-day peak, deliberately not budgeted to sum under the VM; the Grafana rule `Container OOM-killed` fires if one is hit. Details — `check-docker.sh` exit codes, `LAN_IP` semantics, Colima migration — live in `scripts/CLAUDE.md`.
 
 ### Portainer-managed stack
 
@@ -621,9 +581,6 @@ to them — HTTP(S), Postgres, and AMQP — goes through NGINX:
 - Port 5672 → NGINX's `stream{}` block (`nginx/stream.d/rabbitmq.conf`),
   a raw TCP passthrough proxy to `rabbitmq:5672`, bound to
   `127.0.0.1:5672` the same way.
-- Port 7687 → NGINX's `stream{}` block (`nginx/stream.d/neo4j.conf`),
-  a raw TCP passthrough proxy to `neo4j:7687` (Bolt), bound to
-  `127.0.0.1:7687` the same way.
 - Port 2222 → NGINX's `stream{}` block (`nginx/stream.d/devssh.conf`), to
   `dev-gateway:22`, bound to `${LAN_IP}` (never `0.0.0.0`): dev-session SSH
   has to reach other LAN machines (see "Dev sessions").
@@ -639,8 +596,8 @@ fight over the bind. The `portainer.infra.famillelallier.net` vhost stays
 as a convenience.
 
 **Do not add a `ports:` entry to `postgres`, `pgadmin`, `keycloak`,
-`s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-ea`, `oauth2-proxy-infra`,
-`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `neo4j`, `ntfy`, `obsidian`, `prefect-*`, `openbao`, `grafana`, other
+`s3`, `s3-admin`, `oauth2-proxy`, `oauth2-proxy-infra`,
+`oauth2-proxy-prefect`, `ollama-proxy*`, `litellm`, `rabbitmq`, `ntfy`, `prefect-*`, `openbao`, `grafana`, other
 monitoring backends, `dev-egress`, `dev-gateway`, or a `dev-*` session.** If a backend service needs to be reachable from the host, add
 an NGINX server block instead (`nginx/conf.d/app.conf.example` is the
 template for HTTP; extend `nginx/stream.d/` for raw TCP). This is a
@@ -708,7 +665,7 @@ Three things to know before changing any of it:
 
 ### Jarvis / EA Keycloak gates
 
-oauth2-proxy gates (Jarvis, Obsidian) and the EA token-verification realm are documented in `keycloak/CLAUDE.md`.
+oauth2-proxy gates (Jarvis, Prefect, s3-admin) and the EA token-verification realm are documented in `keycloak/CLAUDE.md`.
 
 ### Prefect: pipelines
 
@@ -787,8 +744,7 @@ that nobody has touched for `ORGANIZER_QUIET_MINUTES` (10), at most
 `ORGANIZER_MAX_NOTES` (20), oldest first; asks Ollama for tags, a summary and
 one of the vault's existing top-level folders (a JSON-schema `enum` built per
 run, so it cannot invent one); merges `tags`/`summary`/`organized_at` into
-the frontmatter; and moves the note there. It talks to S3 only — never to the
-Obsidian app — as identity `prefect` (`make s3-provision app=prefect
+the frontmatter; and moves the note there. It talks to S3 only, as identity `prefect` (`make s3-provision app=prefect
 bucket=obsidian`, secret `PREFECT_S3_SECRET_KEY`), separate from Remotely
 Save's `obsidian` identity.
 
@@ -869,7 +825,7 @@ and fastapi versions of the pinned `prefecthq/prefect` image.
 #### `backup`
 
 At 01:30 America/Toronto it dumps postgres (`pg_dumpall` as `postgres`,
-gzipped), OpenBao (raft snapshot, below), neo4j (`neo4j-admin database dump` of `neo4j` and `system`) and
+gzipped), OpenBao (raft snapshot, below) and
 ntfy (tar of its volume) into the external volume `infra-backups`
 (`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
 `BACKUP_KEEP` (3) of each are kept. Heaven is to snapshot that volume (not wired
@@ -907,11 +863,9 @@ postgres dump holds every app's data, so nothing is world-readable.
   `infra-node-exporter-1`, `docker volume rm infra-backups`, `make up`); at
   most a few nightly dumps are lost. It never deletes anything itself.
 
-- **Neo4j is stopped for the dump** (Community has no online dump): about a
-  minute of outage every night, and `start()` runs in `finally`.
 - **One-shot containers carry no `com.docker.compose.*` label.** The deploy
   health gate counts every container labelled project `infra` and fails on
-  exited ones; the neo4j dump and ntfy tar run detached with a
+  exited ones; the ntfy tar runs detached with a
   `BACKUP_STEP_TIMEOUT` wait, always force-removed, and no
   labels, and image and volume names are read from the running container.
 - **A dump is `.part` until it succeeds.** A non-zero `pg_dumpall` exit

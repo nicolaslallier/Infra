@@ -2,7 +2,7 @@
 
 Shared backing infrastructure — the "common group" — for sibling application
 repos (`Jarvis` and others). A single Docker Compose stack provides NGINX,
-PostgreSQL 18 with pgvector, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao,
+PostgreSQL 18 with pgvector, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, OpenBao,
 Portainer, Technitium DNS, and an LGTM monitoring stack (Grafana, Prometheus,
 Loki, Tempo, Alloy).
 Application repos stay independent: they don't run their own database or
@@ -10,9 +10,8 @@ proxy, they just join this stack's Docker network.
 
 **NGINX is the only ingress for application traffic.** It is the sole
 container fronting backend services — 80/443 for HTTP(S), 5432 (TCP
-passthrough) for Postgres, 5672 (TCP passthrough) for RabbitMQ AMQP, and
-7687 (TCP passthrough) for Neo4j Bolt.
-Postgres, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, Neo4j, OpenBao, Grafana, and
+passthrough) for Postgres, and 5672 (TCP passthrough) for RabbitMQ AMQP.
+Postgres, pgAdmin, Keycloak, SeaweedFS (S3), RabbitMQ, OpenBao, Grafana, and
 the rest of the monitoring backends publish nothing themselves; they're
 reachable only on the shared `infra-net` Docker network or through NGINX.
 A separate `dns` container publishes its own ports too — it's a top-level
@@ -76,9 +75,9 @@ Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `S3_ADMIN_SECRET_KEY`,
 `RABBITMQ_DEFAULT_PASS`, `MORIA_AMQP_PASSWORD`, `MONITORING_DB_PASSWORD`, and one
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
-`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the two
+`KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the
 oauth2-proxy cookie keys (`JARVIS_OAUTH_COOKIE_SECRET`,
-`EA_OBSIDIAN_OAUTH_COOKIE_SECRET` — `openssl rand -base64 32 | tr -- '+/'
+`S3_ADMIN_OAUTH_COOKIE_SECRET`, `PREFECT_OAUTH_COOKIE_SECRET` — `openssl rand -base64 32 | tr -- '+/'
 '-_'` each; the `tr` matters, see below).
 `make check-env` lists whatever is still missing, so you don't have to work
 that list out by hand:
@@ -147,11 +146,6 @@ RabbitMQ management: `https://rabbitmq.infra.famillelallier.net` (AMQP at
 Portainer: `https://portainer.infra.famillelallier.net` (admin account and
 access token already created above — see "Portainer" below)
 Postgres: `psql -h 127.0.0.1 -p 5432 -U postgres` (or `make psql`)
-Neo4j (the EA graph): Bolt at `bolt://127.0.0.1:7687` from the host, or
-`neo4j:7687` on `infra-net`; no browser is exposed
-Obsidian (desktop app in the browser): `https://obsidian.infra.famillelallier.net`
-(Keycloak login against the `ea` realm; vaults live in the `obsidian-config`
-volume)
 OpenBao (the vault): `https://vault.infra.famillelallier.net` (log in with
 the root token from `.openbao.env` after `make vault-init` — see "Secrets"
 below; apps on `infra-net` use `http://openbao:8200`)
@@ -194,20 +188,20 @@ container dying on its own config with nothing pointing back at `.env`:
   missing setting: client-secret or client-secret-file
 ```
 
-That is `oauth2-proxy` (or `oauth2-proxy-ea`) handed empty secrets.
+That is an `oauth2-proxy` handed empty secrets.
 `make check-env` diffs the two files and prints the lines to append:
 
 ```
-check-env: .env is missing settings that .env.example defines: EA_OBSIDIAN_OAUTH_COOKIE_SECRET
+check-env: .env is missing settings that .env.example defines: JARVIS_OAUTH_COOKIE_SECRET
 ...
-    EA_OBSIDIAN_OAUTH_COOKIE_SECRET=change-me
+    JARVIS_OAUTH_COOKIE_SECRET=change-me
 ```
 
 Append them, fill each in (`grep -B4 -n <VAR> .env.example` says what it is
 for), and re-run. Do this after every `git pull` that adds a service. The
 one value `check-env` only warns about is an oauth2-proxy **client** secret:
 Keycloak generates it during realm import, so it cannot exist until after
-the first deploy — see the Jarvis and Obsidian login sections below.
+the first deploy — see the Jarvis login section below.
 
 ### Registering the Postgres server inside pgAdmin
 
@@ -227,8 +221,7 @@ machine via `psql` — it's a different path than pgAdmin uses.)
 
 ### Jarvis login (Keycloak + oauth2-proxy)
 
-`https://jarvis.famillelallier.net` requires a Keycloak login (see
-"Obsidian login" below for the other gated vhost; every other app listed
+`https://jarvis.famillelallier.net` requires a Keycloak login (every other app listed
 above is unauthenticated at the NGINX layer). After `make up`:
 
 1. In the Keycloak admin console, open the `jarvis` realm → **Clients** →
@@ -270,67 +263,16 @@ port, not through this vhost — see the "Jarvis: Keycloak login gate"
 section in [CLAUDE.md](CLAUDE.md) for the full explanation and what to
 verify manually.
 
-### Obsidian login (Keycloak + oauth2-proxy, realm `ea`)
-
-`https://obsidian.infra.famillelallier.net` is gated too, but by the **`ea`
-realm**, not `jarvis`: anyone who can log in to EA can open Obsidian. An
-oauth2-proxy process talks to exactly one issuer, so this is a second
-container — `oauth2-proxy-ea` — with its own client, `ea-obsidian`, seeded
-by `keycloak/realm-import/ea-realm.json`. It is a separate session from a
-Jarvis login: different realm, different cookie, no SSO between the two.
-
-After `make up`:
-
-1. Set `EA_OBSIDIAN_OAUTH_COOKIE_SECRET` in `.env` **before first boot**
-   (`openssl rand -base64 32 | tr -- '+/' '-_'` — base64url, same as the
-   Jarvis key above and for the same reason) — oauth2-proxy needs it at
-   startup.
-2. In the Keycloak admin console, `ea` realm → **Clients** → `ea-obsidian`
-   → **Credentials**, copy the client secret into
-   `EA_OBSIDIAN_OAUTH_CLIENT_SECRET` in `.env`, then
-   `docker compose up -d oauth2-proxy-ea`.
-   Until then `oauth2-proxy-ea` crash-loops on `missing setting:
-   client-secret`, exactly as the Jarvis proxy does before its own step 1.
-3. Give each `ea` realm user who should reach Obsidian an **email address**
-   — oauth2-proxy reads the `email` claim and rejects a login without one.
-   No realm role is required; to narrow access to EA editors, add
-   `OAUTH2_PROXY_ALLOWED_ROLES: ea-editor` to the service.
-
-`--import-realm` only seeds a realm that does not exist yet, so on an
-already-running Keycloak the `ea-obsidian` client has to be created by hand
-in the console: confidential client, standard flow only, PKCE method `S256`,
-one exact redirect URI
-`https://obsidian.infra.famillelallier.net/oauth2/callback`.
-
-The desktop inside that container has no login of its own, which is the
-whole reason for the gate — never give the `obsidian` service a `ports:`
-entry.
-
 ### Obsidian vaults in S3
 
-The browser Obsidian keeps its working copy on the `obsidian-config`
-volume and syncs it into the S3 bucket `obsidian` with the Remotely Save
-plugin. One-time setup, after `make up`:
-
-1. Set `OBSIDIAN_S3_SECRET_KEY` in `.env` (`openssl rand -hex 24`),
-   `make vault-seed`, then `make s3-provision app=obsidian versioned=1`
-   (creates the versioned bucket and the identity `obsidian`, scoped to it;
-   safe to re-run).
-2. In `https://obsidian.infra.famillelallier.net`, create or open a vault,
-   then **Settings → Community plugins → Browse → Remotely Save → Install →
-   Enable**.
-3. Remotely Save settings → **S3 or compatible**:
-   - Endpoint: `http://s3:8333`
-   - Region: `us-east-1`
-   - Access Key ID: `obsidian`
-   - Secret Access Key: your `OBSIDIAN_S3_SECRET_KEY`
-   - Bucket: `obsidian`
-   - S3 URL style: **Path Style**
-   - Bypass CORS: on
-   - Then **Check** the connection, and set a schedule (e.g. every 5 min).
-
-Other devices (phone, laptop) can sync the same vault with the same
-settings, using `https://s3.infra.famillelallier.net` as the endpoint.
+The bucket `obsidian` (versioned) and its identity `obsidian` stay after the
+browser Obsidian was retired: devices sync a vault into it with the Remotely
+Save plugin, and `organize-inbox` sorts its `Inbox/`. One-time setup: set
+`OBSIDIAN_S3_SECRET_KEY` in `.env` (`openssl rand -hex 24`), `make vault-seed`,
+then `make s3-provision app=obsidian versioned=1`. Remotely Save settings →
+**S3 or compatible**: endpoint `https://s3.infra.famillelallier.net`, region
+`us-east-1`, access key `obsidian`, your `OBSIDIAN_S3_SECRET_KEY`, bucket
+`obsidian`, **Path Style**, Bypass CORS on.
 
 ### S3 credentials for humans (STS)
 
@@ -1219,11 +1161,11 @@ and the image/state checks on this machine's Docker.
 ## Layout
 
 ```
-docker-compose.yml       postgres, pgadmin, keycloak, s3, s3-admin, rabbitmq, neo4j, openbao, nginx, dns, LGTM + exporters
+docker-compose.yml       postgres, pgadmin, keycloak, s3, s3-admin, rabbitmq, openbao, nginx, dns, LGTM + exporters
 docker-compose.portainer.yml  portainer (deploys the stack above)
-nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP + Bolt TCP passthrough)
+nginx/nginx.conf         http{} (web) + stream{} (Postgres + AMQP TCP passthrough)
 nginx/conf.d/            per-hostname HTTPS server blocks
-nginx/stream.d/          Postgres + RabbitMQ + Neo4j TCP proxy blocks
+nginx/stream.d/          Postgres + RabbitMQ TCP proxy blocks
 openbao/config.hcl       OpenBao server config (raft storage, static seal, declarative audit)
 postgres/initdb/         first-run schema/extension/provisioning scripts
 rabbitmq/                enabled_plugins (management + prometheus)
