@@ -334,11 +334,11 @@ DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
 postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
 rabbitmq, ntfy), `monitoring` (`docker-compose.monitoring.yml`: the LGTM
-stack, cadvisor, node-exporter), `keycloak` (`docker-compose.keycloak.yml`:
-Keycloak alone, on the Mac mini, environment 7: nginx relays
-keycloak.famillelallier.net to 192.168.2.67:8080, Prometheus scrapes :9000,
-and it reaches Postgres through nginx on `LAN_IP:5432`), `auth`
-(`docker-compose.auth.yml`: the oauth2-proxies, kept next to nginx), `platform` (`docker-compose.platform.yml`:
+stack, cadvisor, node-exporter), `auth` (`docker-compose.auth.yml`:
+keycloak, the oauth2-proxies; on the Mac mini, environment 7: nginx relays
+keycloak.famillelallier.net to 192.168.2.67:8080 and auth_requests the
+proxies on :4180-4182, Prometheus scrapes :9000, and Keycloak reaches
+Postgres through nginx on `LAN_IP:5432`), `platform` (`docker-compose.platform.yml`:
 litellm, the ollama-proxies, prefect) and `infra` (`docker-compose.yml`:
 nginx and nginx-exporter, deployed before auth so the
 keycloak.famillelallier.net alias the oauth2-proxies use is up). More stacks follow, each
