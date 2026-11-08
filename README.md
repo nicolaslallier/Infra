@@ -1089,7 +1089,6 @@ portainer_url = "https://portainer.infra.famillelallier.net"
 ca_cert = "/Users/me/OpenCode/Infra/certs/infra-ca.crt"   # a copy of the stack's CA
 api_key = "ptr_..."            # Portainer -> My account -> Access tokens
 endpoint_id = 6                # the Mac Studio, where sessions run
-s3_endpoint_id = 7             # where the data stack's s3 runs, if elsewhere
 ssh_host = "192.168.2.10"      # LAN_IP (nginx passes :2222 to the Mac Studio)
 pubkey_path = "/Users/me/.ssh/id_ed25519.pub"
 # extra_pubkeys = ["ssh-ed25519 AAAA... me@windows-pc"]   # your other machines

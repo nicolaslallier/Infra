@@ -10,10 +10,6 @@ pub struct Config {
     pub portainer_url: String,
     pub api_key: String,
     pub endpoint_id: u32,
-    /// The Portainer environment running the data stack's s3 container, when
-    /// it is not the sessions' one (sessions on the Mac Studio, s3 elsewhere).
-    #[serde(default)]
-    pub s3_endpoint_id: Option<u32>,
     /// PEM of the CA that signed Portainer's certificate (the stack's own
     /// certs/infra-ca.crt when portainer_url is the nginx vhost).
     #[serde(default)]
@@ -53,7 +49,6 @@ impl std::fmt::Debug for Config {
             .field("portainer_url", &self.portainer_url)
             .field("api_key", &"<hidden>")
             .field("endpoint_id", &self.endpoint_id)
-            .field("s3_endpoint_id", &self.s3_endpoint_id)
             .field("ca_cert", &self.ca_cert)
             .field("insecure_tls", &self.insecure_tls)
             .field("ssh_host", &self.ssh_host)
@@ -122,7 +117,6 @@ pubkey_path = "/home/me/.ssh/id_ed25519.pub"
         assert!(c.ca_cert.is_none());
         assert!(c.extra_pubkeys.is_empty());
         assert_eq!(c.cpus, "2");
-        assert_eq!(c.s3_endpoint_id, None);
     }
 
     #[test]

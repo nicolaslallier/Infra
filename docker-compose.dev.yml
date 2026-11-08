@@ -5,7 +5,7 @@
 # "Dev sessions".
 #
 # Nothing here is on infra-net (it lives on 192.168.2.10): nginx there reaches
-# the gateway on DEV_SSH_IP:2222, the proxy reaches s3 on S3_LAN_IP:8333.
+# the gateway on DEV_SSH_IP:2222, the proxy reaches s3.famillelallier.net:8333.
 # No bind mounts: configs are baked into the images (`make dev-image` builds
 # them from GitHub), so the stack can deploy to a remote Portainer environment.
 name: dev
@@ -29,9 +29,8 @@ services:
       interval: 30s
       timeout: 5s
     # dev-out is the route out, to the internet and to s3 on the LAN
-    # (squid.conf decides which); "s3" resolves to the data stack's host.
-    extra_hosts:
-      - "s3:${S3_LAN_IP:?Set S3_LAN_IP in .env}"
+    # (squid.conf decides which; s3 is s3.famillelallier.net, which follows
+    # the data stack).
     networks: [dev-net, dev-out]
 
   dev-gateway:
