@@ -336,7 +336,9 @@ reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
 postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
 rabbitmq, ntfy, on the Mac mini, environment 7: it publishes S3 :8333, AMQP
 :5672, the RabbitMQ UI :15672, ntfy :8090 and the metrics ports on
-192.168.2.67, never s3-admin, the filer or the master; its config files are
+its host, which clients reach by the name `data.famillelallier.net` (and `s3.famillelallier.net`),
+one Primary zone each in Technitium, not records in the famillelallier.net Forwarder zone, whose AAAA misses would come back NXDOMAIN and break musl clients (nginx and Prometheus get `dns: DNS_IP` for that),
+so moving the stack is one record, never s3-admin, the filer or the master; its config files are
 inlined as compose `configs:`; on this host nginx carries the aliases `s3`,
 `rabbitmq` and `ntfy` on infra-net and relays them, so apps keep their
 URLs; the provisioning scripts run with `DOCKER_HOST` on the mini's daemon), `monitoring` (`docker-compose.monitoring.yml`: the LGTM

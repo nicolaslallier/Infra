@@ -41,18 +41,18 @@ scrape_configs:
     # weed server -metricsPort serves every component (master, volume,
     # filer, s3) on this one port; default /metrics path.
     static_configs:
-      - targets: ["192.168.2.67:9324"] # Mac mini (docker-compose.data.yml)
+      - targets: ["data.famillelallier.net:9324"] # data stack host
 
   - job_name: rabbitmq
     static_configs:
-      - targets: ["192.168.2.67:15692"] # Mac mini
+      - targets: ["data.famillelallier.net:15692"] # data stack host
 
   # ntfy: enable-metrics is on in ntfy/server.yml, served on its own listener
   # (:9090): on the API listener /metrics needs credentials under deny-all.
   - job_name: ntfy
     metrics_path: /metrics
     static_configs:
-      - targets: ["192.168.2.67:9090"] # Mac mini
+      - targets: ["data.famillelallier.net:9090"] # data stack host
 
   # OpenBao. /v1/sys/metrics is an authenticated endpoint by default, which
   # would make this scrape a 403 with no obvious cause; the listener in
@@ -100,7 +100,7 @@ scrape_configs:
       vhost: ["moria"]
       family: ["queue_coarse_metrics", "queue_consumer_count"]
     static_configs:
-      - targets: ["192.168.2.67:15692"] # Mac mini
+      - targets: ["data.famillelallier.net:15692"] # data stack host
 
   # Windows machines, each running windows_exporter on :9182. The only job
   # whose targets are not containers on infra-net, so they live in a file
