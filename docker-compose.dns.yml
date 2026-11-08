@@ -10,9 +10,8 @@ name: dns
 
 services:
   dns:
-    # No version tag maps to this digest (it predates 15.5.0's tag), so
-    # `latest` stays for the human and the digest does the pinning.
-    image: technitium/dns-server:latest@sha256:3580381de00ba316748abced1ad0f942aff5a625993fa5dee22a902e26d2c524
+    # Tag for the human, digest for the pinning.
+    image: technitium/dns-server:15.6.2@sha256:eb48ac5c135f4ab936b536f74f853d53e15ab39ef37fdbc9598a089b90d9f245
     # TCP connect to the web console; the image has bash but no wget/curl.
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/5380"]
