@@ -25,3 +25,9 @@
 - targets: ["192.168.2.41:9100"]
   labels:
     hostname: mac-02
+
+# Mac mini: runs the data, Keycloak and DNS stacks (Portainer env 7). Its
+# Colima VM (192.168.2.67) is a Linux guest, not scraped here.
+- targets: ["192.168.2.65:9100"]
+  labels:
+    hostname: mac-mini
