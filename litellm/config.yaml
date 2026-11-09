@@ -53,6 +53,73 @@ vector_store_registry:
       api_base: http://litellm-pgvector:8000
       vector_store_description: "Second cerveau : notes et documents indexés (qwen3-embedding, pgvector)"
 
+# PII guardrails (Quebec's Loi 25), through Microsoft Presidio:
+# presidio-analyzer finds them, presidio-anonymizer replaces each with
+# <ENTITY_TYPE> before the prompt reaches a model. Recognizers, languages and
+# the regexes are in presidio/recognizers.yaml. Pre-call only: the model's
+# answer is not rewritten.
+#
+# pii-identifiants: on for every key. Identifiers found by format or checksum
+# (NAS, RAMQ, permis SAAQ, passeport, carte de crédit, compte bancaire,
+# courriel, téléphone, adresse civique, code postal), French and English
+# alike: the regexes are registered for both languages, so one pass (fr)
+# catches both. Costs ~30 ms per 1,000 characters of prompt (spaCy still
+# tokenizes for the context words): ~3 s on a 100k-character agent prompt.
+# A key that must skip it (a coding agent whose prompts are slow and
+# PII-free): key metadata {"opted_out_global_guardrails": ["pii-identifiants"]}.
+#
+# pii-noms-fr / pii-noms-en: people's names (spaCy NER), off by default.
+# NER mistakes code identifiers and product names for names ("Portainer",
+# "INFRA_DIR"), which would mangle every coding prompt, so it is turned on
+# where prompts are prose: per key or team (Guardrails, in the admin UI) or
+# per request ("guardrails": ["pii-noms-fr"]). Cities alone (LOCATION) are
+# not masked: too noisy in French and not identifying on their own.
+#
+# All three fail closed: while Presidio is down, the requests they cover are
+# rejected rather than sent unmasked.
+guardrails:
+  - guardrail_name: pii-identifiants
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call
+      default_on: true
+      presidio_language: fr
+      pii_entities_config:
+        CA_SIN: MASK
+        CA_RAMQ: MASK
+        CA_QC_DRIVER_LICENSE: MASK
+        CA_PASSPORT: MASK
+        CA_BANK_ACCOUNT: MASK
+        CREDIT_CARD: MASK
+        IBAN_CODE: MASK
+        EMAIL_ADDRESS: MASK
+        PHONE_NUMBER: MASK
+        STREET_ADDRESS: MASK
+        CA_POSTAL_CODE: MASK
+      # Weak patterns (bare 9-digit NAS, passport) only count next to a
+      # context word ("NAS", "passeport", ...), which adds 0.35.
+      presidio_score_thresholds:
+        ALL: 0.5
+        CA_BANK_ACCOUNT: 0.4
+
+  - guardrail_name: pii-noms-fr
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call
+      default_on: false
+      presidio_language: fr
+      pii_entities_config:
+        PERSON: MASK
+
+  - guardrail_name: pii-noms-en
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call
+      default_on: false
+      presidio_language: en
+      pii_entities_config:
+        PERSON: MASK
+
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true

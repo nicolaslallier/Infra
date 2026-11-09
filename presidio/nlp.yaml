@@ -1,0 +1,44 @@
+# Presidio analyzer NLP engine: one spaCy model per language. Bind-mounted
+# into the `presidio-analyzer` container (docker-compose.platform.yml) as
+# NLP_CONF_FILE.
+#
+# en_core_web_lg ships in the image. fr_core_news_md does not: the analyzer
+# downloads it (pip, ~45 MB) on its first start into the `presidio-models`
+# volume (/home/presidio/.local), so later starts are offline. _md, not _lg:
+# _lg is ~570 MB on disk and ~1 GB more RAM for a few points of NER recall.
+nlp_engine_name: spacy
+models:
+  - lang_code: en
+    model_name: en_core_web_lg
+  - lang_code: fr
+    model_name: fr_core_news_md
+
+ner_model_configuration:
+  model_to_presidio_entity_mapping:
+    PER: PERSON
+    PERSON: PERSON
+    NORP: NRP
+    FAC: LOCATION
+    LOC: LOCATION
+    GPE: LOCATION
+    LOCATION: LOCATION
+  low_confidence_score_multiplier: 0.4
+  low_score_entity_names: []
+  # ORG and MISC (fr) and dates have far too many false positives on prompts
+  # full of product and project names.
+  labels_to_ignore:
+    - ORG
+    - ORGANIZATION
+    - MISC
+    - DATE
+    - TIME
+    - CARDINAL
+    - EVENT
+    - LANGUAGE
+    - LAW
+    - MONEY
+    - ORDINAL
+    - PERCENT
+    - PRODUCT
+    - QUANTITY
+    - WORK_OF_ART

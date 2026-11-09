@@ -1,0 +1,6 @@
+# Presidio analyzer engine (ANALYZER_CONF_FILE). Languages must match the
+# models in nlp.yaml and the recognizers in recognizers.yaml.
+supported_languages:
+  - en
+  - fr
+default_score_threshold: 0
