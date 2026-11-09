@@ -1,8 +1,10 @@
-# The "monitoring" stack: the LGTM stack (Prometheus, Loki, Tempo, Alloy,
-# Grafana) and the host exporters (cadvisor, node-exporter), split out of the
+# The "monitoring" stack: the LGT of the LGTM stack (Prometheus, Loki, Tempo,
+# Alloy) and the host exporters (cadvisor, node-exporter), split out of the
 # infra stack because it changes the most (dashboards, rules) and should not
 # restart anything else (see stacks.conf, and CLAUDE.md "Portainer-managed
-# stack"). nginx-exporter stays with nginx in infra.
+# stack"). nginx-exporter stays with nginx in infra. Grafana runs on the Mac
+# mini (docker-compose.grafana.yml) and reaches Prometheus, Loki and Tempo
+# through nginx/conf.d/monitoring-lan.conf.
 #
 # The data volumes are the infra stack's own, declared external by name (a
 # missing one fails the deploy instead of starting empty). On a fresh
@@ -12,7 +14,7 @@
 name: monitoring
 
 services:
-  # --- LGTM monitoring (Grafana UI only via NGINX; no host ports) ---
+  # --- LGT monitoring (no host ports; Grafana reads them via NGINX) ---
 
   prometheus:
     image: prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996
@@ -92,42 +94,6 @@ services:
     depends_on:
       - loki
       - tempo
-
-  grafana:
-    image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      GF_SERVER_ROOT_URL: https://grafana.infra.famillelallier.net
-      GF_SERVER_DOMAIN: grafana.infra.famillelallier.net
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_DATABASE_TYPE: postgres
-      GF_DATABASE_HOST: postgres:5432
-      GF_DATABASE_NAME: grafana
-      GF_DATABASE_USER: grafana
-      GF_DATABASE_PASSWORD: ${GRAFANA_DB_PASSWORD}
-      GF_DATABASE_SSL_MODE: disable
-      GF_INSTALL_PLUGINS: ""
-      # Alert delivery token for ntfy; see monitoring/grafana/provisioning/alerting.
-      GRAFANA_NTFY_TOKEN: ${GRAFANA_NTFY_TOKEN:-}
-    volumes:
-      - ${INFRA_DIR:-.}/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-    networks:
-      - infra-net
-    depends_on:
-      prometheus:
-        condition: service_started
-      loki:
-        condition: service_started
-      tempo:
-        condition: service_started
 
   cadvisor:
     # gcr.io/cadvisor moved; Docker 29's containerd snapshotter needs ≥ the

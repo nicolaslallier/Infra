@@ -1,0 +1,106 @@
+# The "grafana" stack: Grafana alone, on the Mac mini (Portainer environment
+# 7, see stacks.conf), split out of the monitoring stack to free the
+# homelab's memory. Its state (users, folders, UI-edited dashboards, alert
+# state) is all in the `grafana` database of the postgres stack, which runs
+# on this same host, so the container holds nothing to back up and the move
+# copies no volume.
+#
+# On the mini, Grafana joins the mini's own infra-net and reaches postgres
+# and ntfy directly, by their service names. Prometheus, Loki and Tempo stay
+# on the homelab: extra_hosts below points their names at the homelab, where
+# NGINX relays a read-only subset of each API on the homelab's LAN address
+# (nginx/conf.d/monitoring-lan.conf). So provisioning/datasources needs no
+# change and keeps working wherever Grafana runs.
+#
+# A remote stack mounts nothing from a checkout (scripts/portainer-stack.sh
+# refuses it), so the provisioning files are fetched instead: the one-shot
+# `grafana-provisioning` service downloads main's tarball from GitHub (the
+# repository is public) into a volume, at every deploy, before Grafana
+# starts. A deploy is what a merge touching monitoring/grafana/ triggers
+# (stacks.conf paths), so Grafana gets the files of the merged main.
+name: grafana
+
+services:
+  grafana-provisioning:
+    # The Grafana image itself: busybox wget (https through ssl_client) and
+    # tar are there, so no second image to pin.
+    image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
+    # root, to write into the fresh (root-owned) volume; Grafana (uid 472)
+    # only reads it.
+    user: "0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    # If GitHub cannot be reached, keep the files of the previous deploy
+    # rather than leaving Grafana down; fail only when there are none yet.
+    command:
+      - |
+        set -u
+        tmp="$$(mktemp -d)"
+        if wget -qO- https://codeload.github.com/nicolaslallier/Infra/tar.gz/refs/heads/main | tar -xz -C "$$tmp" \
+          && src="$$(ls -d "$$tmp"/*/monitoring/grafana/provisioning)" \
+          && [ -f "$$src/datasources/datasources.yml" ]; then
+          find /provisioning -mindepth 1 -delete
+          cp -R "$$src"/. /provisioning/
+          echo "grafana-provisioning: fetched from main"
+        elif [ -f /provisioning/datasources/datasources.yml ]; then
+          echo "grafana-provisioning: GitHub unreachable, keeping the previous files" >&2
+        else
+          echo "grafana-provisioning: GitHub unreachable and no previous files" >&2
+          exit 1
+        fi
+        rm -rf "$$tmp"
+    volumes:
+      - grafana-provisioning:/provisioning
+
+  grafana:
+    image: grafana/grafana:12.1.0@sha256:6ac590e7cabc2fbe8d7b8fc1ce9c9f0582177b334e0df9c927ebd9670469440f
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SERVER_ROOT_URL: https://grafana.infra.famillelallier.net
+      GF_SERVER_DOMAIN: grafana.infra.famillelallier.net
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DATABASE_TYPE: postgres
+      # The postgres stack, on this host's infra-net.
+      GF_DATABASE_HOST: postgres:5432
+      GF_DATABASE_NAME: grafana
+      GF_DATABASE_USER: grafana
+      GF_DATABASE_PASSWORD: ${GRAFANA_DB_PASSWORD}
+      GF_DATABASE_SSL_MODE: disable
+      GF_INSTALL_PLUGINS: ""
+      # Alert delivery token for ntfy (the data stack, on this host's
+      # infra-net); see monitoring/grafana/provisioning/alerting.
+      GRAFANA_NTFY_TOKEN: ${GRAFANA_NTFY_TOKEN:-}
+    # The datasources' hosts, on the homelab (nginx/conf.d/monitoring-lan.conf).
+    extra_hosts:
+      - "prometheus:${LAN_IP:?Set LAN_IP in .env}"
+      - "loki:${LAN_IP:?Set LAN_IP in .env}"
+      - "tempo:${LAN_IP:?Set LAN_IP in .env}"
+    # nginx (grafana.infra.famillelallier.net, homelab) proxies to :3000.
+    # Plain HTTP on the LAN, like Keycloak; the router forwards nothing here.
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - infra-net
+    depends_on:
+      grafana-provisioning:
+        condition: service_completed_successfully
+
+networks:
+  # Created by hand on the mini (docker network create infra-net), shared
+  # with the postgres and data stacks.
+  infra-net:
+    external: true
+
+volumes:
+  # Rewritten at every deploy by grafana-provisioning; nothing to back up.
+  grafana-provisioning:
