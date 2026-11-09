@@ -1,8 +1,8 @@
 # The "platform" stack: the LLM gateway (LiteLLM), the Ollama metrics
 # proxies and Prefect (server + flows), split out of the infra stack (see
-# stacks.conf, and CLAUDE.md "Portainer-managed stack"). No volumes of its
-# own; prefect-flows writes the nightly backups to infra-backups (external,
-# created by `make app-volumes`).
+# stacks.conf, and CLAUDE.md "Portainer-managed stack"). prefect-flows writes
+# the nightly backups to infra-backups (external, created by `make
+# app-volumes`); presidio-models only caches a downloaded spaCy model.
 name: platform
 
 services:
@@ -177,8 +177,65 @@ services:
       # config.yaml) reads these: litellm-pgvector below.
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${LITELLM_PGVECTOR_API_KEY:?Set LITELLM_PGVECTOR_API_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      # PII guardrails (guardrails: in config.yaml).
+      PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
+      PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
     volumes:
       - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - infra-net
+
+  # --- PII guardrails: Microsoft Presidio (no host ports, no NGINX vhost) ---
+  # LiteLLM sends every prompt to the analyzer, then the hits to the
+  # anonymizer, and forwards the masked text to the model (guardrails: in
+  # litellm/config.yaml). Both are stateless HTTP services on infra-net.
+  # The guardrails fail closed: while the analyzer is down, LiteLLM rejects
+  # the requests they cover instead of passing PII through.
+  presidio-analyzer:
+    image: mcr.microsoft.com/presidio-analyzer:2.2.362@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+    restart: unless-stopped
+    # The French spaCy model is not in the image: fetched once (pip --user,
+    # ~45 MB) into presidio-models, before gunicorn starts. Downloading it
+    # from inside the app instead (Presidio's own fallback) fails the first
+    # boot: the user site-packages did not exist when Python started.
+    # --no-control-socket: gunicorn 25's control socket hung the master
+    # before it forked a worker on 2 of 4 cold starts in testing.
+    entrypoint:
+      - sh
+      - -c
+      - python -c 'import fr_core_news_md' 2>/dev/null || python -m spacy download fr_core_news_md; exec gunicorn -w "$$WORKERS" -b "0.0.0.0:$$PORT" --no-control-socket "app:create_app()"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:3000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 120s
+    # Two spaCy models (en _lg, fr _md): 1.5 GiB measured after a 100k-char
+    # prompt, x1.5.
+    mem_limit: 2304m
+    environment:
+      NLP_CONF_FILE: /conf/nlp.yaml
+      ANALYZER_CONF_FILE: /conf/analyzer.yaml
+      RECOGNIZER_REGISTRY_CONF_FILE: /conf/recognizers.yaml
+    volumes:
+      - ${INFRA_DIR:-.}/presidio:/conf:ro
+      # The image's home: a fresh named volume copies its owner (uid 1001),
+      # which pip --user needs. A volume on ~/.local would be root's.
+      - presidio-models:/home/presidio
+    networks:
+      - infra-net
+
+  presidio-anonymizer:
+    image: mcr.microsoft.com/presidio-anonymizer:2.2.362@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "exec gunicorn -w \"$$WORKERS\" -b \"0.0.0.0:$$PORT\" --no-control-socket \"app:create_app()\""]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:3000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    mem_limit: 256m
     networks:
       - infra-net
 
@@ -226,3 +283,5 @@ networks:
 volumes:
   infra-backups:
     external: true
+  # presidio-analyzer's home: the French spaCy model (re-downloaded if lost).
+  presidio-models:

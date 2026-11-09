@@ -147,6 +147,16 @@ never orphans another app that's still attached to it):
   like any other app; without it the UI login fails with "Not connected to DB".
   Publishes no host port. Not behind oauth2-proxy: API clients use bearer
   keys. Never rotate `LITELLM_SALT_KEY` once models are stored in the DB.
+- **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio,
+  LiteLLM's PII guardrails (Quebec's Loi 25; `guardrails:` in
+  `litellm/config.yaml`). `pii-identifiants` is on for every key and masks
+  NAS, RAMQ, permis SAAQ, passeport, cartes, comptes, courriels, téléphones,
+  adresses civiques and codes postaux as `<ENTITY>`; `pii-noms-fr`/`-en`
+  (spaCy names) are opt-in per key/team or per request, because NER mangles
+  code. Recognizers and models live in `presidio/` (bind-mounted); the
+  French spaCy model is downloaded on the analyzer's first start into the
+  `presidio-models` volume. Fail closed: with the analyzer down, LiteLLM
+  rejects the requests the guardrails cover. On infra-net only, no vhost.
 - **`litellm-pgvector`** — `infra-litellm-pgvector`, built by `make app-images`
   from a pinned commit of BerriAI/litellm-pgvector (`LITELLM_PGVECTOR_REF` in
   the Makefile; keep the compose tag in step). LiteLLM has no pgvector driver

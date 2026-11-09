@@ -1,0 +1,171 @@
+# Presidio analyzer recognizers (RECOGNIZER_REGISTRY_CONF_FILE): what counts
+# as a renseignement personnel (Quebec's Loi 25), in French and English.
+#
+# The NER recognizer (spaCy: PERSON, LOCATION, NRP) is added by the analyzer
+# from nlp.yaml. Everything else is listed here; nothing from Presidio's
+# default US/UK/IN/... set is loaded.
+#
+# Custom regexes run with global_regex_flags (IGNORECASE|MULTILINE|DOTALL).
+# The identifiers whose letters are always upper case turn IGNORECASE back
+# off with (?-i:...) so lower-case hex, hashes and variable names in code
+# don't match. Scores are the base score; a context word near the match
+# adds 0.35. LiteLLM drops anything under its presidio_score_thresholds
+# (litellm/config.yaml), so a weak pattern only counts with its context.
+supported_languages:
+  - en
+  - fr
+global_regex_flags: 26
+
+recognizers:
+  # --- Generic, checksum- or format-validated ------------------------------
+
+  - name: EmailRecognizer
+    type: predefined
+    supported_languages: [en, fr]
+
+  - name: CreditCardRecognizer
+    type: predefined
+    supported_languages:
+      - language: en
+        context: [credit, card, visa, mastercard, amex, debit]
+      - language: fr
+        context: [carte, crédit, credit, débit, visa, mastercard, amex]
+
+  - name: IbanRecognizer
+    type: predefined
+    supported_languages: [en, fr]
+
+  # libphonenumber; CA covers +1 numbers (Quebec 418/438/450/514/579/581/819/873/...).
+  # It is lenient (0.4 for any digit run it can parse, IP addresses and
+  # 5-digit ports included), so LiteLLM keeps PHONE_NUMBER only from 0.5:
+  # with a context word, or from the strict North American format below.
+  - name: PhoneRecognizer
+    type: predefined
+    supported_regions: [CA, US]
+    supported_languages:
+      - language: en
+        context: [phone, number, telephone, cell, cellphone, mobile, call, fax]
+      - language: fr
+        context: [téléphone, telephone, tél, tel, cellulaire, cell, mobile, numéro, appeler, joindre, télécopieur, fax]
+
+  # --- Canada / Quebec ------------------------------------------------------
+
+  # 514-555-0199, (418) 555-0142, 1 819 555 0100, +1.450.555.0123
+  - name: NanpPhoneRecognizer
+    type: custom
+    supported_entity: PHONE_NUMBER
+    supported_languages:
+      - language: fr
+      - language: en
+    patterns:
+      - name: nanp phone
+        regex: "(?<![\\w.])(?:\\+?1[ .-]?)?(?:\\([2-9]\\d{2}\\)\\s?|[2-9]\\d{2}[ .-])[2-9]\\d{2}[ .-]\\d{4}\\b"
+        score: 0.6
+
+  # Numéro d'assurance sociale. First digit is never 8 (0 is unassigned but used by
+  # the government's sample numbers, e.g. 046 454 286). No Luhn check in
+  # a YAML recognizer, so a bare 9-digit run only counts next to "NAS"/"SIN".
+  - name: CaSinRecognizer
+    type: custom
+    supported_entity: CA_SIN
+    supported_languages:
+      - language: fr
+        context: [nas, "assurance sociale", "numéro d'assurance sociale", sin]
+      - language: en
+        context: [sin, "social insurance", "social insurance number", nas]
+    patterns:
+      - name: sin (separated)
+        regex: "\\b[0-79]\\d{2}([- ])\\d{3}\\1\\d{3}\\b"
+        score: 0.5
+      - name: sin (bare, weak)
+        regex: "\\b[0-79]\\d{8}\\b"
+        score: 0.2
+
+  # Carte d'assurance maladie RAMQ: 3 letters of the surname + 1 of the given
+  # name, YY, MM (+50 for women), DD, 2 digits.
+  - name: CaRamqRecognizer
+    type: custom
+    supported_entity: CA_RAMQ
+    supported_languages:
+      - language: fr
+        context: [ramq, "assurance maladie", "assurance-maladie", "carte soleil", "carte d'assurance maladie", nam]
+      - language: en
+        context: [ramq, "health insurance", "health card", medicare]
+    patterns:
+      - name: ramq
+        regex: "(?-i:\\b[A-Z]{4}[ -]?\\d{2}(?:0[1-9]|1[0-2]|5[1-9]|6[0-2])[ -]?(?:0[1-9]|[12]\\d|3[01])\\d{2}\\b)"
+        score: 0.6
+
+  # Permis de conduire SAAQ: 1 letter (first of the surname) + 12 digits.
+  - name: CaQcDriverLicenseRecognizer
+    type: custom
+    supported_entity: CA_QC_DRIVER_LICENSE
+    supported_languages:
+      - language: fr
+        context: [permis, conduire, saaq, "permis de conduire"]
+      - language: en
+        context: [driver, licence, license, saaq, "driver's licence"]
+    patterns:
+      - name: saaq licence
+        regex: "(?-i:\\b[A-Z]\\d{4}[- ]?\\d{6}[- ]?\\d{2}\\b)"
+        score: 0.6
+
+  # Passeport canadien: 2 letters + 6 digits. Weak on its own.
+  - name: CaPassportRecognizer
+    type: custom
+    supported_entity: CA_PASSPORT
+    supported_languages:
+      - language: fr
+        context: [passeport]
+      - language: en
+        context: [passport]
+    patterns:
+      - name: ca passport (weak)
+        regex: "(?-i:\\b[A-Z]{2}\\d{6}\\b)"
+        score: 0.2
+
+  # Code postal: no D, F, I, O, Q, U; never W or Z first.
+  - name: CaPostalCodeRecognizer
+    type: custom
+    supported_entity: CA_POSTAL_CODE
+    supported_languages:
+      - language: fr
+        context: [code postal, adresse, québec, qc]
+      - language: en
+        context: [postal code, address, quebec, qc]
+    patterns:
+      - name: postal code
+        regex: "(?-i:\\b[ABCEGHJ-NPRSTVXY]\\d[ABCEGHJ-NPRSTV-Z][ -]?\\d[ABCEGHJ-NPRSTV-Z]\\d\\b)"
+        score: 0.6
+
+  # Compte bancaire canadien (chèque): transit 5 + institution 3 + compte 7-12.
+  - name: CaBankAccountRecognizer
+    type: custom
+    supported_entity: CA_BANK_ACCOUNT
+    supported_languages:
+      - language: fr
+        context: [compte, transit, institution, banque, caisse, desjardins, chèque, "dépôt direct", folio]
+      - language: en
+        context: [account, transit, institution, bank, cheque, check, "direct deposit"]
+    patterns:
+      - name: transit-institution-account
+        regex: "\\b\\d{5}[- ]\\d{3}[- ]\\d{7,12}\\b"
+        score: 0.4
+
+  # Adresse civique: "1234, rue Saint-Denis", "12 boul. René-Lévesque Est",
+  # "123 Main Street". spaCy finds the city (LOCATION), this finds the street.
+  - name: StreetAddressRecognizer
+    type: custom
+    supported_entity: STREET_ADDRESS
+    supported_languages:
+      - language: fr
+        context: [adresse, demeure, habite, domicile]
+      - language: en
+        context: [address, lives, live, home]
+    patterns:
+      - name: french civic address
+        regex: "\\b\\d{1,6}(?:-\\d{1,4})?,?\\s+(?:rue|avenue|av\\.|boulevard|boul\\.|bd|chemin|ch\\.|rang|route|montée|place|côte|croissant|impasse|allée|promenade|terrasse|carré|square)\\s+[\\w'’.\\-]+(?:[ \\-][\\w'’.\\-]+){0,4}"
+        score: 0.6
+      - name: english civic address
+        regex: "(?-i:\\b\\d{1,6}\\s+(?:[A-Z][\\w'’\\-]*\\s+){1,3}(?:Street|St\\.?|Avenue|Ave\\.?|Road|Rd\\.?|Boulevard|Blvd\\.?|Drive|Dr\\.?|Crescent|Cres\\.?|Lane|Ln\\.?|Court|Ct\\.?|Way|Place|Pl\\.?)(?=\\W|$))"
+        score: 0.6
