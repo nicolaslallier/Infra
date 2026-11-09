@@ -113,8 +113,11 @@ selftest() {
   [ "$(compose_services docker-compose.dns.yml)" = dns ] || die "selftest: compose_services docker-compose.dns.yml"
   [ "$(compose_services docker-compose.openbao.yml)" = openbao ] || die "selftest: compose_services docker-compose.openbao.yml"
   [ "$(compose_services docker-compose.data.yml | tr '\n' ' ')" = "s3 s3-admin rabbitmq ntfy " ] || die "selftest: compose_services docker-compose.data.yml"
-  [ "$(compose_services docker-compose.monitoring.yml | tr '\n' ' ')" = "prometheus loki tempo alloy grafana cadvisor node-exporter " ] \
+  [ "$(compose_services docker-compose.monitoring.yml | tr '\n' ' ')" = "prometheus loki tempo alloy cadvisor node-exporter " ] \
     || die "selftest: compose_services docker-compose.monitoring.yml"
+  [ "$(compose_services docker-compose.grafana.yml | tr '\n' ' ')" = "grafana-provisioning grafana " ] \
+    || die "selftest: compose_services docker-compose.grafana.yml"
+  ! grep -q INFRA_DIR docker-compose.grafana.yml || die "selftest: docker-compose.grafana.yml mounts from the checkout but deploys remotely"
   [ "$(compose_services docker-compose.keycloak.yml)" = keycloak ] || die "selftest: compose_services docker-compose.keycloak.yml"
   ! grep -q INFRA_DIR docker-compose.keycloak.yml || die "selftest: docker-compose.keycloak.yml mounts from the checkout but deploys remotely"
   ! grep -q INFRA_DIR docker-compose.auth.yml || die "selftest: docker-compose.auth.yml mounts from the checkout but deploys remotely"

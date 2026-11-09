@@ -79,8 +79,10 @@ startup caveats that the update script deliberately does NOT handle.
   `127.0.0.1:5432` (bound to loopback), or in-cluster by service name
   `postgres:5432`. AMQP is the same pattern at `127.0.0.1:5672` →
   and `rabbitmq:5672`. `make psql` opens a superuser shell inside the container.
-  Do not add a `ports:` entry to `postgres`/`pgadmin`/`keycloak`/`grafana`
-  /`s3`/`s3-admin`/`rabbitmq`/`prefect-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  Do not add a `ports:` entry to `pgadmin`/`s3`/`s3-admin`/`rabbitmq`
+  /`prefect-*`/`openbao`/`portainer` (see `CLAUDE.md` "Single-ingress rule").
+  The stacks on the Mac mini (`postgres`, `keycloak`, `grafana`, `data`)
+  publish LAN-only ports because the homelab's NGINX reaches them over the LAN.
 
 - **The vault needs two files this snapshot may not have.** `openbao` reads
   `openbao/seal.key` as a bind-mounted file, and Docker turns a *missing*

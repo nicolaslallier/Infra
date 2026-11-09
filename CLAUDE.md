@@ -283,8 +283,10 @@ never orphans another app that's still attached to it):
   the same rule that keeps `postgres`/`pgadmin`/`keycloak` unpublished.
 - **LGTM + exporters** — `grafana`, `prometheus`, `loki`, `tempo`,
   `alloy`, `cadvisor`, `node-exporter`, `postgres-exporter`, `nginx-exporter`.
-  Only Grafana is fronted by NGINX (`grafana.infra.famillelallier.net`);
-  everything else stays on `infra-net` with no host `ports:`. Config lives
+  Only Grafana is fronted by NGINX (`grafana.infra.famillelallier.net`).
+  Grafana is its own stack on the Mac mini (see "Grafana on the Mac mini"
+  below); the rest is the `monitoring` stack on the homelab's `infra-net`
+  with no host `ports:` (NGINX relays their read APIs to Grafana). Config lives
   under `monitoring/`. Grafana stores its own state in the provisioned
   Postgres database/role `grafana`. Alloy mounts the Docker socket to
   collect container logs (all Compose projects on the host) and accepts
@@ -1222,6 +1224,33 @@ sets `PGDATA=/var/lib/postgresql/18/docker` (verified against both the
 mounts the named volume at `/var/lib/postgresql` accordingly. Mounting the
 pre-18 path here doesn't error — it just silently creates a database that
 doesn't persist across restarts, since data actually lands under `PGDATA`.
+
+### Grafana on the Mac mini
+
+The `grafana` stack (`docker-compose.grafana.yml`) runs on the Mac mini,
+Portainer environment 7. It has no volume to move: all of Grafana's state is
+in the `grafana` database of the postgres stack, on the same host.
+
+- **Provisioning is fetched, not mounted.** A remote stack mounts nothing
+  from the checkout, so the one-shot `grafana-provisioning` service
+  downloads main's tarball from GitHub into a volume at every deploy, before
+  Grafana starts (it keeps the previous files if GitHub is unreachable).
+  A merge touching `monitoring/grafana/` redeploys the stack (stacks.conf).
+- **Datasources are unchanged.** `extra_hosts` points `prometheus`, `loki`
+  and `tempo` at the homelab's `LAN_IP`, where `nginx/conf.d/monitoring-lan.conf`
+  relays only the query APIs on 9090, 3100 and 3200 (no admin, lifecycle,
+  push or delete). On the mini, `postgres` and `ntfy` are on its infra-net.
+- **nginx** (`conf.d/grafana.conf`) proxies to `192.168.2.67:3000`.
+- **Grafana's own logs are not in Loki**: alloy only reads the homelab's
+  Docker socket (same as Keycloak). Read them in Portainer.
+- **Health is not gated by the deploy** (remote environment): check the
+  stack in Portainer.
+- **Moving it**: dump the `grafana` database first; merge (CI redeploys
+  `infra` for the relay, `monitoring` without Grafana, then creates `grafana`
+  on the mini). Portainer redeploys with `Prune: false`, so the homelab's
+  old `monitoring-grafana-1` keeps running: remove that one container by
+  hand (`docker rm -f monitoring-grafana-1`) right after the deploy, so two
+  Grafanas do not send every alert twice.
 
 ### Postgres on the Mac mini
 

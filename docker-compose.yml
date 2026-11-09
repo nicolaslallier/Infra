@@ -36,6 +36,11 @@ services:
       # DarkAngel's dashboard on the Mac Studio: Prometheus' query API only
       # (conf.d/darkangel-lan.conf). LAN only.
       - "${LAN_IP:?Set LAN_IP in .env}:8480:8480"
+      # Grafana on the Mac mini: read-only Prometheus, Loki and Tempo APIs
+      # (conf.d/monitoring-lan.conf). LAN only.
+      - "${LAN_IP:?Set LAN_IP in .env}:9090:9090"
+      - "${LAN_IP:?Set LAN_IP in .env}:3100:3100"
+      - "${LAN_IP:?Set LAN_IP in .env}:3200:3200"
       - "127.0.0.1:5672:5672"
       # Moria (stream.d/moria.conf): public, the router forwards 7777/TCP here.
       - "7777:7777"

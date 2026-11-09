@@ -531,8 +531,10 @@ The LGTM stack (Grafana + Prometheus + Loki + Tempo + Alloy) plus
 exporters (cAdvisor, node-exporter, postgres-exporter, nginx-exporter) runs
 on `infra-net`. Only Grafana is browser-facing, at
 `https://grafana.infra.famillelallier.net` (admin password =
-`GRAFANA_ADMIN_PASSWORD`). Prometheus, Loki, Tempo, Alloy, and exporters
-have no host `ports:`.
+`GRAFANA_ADMIN_PASSWORD`). Grafana runs on the Mac mini (its own
+`grafana` stack); Prometheus, Loki, Tempo, Alloy, and exporters stay on the
+homelab with no host `ports:`, and NGINX relays their query APIs to Grafana
+on the LAN (`nginx/conf.d/monitoring-lan.conf`).
 
 What you get:
 
