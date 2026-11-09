@@ -30,8 +30,8 @@ services:
       - "80:80"
       - "443:443"
       - "127.0.0.1:5432:5432"
-      # Keycloak on the Mac mini (and DarkAngel on the Mac Studio) reach
-      # Postgres here, off infra-net. LAN only: the router forwards no 5432.
+      # DarkAngel on the Mac Studio (and Keycloak on the Mac mini) reach
+      # Postgres here, relayed to the mini. LAN only: the router forwards no 5432.
       - "${LAN_IP:?Set LAN_IP in .env}:5432:5432"
       # DarkAngel's dashboard on the Mac Studio: Prometheus' query API only
       # (conf.d/darkangel-lan.conf). LAN only.
@@ -69,6 +69,11 @@ services:
           - s3
           - rabbitmq
           - ntfy
+          # Postgres runs on the Mac mini too (docker-compose.postgres.yml):
+          # postgres:5432 keeps working for apps on this host's infra-net
+          # (Prefect, LiteLLM, Grafana, the backup flow), relayed by
+          # stream.d/postgres.conf. pgAdmin registers `postgres` on the mini.
+          - postgres
 
   nginx-exporter:
     image: nginx/nginx-prometheus-exporter:1.4.2@sha256:6edfb73afd11f2d83ea4e8007f5068c3ffaa38078a6b0ad1339e5bd2f637aacd

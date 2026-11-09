@@ -66,12 +66,17 @@ never orphans another app that's still attached to it):
 
 - **`postgres`** (own stack, `docker-compose.postgres.yml`, with `pgadmin` and
   `postgres-exporter`) — `pgvector/pgvector:0.8.6-pg18-bookworm` (Postgres 18 + pgvector;
-  Debian bookworm — no alpine tag for pg18). Publishes no host port.
+  Debian bookworm — no alpine tag for pg18). Runs on the **Mac mini**
+  (Portainer environment 7) and publishes 5432, pgAdmin (5050) and the
+  exporter (9187) on 192.168.2.67, LAN only; on the homelab, NGINX carries
+  the alias `postgres` on infra-net and relays 5432 there (see "Postgres on
+  the Mac mini" below).
   Per-app provisioning also runs `CREATE EXTENSION IF NOT EXISTS vector`
   as the superuser in each app database, so app roles (e.g. Jarvis RAG
   migrations) can use the `vector` type without needing CREATE EXTENSION
   privilege themselves. Logs connections/disconnections (`command:` flags).
-- **`pgadmin`** — `dpage/pgadmin4:9`. Publishes no host port.
+- **`pgadmin`** — `dpage/pgadmin4:9`. On the Mac mini with postgres,
+  reached through the homelab NGINX vhost (`192.168.2.67:5050`).
 - **`keycloak`** — `quay.io/keycloak/keycloak`. Publishes no host port;
   uses the shared `postgres` cluster (database/role `keycloak`, via the
   same generic per-app provisioning as any other app — see "Per-app
@@ -357,7 +362,10 @@ stack: name, compose file, Portainer environment, owned paths): `dns`
 (`docker-compose.dns.yml`: Technitium, so a merge no longer cuts the LAN's
 DNS), `openbao` (`docker-compose.openbao.yml`: the vault every `make up`
 reads first), `postgres` (`docker-compose.postgres.yml`: postgres, pgadmin,
-postgres-exporter), `data` (`docker-compose.data.yml`: s3, s3-admin,
+postgres-exporter, on the Mac mini, environment 7: it publishes 5432, 5050 and
+9187 on its host, `data.famillelallier.net`; on this host nginx carries the
+alias `postgres` on infra-net and relays 5432, so apps keep `postgres:5432`;
+the provisioning scripts reach it from a one-shot container, `scripts/lib/pg.sh`), `data` (`docker-compose.data.yml`: s3, s3-admin,
 rabbitmq, ntfy, on the Mac mini, environment 7: it publishes S3 :8333, AMQP
 :5672, the RabbitMQ UI :15672, ntfy :8090 and the metrics ports on
 its host, which clients reach by the name `data.famillelallier.net` (and `s3.famillelallier.net`),
@@ -900,7 +908,9 @@ and fastapi versions of the pinned `prefecthq/prefect` image.
 #### `backup`
 
 At 01:30 America/Toronto it dumps postgres (`pg_dumpall` as `postgres`,
-gzipped), OpenBao (raft snapshot, below) and
+gzipped; Postgres is on the Mac mini, so it runs in a one-shot container of
+`BACKUP_PG_IMAGE` on infra-net that connects to `postgres:5432`, the nginx
+relay, and writes the file into the volume itself), OpenBao (raft snapshot, below) and
 ntfy (tar of its volume) into the external volume `infra-backups`
 (`/backups`), as `<target>/<target>-<UTC stamp>.<ext>`. The newest
 `BACKUP_KEEP` (3) of each are kept. Heaven is to snapshot that volume (not wired
@@ -1203,6 +1213,48 @@ mounts the named volume at `/var/lib/postgresql` accordingly. Mounting the
 pre-18 path here doesn't error — it just silently creates a database that
 doesn't persist across restarts, since data actually lands under `PGDATA`.
 
+### Postgres on the Mac mini
+
+The `postgres` stack (postgres, pgadmin, postgres-exporter) runs on the Mac
+mini, Portainer environment 7, next to the `data` stack, on the volumes
+`infra_pgdata` / `infra_pgadmin-data` copied from the homelab.
+
+- **Apps keep `postgres:5432`.** On the homelab, nginx answers to `postgres`
+  on infra-net (alias in `docker-compose.yml`) and `stream.d/postgres.conf`
+  relays to `data.famillelallier.net:5432`. Never run a second `postgres`
+  container on the homelab's infra-net: Docker's resolver would round-robin
+  between it and the alias. On the mini, apps join its infra-net and use
+  `postgres` directly.
+- **No initdb on the mini.** A remote stack mounts nothing from the
+  checkout, and `postgres/initdb` only runs on an empty volume anyway. On a
+  brand-new empty cluster (disaster recovery), restore the latest
+  `pg_dumpall` from infra-backups instead, or run `make provision-app` for
+  each app and `make provision-monitoring-role`.
+- **`docker compose exec postgres` does not work from the homelab.** Use
+  `make psql`, `make provision-app`, etc.: they go through `scripts/lib/pg.sh`.
+- **Health is not gated by the deploy** (remote environment): check the
+  stack in Portainer.
+
+**Moving it (one time, with downtime; Nicolas runs these on the machines):**
+
+1. On the homelab, take a last dump as a safety net: trigger `backup/nightly`
+   in the Prefect UI (or `docker exec postgres-postgres-1 pg_dumpall -U postgres | gzip > pg-before-move.sql.gz`).
+2. Stop everything that writes to Postgres, then the stack itself, in
+   Portainer on the homelab: `platform`, `monitoring` (Grafana), `keycloak`
+   on the mini, then `postgres` (Stop, not Delete: it is the way back).
+3. Copy the two volumes with the cluster's own image (GNU tar, owners kept):
+   on the homelab
+   `for v in infra_pgdata infra_pgadmin-data; do docker run --rm -v $v:/v --entrypoint tar pgvector/pgvector:0.8.6-pg18-bookworm --numeric-owner -cpzf - -C /v . > $v.tgz; done`,
+   move the two files to the mini, then in its Colima VM
+   `for v in infra_pgdata infra_pgadmin-data; do docker volume create $v && docker run --rm -i -v $v:/v --entrypoint tar pgvector/pgvector:0.8.6-pg18-bookworm --numeric-owner -xpzf - -C /v < $v.tgz; done`.
+4. Merge, or deploy by hand: `make up stack=postgres` (creates it on
+   environment 7), then `make up stack=infra` (the nginx alias), then
+   `platform`, `monitoring`, and start `keycloak` again.
+5. Check: `make psql` lists the databases, Prefect and LiteLLM are healthy,
+   Grafana shows the `postgres` job up, pgAdmin opens. Leave the homelab's
+   stopped `postgres` stack in place a few days, then delete it in Portainer
+   (its volumes stay until removed by hand).
+
 ### Per-app database provisioning
 
 Each application gets its own database and a role that owns it (not a
@@ -1214,9 +1266,11 @@ code paths can't drift apart:
    args; it loops over `APP_DATABASES` (comma-separated in `.env`) and
    reads each app's password from `<APPNAME>_DB_PASSWORD`.
 2. **Adding an app later** — `scripts/provision-app.sh <name>` runs the
-   same script inside the already-running container via
-   `docker compose exec ... 10-provision-apps.sh --single`, passing
-   `APP_NAME`/`APP_PASSWORD` explicitly. This exists because
+   same script against the running cluster with `--single`, passing
+   `APP_NAME`/`APP_PASSWORD` explicitly, from a one-shot container of the
+   postgres image on infra-net (`scripts/lib/pg.sh`; psql connects to
+   `postgres:5432` with `PGHOST`/`PGPASSWORD`), since the cluster is on the
+   Mac mini. This exists because
    `docker-entrypoint-initdb.d` scripts only run once, against an empty
    volume — there's no other built-in way to add a database to a live
    cluster without wiping it.

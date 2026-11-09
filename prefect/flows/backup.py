@@ -4,9 +4,9 @@ Layout under BACKUP_DIR (/backups): <target>/<target>-<UTC stamp>.<ext>, plus
 metrics/backup.prom for node-exporter's textfile collector. Heaven snapshots
 the volume; this flow only has to leave consistent files there.
 
-Containers are found by their compose labels (project infra). The one-shot
-container this flow starts (ntfy tar) carries NO com.docker.compose
-label: the deploy health gate counts every container of project infra and
+Containers are found by their compose labels. Postgres is on another host
+(the Mac mini) and is dumped over the network. The one-shot containers this
+flow starts (pg_dumpall, ntfy tar) carry NO com.docker.compose label: the deploy health gate counts every container of project infra and
 fails on exited ones.
 
 A dump is written to <name>.part and renamed on success, so a failed run never
@@ -20,7 +20,6 @@ import re
 import urllib.parse
 import urllib.request
 import zlib
-from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -30,6 +29,11 @@ from prefect.blocks.system import Secret
 
 BACKUP_DIR = os.environ.get("BACKUP_DIR", "/backups")
 BACKUP_PG_USER = os.environ.get("BACKUP_PG_USER", "postgres")
+BACKUP_PG_HOST = os.environ.get("BACKUP_PG_HOST", "postgres")
+# pg_dumpall must be at least the server's version: the same image as
+# docker-compose.postgres.yml (set in docker-compose.platform.yml).
+BACKUP_PG_IMAGE = os.environ.get("BACKUP_PG_IMAGE", "pgvector/pgvector:0.8.6-pg18-bookworm")
+BACKUP_NETWORK = os.environ.get("BACKUP_NETWORK", "infra-net")
 BACKUP_KEEP = int(os.environ.get("BACKUP_KEEP", "3"))
 METRIC = "infra_backup_last_success_timestamp_seconds"
 BACKUP_STEP_TIMEOUT = int(os.environ.get("BACKUP_STEP_TIMEOUT", "900"))
@@ -168,30 +172,34 @@ def _gzip_checked(chunks: Iterable[bytes]) -> Iterator[bytes]:
 
 @task(name="dump-postgres")
 def dump_postgres() -> Path:
+    # Postgres runs on the Mac mini, out of this daemon's reach: pg_dumpall
+    # runs in a one-shot container of the cluster's own image, on this host's
+    # infra-net (postgres:5432 is the nginx relay to the mini), and writes the
+    # gzip straight into infra-backups. stdout never leaves that container,
+    # so no dump lands in its logs (or in Loki); stderr is the error tail.
     client = _docker()
-    container = _container(client, "postgres", project="postgres")
-    api = client.api
-    exec_id = api.exec_create(
-        container.id, ["pg_dumpall", "-U", BACKUP_PG_USER], user="postgres"
-    )["Id"]
-    stderr_tail: deque[bytes] = deque(maxlen=20)
-
-    def sql() -> Iterator[bytes]:
-        for out, err in api.exec_start(exec_id, stream=True, demux=True):
-            if err:
-                stderr_tail.append(err)
-            if out:
-                yield out
-        # raised inside the generator so write_atomic removes the .part
-        code = api.exec_inspect(exec_id)["ExitCode"]
-        if code != 0:
-            raise RuntimeError(
-                f"pg_dumpall exited {code}: {b''.join(stderr_tail).decode(errors='replace')[-500:]}"
-            )
-
-    path = Path(BACKUP_DIR) / dump_name("postgres", "sql.gz", _now())
-    write_atomic(path, _gzip(sql()))
-    return path
+    base = Path(BACKUP_DIR)
+    (base / "postgres").mkdir(parents=True, exist_ok=True)
+    tmp = base / "postgres" / ".tmp.sql.gz"
+    try:
+        _run_once(
+            client,
+            BACKUP_PG_IMAGE,
+            ["bash", "-c", "set -o pipefail; pg_dumpall | gzip > /backups/postgres/.tmp.sql.gz"],
+            environment={
+                "PGHOST": BACKUP_PG_HOST,
+                "PGUSER": BACKUP_PG_USER,
+                "PGPASSWORD": os.environ.get("BACKUP_PG_PASSWORD", ""),
+            },
+            network=BACKUP_NETWORK,
+            volumes={BACKUP_VOLUME: {"bind": "/backups"}},
+        )
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    final = base / dump_name("postgres", "sql.gz", _now())
+    tmp.rename(final)
+    return final
 
 
 @task(name="dump-ntfy")

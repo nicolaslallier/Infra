@@ -162,39 +162,45 @@ def test_ntfy_uses_mount_volume_and_no_labels():
     _no_compose_labels(kw)
 
 
-class FakeApi:
-    def __init__(self, code):
-        self.code = code
+def test_postgres_dumps_over_the_network_without_labels():
+    client = FakeClient({})
+    backup._docker = lambda: client
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
 
-    def exec_create(self, cid, cmd, user=None):
-        assert cmd[0] == "pg_dumpall" and user == "postgres"
-        return {"Id": "eid"}
+        def fake_dump():
+            (Path(d) / "postgres" / ".tmp.sql.gz").write_bytes(b"x")
 
-    def exec_start(self, eid, stream=False, demux=False):
-        assert stream and demux
-        return iter([(b"-- dump\n", None), (None, b"warn")])
-
-    def exec_inspect(self, eid):
-        return {"ExitCode": self.code}
-
-
-def FakeExecClient(c, code):
-    client = FakeClient({"postgres": c})
-    client.api = FakeApi(code)
-    return client
+        client._run = fake_dump
+        out = backup.dump_postgres.fn()
+        assert out.exists() and out.name.startswith("postgres-") and out.name.endswith(".sql.gz")
+        assert not (Path(d) / "postgres" / ".tmp.sql.gz").exists()
+    image, cmd, kw = client.run_calls[0]
+    assert image.startswith("pgvector/pgvector:") and "pg_dumpall" in cmd[-1] and "pipefail" in cmd[-1]
+    assert kw["network"] == "infra-net" and kw["environment"]["PGHOST"] == "postgres"
+    assert kw["volumes"]["infra-backups"]["bind"] == "/backups"
+    _no_compose_labels(kw)
 
 
-def test_postgres_nonzero_exit_leaves_no_file():
-    for code, ok in ((0, True), (1, False)):
-        backup._docker = lambda code=code: FakeExecClient(FakeContainer(), code)
-        with tempfile.TemporaryDirectory() as d:
-            backup.BACKUP_DIR = d
-            try:
-                out = backup.dump_postgres.fn()
-                assert ok and out.exists()
-            except RuntimeError:
-                assert not ok
-                assert not list((Path(d) / "postgres").glob("*.gz*"))
+def test_postgres_failed_dump_leaves_no_file():
+    client = FakeClient({})
+    client.wait_exc = TimeoutError("read timed out")
+    backup._docker = lambda: client
+    with tempfile.TemporaryDirectory() as d:
+        backup.BACKUP_DIR = d
+
+        def fake_partial():
+            (Path(d) / "postgres" / ".tmp.sql.gz").write_bytes(b"half")
+
+        client._run = fake_partial
+        try:
+            backup.dump_postgres.fn()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("expected RuntimeError")
+        assert not list((Path(d) / "postgres").iterdir())
+    assert [o.removed for o in client.oneshots] == [1]
 
 
 import gzip as _gzip_mod
