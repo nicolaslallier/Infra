@@ -6,8 +6,9 @@
 #
 # Looks up <APPNAME>_DB_PASSWORD (uppercased) in .env, then drives the
 # same provisioning logic used at initdb time
-# (postgres/initdb/10-provision-apps.sh) inside the running container,
-# so the two paths can never diverge.
+# (postgres/initdb/10-provision-apps.sh) against the running cluster, over
+# the network from a one-shot container (scripts/lib/pg.sh: Postgres is on
+# the Mac mini), so the two paths can never diverge.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,10 +28,13 @@ if [ -z "$pass" ]; then
   exit 1
 fi
 
-docker compose -f docker-compose.postgres.yml exec -T \
-  -e APP_NAME="$app" \
-  -e APP_PASSWORD="$pass" \
-  postgres /docker-entrypoint-initdb.d/10-provision-apps.sh --single
+POSTGRES_USER="$(grep -E '^POSTGRES_USER=' .env | tail -n1 | cut -d= -f2-)"
+POSTGRES_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' .env | tail -n1 | cut -d= -f2-)"
+export POSTGRES_USER POSTGRES_PASSWORD
+# shellcheck source=lib/pg.sh
+. scripts/lib/pg.sh
+APP_NAME="$app" APP_PASSWORD="$pass" \
+  pg_run_script postgres/initdb/10-provision-apps.sh -e APP_NAME -e APP_PASSWORD -- --single
 
 echo "provision-app.sh: '$app' is ready. Add it to APP_DATABASES in .env"
 echo "  too, so a future 'docker compose down -v' + 'up' recreates it."

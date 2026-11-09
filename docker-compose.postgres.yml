@@ -1,14 +1,27 @@
-# The "postgres" stack: PostgreSQL, pgAdmin and the Postgres exporter, split
-# out of the infra stack so a merge that touches anything else no longer
-# restarts the database (see stacks.conf, and CLAUDE.md "Portainer-managed
-# stack"). Same infra-net and same service names as before, so every client
-# still reaches postgres:5432.
+# The "postgres" stack, on the Mac mini (Portainer environment 7, Colima VM
+# 192.168.2.67): PostgreSQL, pgAdmin and the Postgres exporter, split out of
+# the infra stack so a merge that touches anything else no longer restarts
+# the database (see stacks.conf, and CLAUDE.md "Portainer-managed stack").
 #
-# The volumes are the infra stack's own (infra_pgdata, infra_pgadmin-data),
-# declared external by name: Portainer would otherwise create
-# postgres_pgdata, an empty cluster. A missing volume fails the deploy
-# instead of starting empty. On a fresh machine, create them first:
-#   docker volume create infra_pgdata && docker volume create infra_pgadmin-data
+# It publishes 5432, pgAdmin (5050) and the exporter (9187) on the mini's LAN
+# address; the router forwards none of them. On the homelab, the infra NGINX
+# answers to the name `postgres` on infra-net and relays 5432 here
+# (stream.d/postgres.conf), so apps there still reach postgres:5432. On the
+# mini, apps join the mini's own infra-net and use `postgres` directly.
+#
+# A remote stack mounts nothing from a checkout (scripts/portainer-stack.sh
+# refuses it), so postgres/initdb is no longer mounted: it only ever ran on
+# an empty volume, and this cluster is the homelab's, copied. The
+# provisioning scripts (make provision-app, provision-monitoring-role,
+# provision-litellm-rag, psql) run those same files over the network from a
+# one-shot container (scripts/lib/pg.sh). On a brand-new empty cluster, run
+# them once by hand after the first boot (see CLAUDE.md).
+#
+# The volumes keep the infra stack's names (infra_pgdata, infra_pgadmin-data),
+# declared external: a missing volume fails the deploy instead of starting an
+# empty cluster. On the mini, before the first deploy: copy them over from
+# the homelab (CLAUDE.md "Postgres on the Mac mini"); never create
+# them empty.
 name: postgres
 
 services:
@@ -39,7 +52,11 @@ services:
         required: false
     volumes:
       - pgdata:/var/lib/postgresql
-      - ${INFRA_DIR:-.}/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      # For the homelab NGINX relay (apps there), Keycloak and DarkAngel.
+      # LAN only: the router forwards no 5432. Every role logs in with a
+      # password (scram-sha-256), as before through the homelab NGINX.
+      - "5432:5432"
     networks:
       - infra-net
     healthcheck:
@@ -63,6 +80,9 @@ services:
       PGADMIN_CONFIG_PROXY_X_FOR_COUNT: "1"
     volumes:
       - pgadmin-data:/var/lib/pgadmin
+    ports:
+      # Behind the homelab NGINX (pgadmin.famillelallier.net, conf.d/pgadmin.conf).
+      - "5050:80"
     networks:
       - infra-net
     depends_on:
@@ -74,6 +94,8 @@ services:
     restart: unless-stopped
     environment:
       DATA_SOURCE_NAME: postgresql://monitoring:${MONITORING_DB_PASSWORD}@postgres:5432/postgres?sslmode=disable
+    ports:
+      - "9187:9187" # metrics, for Prometheus on the homelab
     networks:
       - infra-net
     depends_on:
@@ -81,6 +103,8 @@ services:
         condition: service_healthy
 
 networks:
+  # Created by hand on the mini (docker network create infra-net), shared
+  # with the data stack.
   infra-net:
     external: true
 

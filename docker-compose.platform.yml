@@ -101,6 +101,12 @@ services:
       PREFECT_API_AUTH_STRING: ${PREFECT_AUTH_STRING:?Set PREFECT_AUTH_STRING in .env (user:password)}
       BACKUP_DIR: /backups
       BACKUP_PG_USER: ${POSTGRES_USER}
+      # Postgres is on the Mac mini: the backup flow runs pg_dumpall in a
+      # one-shot container of this image on infra-net (postgres = the nginx
+      # relay). Keep it the image of docker-compose.postgres.yml: pg_dumpall
+      # refuses a server newer than itself.
+      BACKUP_PG_PASSWORD: ${POSTGRES_PASSWORD}
+      BACKUP_PG_IMAGE: pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
       BACKUP_KEEP: "3"
       # organize-inbox. Not PREFECT_*: Prefect reads that namespace as its
       # own settings.

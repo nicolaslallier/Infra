@@ -211,8 +211,8 @@ shell: ## Open a shell in a service (s=<service>)
 	@test -n "$(s)" || { echo "usage: make shell s=<service>" >&2; exit 1; }
 	docker compose exec "$(s)" sh
 
-psql: ## Open a psql shell as the superuser
-	docker compose -f docker-compose.postgres.yml exec postgres sh -c 'psql -U "$$POSTGRES_USER"'
+psql: check-env ## Open a psql shell as the superuser (one-shot container; Postgres is on the Mac mini)
+	@set -a && . ./.env && set +a && . scripts/lib/pg.sh && pg_run -- psql
 
 PORTAINER_COMPOSE := docker compose -f docker-compose.portainer.yml
 

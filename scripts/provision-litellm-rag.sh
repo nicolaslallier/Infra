@@ -23,8 +23,9 @@ set +a
 
 ./scripts/provision-app.sh litellm_rag </dev/null
 
-docker compose -f docker-compose.postgres.yml exec -T postgres \
-  psql -X -q -v ON_ERROR_STOP=1 -U "${POSTGRES_USER:-postgres}" -d litellm_rag \
-  < litellm/rag.sql
+# Over the network from a one-shot container: Postgres is on the Mac mini.
+# shellcheck source=lib/pg.sh
+. scripts/lib/pg.sh
+pg_run -- psql -X -q -v ON_ERROR_STOP=1 -d litellm_rag < litellm/rag.sql
 
 echo "provision-litellm-rag.sh: database 'litellm_rag' is ready (store 'second-brain')"

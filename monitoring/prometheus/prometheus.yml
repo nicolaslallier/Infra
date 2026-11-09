@@ -17,7 +17,7 @@ scrape_configs:
 
   - job_name: postgres
     static_configs:
-      - targets: ["postgres-exporter:9187"]
+      - targets: ["data.famillelallier.net:9187"] # postgres stack, on the data host
 
   - job_name: nginx
     static_configs:
