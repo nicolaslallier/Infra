@@ -560,8 +560,15 @@ What you get:
 Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
 **Application logs**, **Jarvis** (`uid: jarvis-overview`) covering
 API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs and
-Tempo traces, **Windows machines** (`uid: windows-hosts`), and **macOS
-machines** (`uid: macos-hosts`).
+Tempo traces, **Windows machines** (`uid: windows-hosts`), **macOS
+machines** (`uid: macos-hosts`), and **Agents** (`uid: agents-overview`):
+one screen over DarkAngel, Jarvis, EA, LibreChat, LiteLLM, Prefect and
+Ollama (containers up, restarts and OOM kills, log errors, HTTP traffic,
+Prefect flow-run outcomes, Ollama tokens), linking to each app's own
+dashboard. Its container selectors are cAdvisor name regexes without a
+`job=` matcher on purpose, so an agent counts on the homelab and on the
+Colima VMs alike; its log panels only see the homelab (Alloy reads that
+Docker socket alone).
 
 ### Windows machines
 
