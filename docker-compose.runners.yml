@@ -1,5 +1,5 @@
 # The self-hosted GitHub Actions runners, one per repo (DarkAngel, EA, Heaven,
-# Infra, Moria), deployed as their own Portainer stack. Their own compose
+# Infra, Moria, AI), deployed as their own Portainer stack. Their own compose
 # project, outside the "infra" stack: every `make up` force-recreates every
 # container in that stack (see CLAUDE.md "Portainer-managed stack"), and a
 # runner recreated mid-job is a job that never reports its result.
@@ -32,6 +32,13 @@ x-runner: &runner
     # a working tree. The socket runners (darkangel, heaven, infra) keep /_work
     # in a named volume and their jobs can leave containers behind.
     EPHEMERAL: "true"
+    # No self-update. An ephemeral runner that updates itself swaps its own
+    # binaries mid-life, and `restart: unless-stopped` then reuses that
+    # container: the runner-ea crash loop on a missing Runner.Listener. The
+    # image's own ephemeral example sets it too. Updates come from the moving
+    # tag instead: `make runners-pull` (GitHub refuses a runner left more than
+    # 30 days behind a release once updates are off).
+    DISABLE_AUTO_UPDATE: "true"
 
 services:
   runner-darkangel:
@@ -113,6 +120,21 @@ services:
       RUNNER_NAME: moria-host
       LABELS: moria
       ACCESS_TOKEN: ${GH_RUNNER_TOKEN_MORIA:?Set GH_RUNNER_TOKEN_MORIA in .runner.env}
+    tmpfs:
+      - /_work:exec
+
+  runner-ai:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/AI
+      RUNNER_NAME: ai-host
+      LABELS: ai
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_AI:?Set GH_RUNNER_TOKEN_AI in .runner.env}
+    # Like moria: no Docker socket, no infra-net, a work dir wiped between
+    # jobs. A job here can reach the LAN (Ollama, LiteLLM by address) but
+    # holds no deploy secret. Give it the socket only with a reason, and then
+    # count it among the runners that can read every PAT (CLAUDE.md).
     tmpfs:
       - /_work:exec
 

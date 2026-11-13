@@ -99,7 +99,7 @@ startup caveats that the update script deliberately does NOT handle.
   run in an environment with no vault.
 
 - **The CD runner is not part of this stack and does not belong on this VM.**
-  `docker-compose.runners.yml` (`make runners-up`) registers five self-hosted
+  `docker-compose.runners.yml` (`make runners-up`) registers six self-hosted
   GitHub Actions runners, one of which redeploys the stack through Portainer on a push
   to `main` — it only makes sense on the machine that runs Portainer. Here
   there is no Portainer and nothing to deploy to, so leave it down;

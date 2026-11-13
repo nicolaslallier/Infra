@@ -504,10 +504,10 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (five self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
-| `make runners-logs` | Tail the five runners' logs (on the Docker host) |
+| `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (six self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
+| `make runners-logs` | Tail the six runners' logs (on the Docker host) |
 | `make runners-status` | Per repo: running here, and registered at GitHub with its label? |
-| `make runners-env` | Write `.runner.env` from five per-repo PATs, checking each first (`FORCE=1` replaces it) |
+| `make runners-env` | Write `.runner.env` from six per-repo PATs, checking each first (`FORCE=1` replaces it) |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -844,20 +844,20 @@ container, `dns` included, so it costs a brief LAN DNS outage.
 
 It runs on a **self-hosted runner**, and has to: Portainer's API is on
 `${LAN_IP}:9443` and otherwise only on `infra-net`, with no public ingress,
-so a GitHub-hosted runner cannot reach it. There are five runners
-(`darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo), together a
+so a GitHub-hosted runner cannot reach it. There are six runners
+(`ai`, `darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo), together a
 Portainer stack `runners` of their own — outside `infra`, so a `make up` never
 recreates a runner mid-job. Portainer reads `docker-compose.runners.yml` from
 GitHub main: merge before `make runners-up`.
 
-Setup is five tokens, a `make`, and one settings change:
+Setup is six tokens, a `make`, and one settings change:
 
 ```bash
 # 1. one fine-grained PAT per repo, Administration: read and write on that
 #    repo only (GitHub -> Settings -> Developer settings; minted in the web UI).
 #    Caveat: a compromised job on darkangel, heaven or infra (they hold the
-#    Docker socket) can read all five tokens off the other runners.
-make runners-env        # paste the five; writes .runner.env, mode 600
+#    Docker socket) can read all six tokens off the other runners.
+make runners-env        # paste the six; writes .runner.env, mode 600
 
 # 2. .portainer.env needs PORTAINER_API_KEY and PORTAINER_PINNEDPUBKEY
 #    (INFRA_HOST comes from the Makefile; PORTAINER_URL optionally overrides);
@@ -873,7 +873,7 @@ nothing about whether GitHub still has a runner for the next one. A job whose
 labels match nothing queues silently rather than failing.
 
 `runners-up`, `-down`, `-pull` and `-restart` are stack redeploys that recreate
-all five runners, so they refuse while any job is running;
+all six runners, so they refuse while any job is running;
 `FORCE=1 make runners-down` overrides. If GitHub cannot be reached to ask they
 warn and continue. `make runners-pull` is the fix for a runner GitHub has
 stopped accepting (the image tag moves on purpose).
