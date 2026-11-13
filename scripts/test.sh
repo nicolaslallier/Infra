@@ -108,20 +108,20 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 	fi
 
 	echo "== runners compose"
-	# ci-fake-env.sh (run by _run_all above) wrote a five-token .runner.env into $ws.
+	# ci-fake-env.sh (run by _run_all above) wrote a six-token .runner.env into $ws.
 	rc() { (cd "$ws" && docker compose -f docker-compose.runners.yml --env-file "$1" "${@:2}" 2>&1); }
 	if cfg="$(rc .runner.env config --format json)"; then
 		names="$(jq -r '.services | keys | join(",")' <<<"$cfg")"
-		if [ "$names" = "runner-darkangel,runner-ea,runner-heaven,runner-infra,runner-moria" ]; then
-			pass "five runner-<name> services"
+		if [ "$names" = "runner-ai,runner-darkangel,runner-ea,runner-heaven,runner-infra,runner-moria" ]; then
+			pass "six runner-<name> services"
 		else
-			fail "five runner-<name> services" "got: $names"
+			fail "six runner-<name> services" "got: $names"
 		fi
-		for n in darkangel ea heaven infra moria; do
-			if jq -e --arg n "$n" '.services["runner-"+$n].environment | .LABELS == $n and .EPHEMERAL == "true"' <<<"$cfg" >/dev/null; then
-				pass "runner-$n label and EPHEMERAL"
+		for n in ai darkangel ea heaven infra moria; do
+			if jq -e --arg n "$n" '.services["runner-"+$n].environment | .LABELS == $n and .EPHEMERAL == "true" and .DISABLE_AUTO_UPDATE == "true"' <<<"$cfg" >/dev/null; then
+				pass "runner-$n label, EPHEMERAL, no self-update"
 			else
-				fail "runner-$n label and EPHEMERAL"
+				fail "runner-$n label, EPHEMERAL, no self-update"
 			fi
 		done
 		socks="$(jq -r '[.services | to_entries[] | select(any(.value.volumes[]?; .source == "/var/run/docker.sock")) | .key] | sort | join(",")' <<<"$cfg")"
@@ -194,23 +194,23 @@ else
 fi
 FAKE
 	chmod +x "$sb/bin/curl"
-	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\n'
+	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\ntok-f\n'
 	if out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$good" 2>&1)" \
-		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 5 ] \
+		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 6 ] \
 		&& [ "$(stat -c %a "$sb/.runner.env" 2>/dev/null || stat -f %Lp "$sb/.runner.env")" = 600 ]; then
-		pass "gen-runner-env writes five tokens, mode 600"
+		pass "gen-runner-env writes six tokens, mode 600"
 	else
-		fail "gen-runner-env writes five tokens, mode 600" "$out"
+		fail "gen-runner-env writes six tokens, mode 600" "$out"
 	fi
 	rm -f "$sb/.runner.env"
-	bad=$'tok-a\ntok-404\ntok-c\ntok-d\ntok-e\n'
+	bad=$'tok-a\ntok-404\ntok-c\ntok-d\ntok-e\ntok-f\n'
 	out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$bad" 2>&1)"; code=$?
 	if [ "$code" -ne 0 ] && grep -qF nicolaslallier/EA <<<"$out" && [ ! -e "$sb/.runner.env" ]; then
 		pass "gen-runner-env rejects EA's 404 token, names the repo, writes nothing"
 	else
 		fail "gen-runner-env rejects EA's 404 token, names the repo, writes nothing" "exit $code: $out"
 	fi
-	printf 'GH_RUNNER_TOKEN_%s=t\n' DARKANGEL EA HEAVEN INFRA MORIA >"$sb/.runner.env"
+	printf 'GH_RUNNER_TOKEN_%s=t\n' DARKANGEL EA HEAVEN INFRA MORIA AI >"$sb/.runner.env"
 	out="$(cd "$sb" && FAKE_BUSY=heaven PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
 	if [ "$code" = 3 ] && grep -qF heaven-host <<<"$out"; then
 		pass "runner-status --busy: busy heaven runner -> exit 3, named"

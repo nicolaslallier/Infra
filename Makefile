@@ -241,7 +241,7 @@ portainer-logs: ## Tail Portainer's logs
 	docker logs -f --tail 100 $$id
 
 ##@ CI runners
-# --- Five repo runners (docker-compose.runners.yml) -------------------------
+# --- Six repo runners (docker-compose.runners.yml) -------------------------
 # Their own Portainer stack ("runners"), outside "infra": a `make up`
 # force-recreates every container in infra, and a runner recreated mid-job
 # never reports. Portainer reads the compose from GitHub main (merge first).
@@ -251,12 +251,12 @@ portainer-logs: ## Tail Portainer's logs
 # interpolate from this repo's .env, the stack's whole secret set.
 RUNNERS_COMPOSE := docker compose -f docker-compose.runners.yml --env-file .runner.env
 
-# GitHub mints PATs in its web UI only. This takes the five (one per repo)
+# GitHub mints PATs in its web UI only. This takes the six (one per repo)
 # from there and checks each can administer runners on its repo before writing.
-runners-env: ## Write .runner.env from five per-repo GitHub PATs (FORCE=1 replaces it)
+runners-env: ## Write .runner.env from six per-repo GitHub PATs (FORCE=1 replaces it)
 	@./scripts/gen-runner-env.sh $(if $(filter 1,$(FORCE)),--force,)
 
-# up/down/pull/restart are redeploys of all five runners through Portainer;
+# up/down/pull/restart are redeploys of all six runners through Portainer;
 # scripts/runners-stack.sh refuses while any job runs (exit 3), FORCE=1 means it.
 runners-up: ## Create/redeploy the runners stack via Portainer (refuses mid-job; FORCE=1)
 	@INFRA_HOST=$(INFRA_HOST) ./scripts/runners-stack.sh up
@@ -272,7 +272,7 @@ runners-pull: ## Re-pull the runner image and redeploy (refuses mid-job; FORCE=1
 runners-restart: ## Redeploy the runners stack (same as runners-up)
 	@INFRA_HOST=$(INFRA_HOST) ./scripts/runners-stack.sh up
 
-runners-logs: ## Tail the five runners' logs (on the Docker host, DOCKER_HOST)
+runners-logs: ## Tail the six runners' logs (on the Docker host, DOCKER_HOST)
 	@test -f .runner.env || { echo "make: .runner.env not found -- run 'make runners-env'" >&2; exit 1; }
 	$(RUNNERS_COMPOSE) logs -f
 

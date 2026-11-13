@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drive the "runners" stack (docker-compose.runners.yml, five GitHub runners)
+# Drive the "runners" stack (docker-compose.runners.yml, six GitHub runners)
 # through Portainer's API. Portainer clones docker-compose.yml's sibling from
 # GitHub main; the one file the compose bind-mounts from a checkout
 # (certs/infra-ca.crt, for EA) comes from INFRA_DIR.
@@ -14,7 +14,7 @@
 # Unlike portainer-stack.sh there is no drift guard and no host-checkout
 # sync: the runners' compose mounts nothing tracked by git, so a checkout that
 # lags main cannot deploy stale config. Only the gitignored CA is read, and
-# `up` checks it exists. The env sent to Portainer is .runner.env's five PATs
+# `up` checks it exists. The env sent to Portainer is .runner.env's six PATs
 # plus INFRA_DIR, never .env: that file holds the whole stack's secrets.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -35,7 +35,7 @@ env_json() { # <env-file> <infra-dir>
     + [{name: "INFRA_DIR", value: $dir}]' <"$1"
 }
 
-# Request bodies. The env (five PATs) arrives on stdin: jq --argjson would put
+# Request bodies. The env (six PATs) arrives on stdin: jq --argjson would put
 # it on jq's command line, readable by anyone via ps.
 create_body() { # stdin: env json
   jq --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" \
@@ -49,7 +49,7 @@ redeploy_body() { # <true|false: re-pull images>; stdin: env json
 }
 
 # Recreating or stopping the runners mid-job kills the job. One busy runner
-# out of the five is enough, they are handled together.
+# out of the six is enough, they are handled together.
 check_idle() {
   local rc=0
   bash scripts/runner-status.sh --busy || rc=$?
@@ -82,16 +82,16 @@ selftest() {
   tmp="$(mktemp -d)"
   printf '%s\n' '# comment' '' \
     GH_RUNNER_TOKEN_DARKANGEL=a GH_RUNNER_TOKEN_EA=b GH_RUNNER_TOKEN_HEAVEN=c \
-    GH_RUNNER_TOKEN_INFRA=d GH_RUNNER_TOKEN_MORIA=e \
+    GH_RUNNER_TOKEN_INFRA=d GH_RUNNER_TOKEN_MORIA=e GH_RUNNER_TOKEN_AI=f \
     'PORTAINER_API_KEY=x' 'INFRA_DIR=/stale' '  GH_RUNNER_TOKEN_INDENTED=no' >"$tmp/env"
   got="$(env_json "$tmp/env" /repo | jq -c .)"
   rm -rf "$tmp"
   local cb rb
   cb="$(printf '%s' "$got" | create_body | jq -c '[.Name, .ComposeFile, (.Env | length), (.Env | map(.name) | index("INFRA_DIR"))]')"
-  [ "$cb" = '["runners","docker-compose.runners.yml",6,5]' ] || die "selftest: create_body: $cb"
+  [ "$cb" = '["runners","docker-compose.runners.yml",7,6]' ] || die "selftest: create_body: $cb"
   rb="$(printf '%s' "$got" | redeploy_body true | jq -c '[.RepullImageAndRedeploy, (.Env | length), .Env[0].value]')"
-  [ "$rb" = '[true,6,"a"]' ] || die "selftest: redeploy_body: $rb"
-  want='[{"name":"GH_RUNNER_TOKEN_DARKANGEL","value":"a"},{"name":"GH_RUNNER_TOKEN_EA","value":"b"},{"name":"GH_RUNNER_TOKEN_HEAVEN","value":"c"},{"name":"GH_RUNNER_TOKEN_INFRA","value":"d"},{"name":"GH_RUNNER_TOKEN_MORIA","value":"e"},{"name":"INFRA_DIR","value":"/repo"}]'
+  [ "$rb" = '[true,7,"a"]' ] || die "selftest: redeploy_body: $rb"
+  want='[{"name":"GH_RUNNER_TOKEN_DARKANGEL","value":"a"},{"name":"GH_RUNNER_TOKEN_EA","value":"b"},{"name":"GH_RUNNER_TOKEN_HEAVEN","value":"c"},{"name":"GH_RUNNER_TOKEN_INFRA","value":"d"},{"name":"GH_RUNNER_TOKEN_MORIA","value":"e"},{"name":"GH_RUNNER_TOKEN_AI","value":"f"},{"name":"INFRA_DIR","value":"/repo"}]'
   [ "$got" = "$want" ] || die "selftest: env_json\n  got:  $got\n  want: $want"
   echo "runners-stack.sh: selftest ok"
 }

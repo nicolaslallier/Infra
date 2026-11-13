@@ -1,8 +1,10 @@
 # shellcheck shell=bash
 # Sourced by the runner scripts: the one table of GitHub runners.
-# Each entry is <name>:<Repo>. <name> is the compose service suffix
+# Each entry is <name>:<Repo>. New entries go at the end: gen-runner-env.sh
+# reads piped tokens in this order.
+# <name> is the compose service suffix
 # (runner-<name>), the runner's label, and the lowercase part of its PAT variable.
-RUNNERS=(darkangel:DarkAngel ea:EA heaven:Heaven infra:Infra moria:Moria)
+RUNNERS=(darkangel:DarkAngel ea:EA heaven:Heaven infra:Infra moria:Moria ai:AI)
 
 # runner_repo <name> -> nicolaslallier/<Repo>
 runner_repo() {

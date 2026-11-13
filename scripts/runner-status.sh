@@ -16,7 +16,7 @@
 #
 # --busy is what the targets that recreate the runners check first: doing
 # that mid-job leaves the workflow hanging with no result. One busy runner
-# out of the five is enough to refuse, because they are recreated together.
+# out of the six is enough to refuse, because they are recreated together.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
