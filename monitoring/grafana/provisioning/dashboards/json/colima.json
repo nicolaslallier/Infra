@@ -56,7 +56,7 @@
   "title": "Colima VMs",
   "uid": "colima-vms",
   "version": 1,
-  "description": "The Colima VMs on the Mac Studio (colima-studio, 192.168.2.66) and the Mac mini (colima-mini, 192.168.2.67): node-exporter and cadvisor inside each VM (docker-compose.colima.yml).",
+  "description": "The Colima VMs on the Mac Studio (colima-studio, 192.168.2.66) and the Mac mini (colima-mini, 192.168.2.68): node-exporter and cadvisor inside each VM (docker-compose.colima.yml).",
   "panels": [
     {
       "type": "row",
