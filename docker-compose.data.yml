@@ -1,5 +1,5 @@
 # The "data" stack, on the Mac mini (Portainer environment 7, Colima VM
-# 192.168.2.67): object storage (SeaweedFS s3 + s3-admin), the message
+# 192.168.2.68): object storage (SeaweedFS s3 + s3-admin), the message
 # broker (RabbitMQ) and push notifications (ntfy) -- the stateful services
 # the apps use -- split out of the infra stack (see stacks.conf, and
 # CLAUDE.md "Portainer-managed stack"). It publishes its ports on the mini's
@@ -180,7 +180,7 @@ configs:
             "config": {
               "issuer": "https://keycloak.famillelallier.net/realms/infra",
               "clientId": "s3-sts",
-              "jwksUri": "http://192.168.2.67:8080/realms/infra/protocol/openid-connect/certs",
+              "jwksUri": "http://192.168.2.68:8080/realms/infra/protocol/openid-connect/certs",
               "roleMapping": {
                 "rules": [
                   { "claim": "groups", "value": "s3-admin", "role": "arn:aws:iam::role/S3AdminRole" },

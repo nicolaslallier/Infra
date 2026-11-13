@@ -11,7 +11,7 @@
     hostname: colima-studio
     mac: mac-infra
 
-- targets: ["192.168.2.67"]
+- targets: ["192.168.2.68"]
   labels:
     hostname: colima-mini
     mac: mac-mini
