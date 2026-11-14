@@ -295,8 +295,9 @@ both together, then `make provision-app app=portail`.
    `.runner.env` and this compose on `main`, `make runners-up`.
 
 **What `runner-ai` does and does not guarantee between jobs.** It is
-`EPHEMERAL` (fresh registration per job) and its jobs run as the `runner` user
-with `no-new-privileges` (the image's passwordless `sudo` no longer works),
+`EPHEMERAL` (fresh registration per job), `UNSET_CONFIG_VARS` keeps the
+registration PAT out of the jobs' environment, and its jobs run as the
+`runner` user with `no-new-privileges` (the image's passwordless `sudo` no longer works),
 with `/_work`, `/tmp` and `/home/runner` on tmpfs, wiped at every restart. But
 `restart` reuses the container: `/actions-runner`, which the image makes
 `runner`-owned (the runner's own binaries), survives, so a job could still
