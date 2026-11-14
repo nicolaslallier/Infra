@@ -309,6 +309,14 @@ def _use_local_token_counting() -> None:
     proxy_server._try_provider_token_count = _local_only
 
 
+def _team_cache(data, team):
+    """Cache entries are per team, from the authenticated key (never the request body's own
+    namespace): a hit must not hand one team's answer to another. Keeps the client's ttl/no-cache."""
+    c = data.get("cache")
+    data["cache"] = {**(c if isinstance(c, dict) else {}), "namespace": team or "no-team"}
+    return data
+
+
 class CloudPIIGate(CustomLogger):
     def __init__(
         self,
@@ -417,7 +425,7 @@ class CloudPIIGate(CustomLogger):
                 for name in _strings(data.get(key)):
                     if name not in self.policy["local_models"]:
                         raise _refuse(f"'{name}' is not a local model; it cannot be a fallback of a local request")
-            return data  # local: the data never leaves the Macs
+            return _team_cache(data, team)  # local: the data never leaves the Macs
 
         if call_type not in ALLOWED_CALL_TYPES:
             raise _refuse(f"the '{call_type}' endpoint is not available toward a non-local model (it is not masked)")
@@ -438,7 +446,7 @@ class CloudPIIGate(CustomLogger):
         except Exception:
             # Fail closed, and never put the text in the error.
             raise HTTPException(status_code=503, detail="cloud-pii: PII scanning unavailable, request refused") from None
-        return data
+        return _team_cache(data, team)
 
 
 gate = CloudPIIGate()
