@@ -162,8 +162,12 @@ def apply(spec: dict, client, rotate: str | None = None, log=None, emit=None) ->
             team_ids[alias] = existing[alias]["team_id"]
             client.request("POST", "/team/update", {**body, "team_id": team_ids[alias]})
             log(f"team '{alias}': updated")
+            if team_ids[alias] != alias:
+                log(f"team '{alias}' has id '{team_ids[alias]}', not '{alias}': the cloud-pii policy is keyed on "
+                    f"the id, so this team gets the strictest set until it is deleted and recreated by this script")
         else:
-            team_ids[alias] = client.request("POST", "/team/new", body)["team_id"]
+            # The id is the alias: pii_policy.yaml keys on it, and unlike an alias an id is unique.
+            team_ids[alias] = client.request("POST", "/team/new", {**body, "team_id": alias})["team_id"]
             log(f"team '{alias}': created")
 
     have_users = {u["user_id"] for u in _items(client.request("GET", "/user/list"), "users")}

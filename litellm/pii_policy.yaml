@@ -1,11 +1,11 @@
-# What the cloud-pii guardrail (litellm/cloud_pii.py) masks, and for whom.
+# What the cloud_pii.gate callback (litellm/cloud_pii.py) masks, and for whom.
 # Read at runtime from /app/pii_policy.yaml; checked against teams.yaml and
 # config.yaml by `make test` (scripts/test_pii_policy.py).
 #
 # The rule is inverted: EVERY model is masked except the aliases below, so a
 # model added in the admin UI under a free name is masked, not leaked. Local
-# models keep seeing the real data, which never leaves the Macs. Never list an
-# alias that talks to anthropic/, gemini/ or openai/ here.
+# models keep seeing the real data, which never leaves the Macs. Only an alias served
+# by Ollama (ollama/ or ollama_chat/ in config.yaml) may be listed; `make test` checks.
 local_models:
   - qwen3.8:27b-mlx
   - gemma4:26b-a4b-it-qat
@@ -39,7 +39,8 @@ groups:
     languages: [fr, en]
     entities: [PERSON]
 
-# Groups applied to a non-local request, per team.
+# Groups applied to a non-local request, per team ID (not alias, which can be
+# duplicated): make litellm-provision creates each team with its alias as its id.
 teams:
   admin: [identifiants, noms]
   famille: [identifiants, noms]

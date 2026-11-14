@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import yaml
 
-PROVIDER_PREFIXES = ("anthropic/", "gemini/", "openai/")
+LOCAL_PREFIXES = ("ollama/", "ollama_chat/")  # the inverted rule again: only Ollama counts as local
 
 
 @dataclass(frozen=True)
@@ -57,8 +57,8 @@ def validate(policy: dict, teams: dict, config: dict) -> list[str]:
     for name in policy.get("local_models") or []:
         if name not in by_name:
             errs.append(f"local model '{name}' is not in config.yaml model_list")
-        elif any(model.startswith(PROVIDER_PREFIXES) for model in by_name[name]):
-            errs.append(f"local model '{name}' talks to a cloud provider; it must not be in local_models")
+        elif any(not model.startswith(LOCAL_PREFIXES) for model in by_name[name]):
+            errs.append(f"local model '{name}' is not served by Ollama (ollama/ or ollama_chat/); it must not be in local_models")
     return errs
 
 

@@ -1,22 +1,36 @@
 """cloud-pii: mask personal information on requests to non-local models only.
 
-Mounted into the litellm container next to pii_policy.py (see config.yaml `guardrails:`).
-The policy (pii_policy.yaml) says which aliases are local; everything else is masked, so an
-alias added in the admin UI under a free name is masked, not leaked. Fails closed.
+One pre-call callback (`litellm_settings.callbacks: [cloud_pii.gate]` in config.yaml), mounted
+next to pii_policy.py. It is a callback and not a guardrail on purpose: LiteLLM hands a
+guardrail only the text its per-endpoint handler finds (nothing for a request without text,
+no `system` or `tool_use` on /v1/messages) and rewrites `tools` on the way back, whereas a
+callback always runs, sees the whole request and receives the authenticated key itself.
+
+The policy (pii_policy.yaml) lists the local aliases; everything else is masked, so an alias
+added in the admin UI under a free name is masked, not leaked. Fails closed.
 Design: docs/superpowers/specs/2026-11-14-litellm-cloud-pii-design.md
 """
+import asyncio
+import hashlib
 import os
+from collections import OrderedDict
 from typing import Any
 
 from fastapi import HTTPException
-from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.integrations.custom_logger import CustomLogger
-from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.guardrails.guardrail_hooks.presidio import _OPTIONAL_PresidioPIIMasking
 
 from pii_policy import chunk_text, decide, entities_for, load_policy
 
 TEXT_TYPES = {"text", "input_text", "output_text"}  # content blocks Presidio can read
+# Endpoints whose request body this module knows how to read and mask. Anything else, toward a
+# non-local model, is refused rather than guessed at (moderations, files, batches, images,
+# Gemini-native generateContent, provider pass-through...).
+ALLOWED_CALL_TYPES = {
+    "completion", "acompletion", "text_completion", "atext_completion",
+    "embedding", "aembedding", "responses", "aresponses", "anthropic_messages",
+}
+FALLBACK_KEYS = ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks")
 
 
 def _refuse(detail: str) -> HTTPException:
@@ -28,13 +42,25 @@ def _add(slots: list, container: Any, key: Any) -> None:
         slots.append((container, key))
 
 
+def _items(node: Any):
+    return node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+
+
 def _string_leaves(node: Any, slots: list) -> None:
-    items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
-    for k, v in list(items):
+    for k, v in list(_items(node)):
         if isinstance(v, str):
             slots.append((node, k))
         else:
             _string_leaves(v, slots)
+
+
+def _descriptions(node: Any, slots: list) -> None:
+    """Tool definitions are sent to the provider too: their `description` strings, at any depth."""
+    for k, v in list(_items(node)):
+        if k == "description" and isinstance(v, str):
+            slots.append((node, k))
+        else:
+            _descriptions(v, slots)
 
 
 def _blocks(content: Any, slots: list) -> None:
@@ -45,7 +71,8 @@ def _blocks(content: Any, slots: list) -> None:
         elif not isinstance(b, dict):
             raise _refuse("unreadable content block")
         elif b.get("type") in TEXT_TYPES:
-            _add(slots, b, "text") if "text" in b else None
+            if "text" in b:
+                _add(slots, b, "text")
         elif b.get("type") == "tool_use":
             _string_leaves(b.get("input"), slots)
         elif b.get("type") == "tool_result":
@@ -54,22 +81,10 @@ def _blocks(content: Any, slots: list) -> None:
                 slots.append((b, "content"))
             elif isinstance(c, list):
                 _blocks(c, slots)
-        elif b.get("type") == "thinking":
-            _add(slots, b, "thinking") if "thinking" in b else None
-        elif b.get("type") == "redacted_thinking":
-            pass  # opaque, nothing to read
+        elif b.get("type") in ("thinking", "redacted_thinking"):
+            pass  # signed model output from an already-masked prompt: altering it breaks the signature
         else:
             raise _refuse(f"'{b.get('type')}' content is not sent to a non-local model (it cannot be scanned)")
-
-
-def _descriptions(node: Any, slots: list) -> None:
-    """Tool definitions are sent to the provider too: their `description` strings, at any depth."""
-    items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
-    for k, v in list(items):
-        if k == "description" and isinstance(v, str):
-            slots.append((node, k))
-        else:
-            _descriptions(v, slots)
 
 
 def _slots(data: dict) -> list:
@@ -79,10 +94,14 @@ def _slots(data: dict) -> list:
         v = data.get(field)
         if isinstance(v, str):
             slots.append((data, field))
+        elif isinstance(v, dict) and field == "prompt":  # Responses API prompt template
+            _string_leaves(v.get("variables"), slots)
         elif isinstance(v, list):
             for i, item in enumerate(v):
                 if isinstance(item, str):
                     slots.append((v, i))
+                elif isinstance(item, (int, list)):
+                    raise _refuse("token arrays cannot be scanned")
                 elif isinstance(item, dict) and "content" in item:
                     if isinstance(item["content"], str):
                         slots.append((item, "content"))
@@ -90,6 +109,12 @@ def _slots(data: dict) -> list:
                         _blocks(item["content"], slots)
                 elif isinstance(item, dict):
                     _blocks([item], slots)
+    prediction = data.get("prediction")
+    if isinstance(prediction, dict):
+        if isinstance(prediction.get("content"), str):
+            slots.append((prediction, "content"))
+        elif isinstance(prediction.get("content"), list):
+            _blocks(prediction["content"], slots)
     _descriptions(data.get("tools"), slots)
     for m in data.get("messages") or []:
         if isinstance(m.get("name"), str):
@@ -104,12 +129,9 @@ def _slots(data: dict) -> list:
             _blocks(c, slots)
         for tc in m.get("tool_calls") or []:
             fn = tc.get("function") if isinstance(tc, dict) else None
-            if isinstance(fn, dict):
-                _add(slots, fn, "arguments") if "arguments" in fn else None
+            if isinstance(fn, dict) and "arguments" in fn:
+                _add(slots, fn, "arguments")
     return slots
-
-
-FALLBACK_KEYS = ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks")
 
 
 def _strings(node: Any):
@@ -125,10 +147,8 @@ def _strings(node: Any):
             yield from _strings(v)
 
 
-def check_sendable(data: dict, images: list | None = None) -> list:
+def check_sendable(data: dict) -> list:
     """Refuse what cannot be scanned (400); otherwise return the request's text slots."""
-    if images:
-        raise _refuse("images are not sent to a non-local model (they cannot be scanned)")
     if data.get("vector_store_ids") or any(
         isinstance(t, dict) and t.get("type") == "file_search" for t in data.get("tools") or []
     ):
@@ -137,114 +157,60 @@ def check_sendable(data: dict, images: list | None = None) -> list:
 
 
 def _replace(text: str, spans: list[tuple[int, int, str]]) -> str:
-    """Replace detected spans by <ENTITY_TYPE> (Presidio's default), longest first on overlap."""
-    keep: list[tuple[int, int, str]] = []
+    """Replace detected spans by <ENTITY_TYPE> (Presidio's default).
+
+    Overlapping spans are merged into one covering both, so no tail of the longer one survives.
+    """
+    merged: list[tuple[int, int, str]] = []
     for s, e, t in sorted(spans, key=lambda x: (x[0], -x[1])):
-        if not keep or s >= keep[-1][1]:
-            keep.append((s, e, t))
-    for s, e, t in reversed(keep):
+        if merged and s < merged[-1][1]:
+            ms, me, mt = merged[-1]
+            if e > me:
+                merged[-1] = (ms, e, mt)
+        else:
+            merged.append((s, e, t))
+    for s, e, t in reversed(merged):
         text = text[:s] + f"<{t}>" + text[e:]
     return text
 
 
-class CloudPII(CustomGuardrail):
-    # System prompts hold personal information too: never let the framework skip them.
-    skip_system_message_in_guardrail = False
+def _use_local_token_counting() -> None:
+    """Make /v1/messages/count_tokens (and friends) count locally.
 
-    def __init__(
-        self,
-        presidio_analyzer_api_base: str | None = None,
-        presidio_anonymizer_api_base: str | None = None,
-        policy_path: str | None = None,
-        chunk_chars: int = 100_000,
-        chunk_overlap: int = 200,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.policy = load_policy(policy_path or os.environ.get("PII_POLICY_PATH", "/app/pii_policy.yaml"))
-        self.chunk_chars, self.chunk_overlap = chunk_chars, chunk_overlap
-        # Presidio's entities, language and thresholds are instance state, so one helper per
-        # (group, language) rather than mutating a shared one under concurrent requests.
-        self._helpers: dict[tuple[str, str], _OPTIONAL_PresidioPIIMasking] = {}
-        for name, group in self.policy["groups"].items():
-            for lang in group["languages"]:
-                self._helpers[(name, lang)] = _OPTIONAL_PresidioPIIMasking(
-                    presidio_analyzer_api_base=presidio_analyzer_api_base,
-                    presidio_anonymizer_api_base=presidio_anonymizer_api_base,
-                    pii_entities_config={e: "MASK" for e in entities_for(self.policy, (name,))},
-                    presidio_score_thresholds=group.get("thresholds"),
-                    presidio_language=lang,
-                    guardrail_name=f"cloud-pii-{name}-{lang}",
-                    event_hook="pre_call",
-                    default_on=False,
-                )
+    LiteLLM would otherwise post the whole conversation (messages, system, tools) to Anthropic's
+    count-tokens API, and that route never runs a pre-call hook. Returning None from the single
+    choke point makes it fall through to its local tokenizer.
+    """
+    try:
+        from litellm.proxy import proxy_server
+    except Exception:  # noqa: BLE001
+        return
 
-    @staticmethod
-    def _team(request_data: dict) -> str | None:
-        """The authenticated key's team, or None (the strictest set).
-
-        Only the proxy's own UserAPIKeyAuth object counts: a JSON body cannot contain a Python
-        object, whereas any `user_api_key_team_alias` string in `metadata` or `litellm_metadata`
-        may have been written by the client.
-        """
-        for key in ("metadata", "litellm_metadata"):
-            auth = (request_data.get(key) or {}).get("user_api_key_auth")
-            if isinstance(auth, UserAPIKeyAuth):
-                return auth.team_alias or None
+    async def _local_only(*args, **kwargs):
         return None
 
-    async def _mask(self, text: str, groups: tuple[str, ...], request_data: dict, memo: dict) -> str:
-        if (text, groups) in memo:
-            return memo[(text, groups)]
-        spans: list[tuple[int, int, str]] = []
-        for g in groups:
-            for lang in self.policy["groups"][g]["languages"]:
-                helper = self._helpers[(g, lang)]
-                for start, end in chunk_text(text, self.chunk_chars, self.chunk_overlap):
-                    found = await helper.analyze_text(text=text[start:end], presidio_config=None, request_data=request_data)
-                    for r in helper.filter_analyze_results_by_score(found):
-                        t = r["entity_type"]
-                        spans.append((start + r["start"], start + r["end"], str(getattr(t, "value", t))))
-        memo[(text, groups)] = _replace(text, spans)
-        return memo[(text, groups)]
-
-    async def apply_guardrail(self, inputs, request_data, input_type, logging_obj=None):
-        if input_type != "request":
-            return inputs  # the model's answer is not rewritten (non-goal)
-        model = inputs.get("model") or request_data.get("model")
-        decision = decide(self.policy, model, self._team(request_data))
-        if not decision.mask:
-            return inputs  # local: the data never leaves the Macs
-
-        slots = check_sendable(request_data, inputs.get("images"))  # refuse before touching anything
-
-        memo: dict = {}
-        try:
-            for container, key in slots:
-                container[key] = await self._mask(container[key], decision.groups, request_data, memo)
-            # The framework writes inputs["texts"] back over the messages: keep them consistent.
-            inputs["texts"] = [await self._mask(t, decision.groups, request_data, memo) for t in inputs.get("texts", [])]
-        except HTTPException:
-            raise
-        except Exception:
-            # Fail closed, and never put the text in the error.
-            raise HTTPException(status_code=503, detail="cloud-pii: PII scanning unavailable, request refused") from None
-        return inputs
+    proxy_server._try_provider_token_count = _local_only
 
 
 class CloudPIIGate(CustomLogger):
-    """Refusals for every request, text or not.
-
-    LiteLLM calls a guardrail only when it finds text in the request, so an image-only (or
-    otherwise text-less) request would skip CloudPII entirely. This pre-call callback runs
-    regardless and applies the same refusals; masking stays in CloudPII.
-    Registered with `litellm_settings.callbacks: cloud_pii.gate`.
-    """
-
-    def __init__(self, policy_path: str | None = None):
+    def __init__(
+        self,
+        presidio_analyzer_api_base: str | None = None,
+        policy_path: str | None = None,
+        chunk_chars: int = 100_000,
+        chunk_overlap: int = 200,
+        timeout: float = 15.0,
+        cache_size: int = 512,
+    ):
         super().__init__()
         self._path = policy_path
+        self._analyzer = presidio_analyzer_api_base
         self._policy: dict | None = None  # loaded on first use: importing must not need the file
+        self._helpers: dict[tuple[str, str], _OPTIONAL_PresidioPIIMasking] = {}
+        self.chunk_chars, self.chunk_overlap, self.timeout = chunk_chars, chunk_overlap, timeout
+        self._cache: OrderedDict = OrderedDict()
+        self._cache_size = cache_size
+        _use_local_token_counting()
 
     @property
     def policy(self) -> dict:
@@ -252,16 +218,72 @@ class CloudPIIGate(CustomLogger):
             self._policy = load_policy(self._path or os.environ.get("PII_POLICY_PATH", "/app/pii_policy.yaml"))
         return self._policy
 
+    def _helper(self, group: str, lang: str) -> _OPTIONAL_PresidioPIIMasking:
+        # Presidio's entities, language and thresholds are instance state, so one helper per
+        # (group, language) rather than mutating a shared one under concurrent requests.
+        if (group, lang) not in self._helpers:
+            g = self.policy["groups"][group]
+            self._helpers[(group, lang)] = _OPTIONAL_PresidioPIIMasking(
+                presidio_analyzer_api_base=self._analyzer,
+                presidio_anonymizer_api_base=self._analyzer,  # required by the helper, never called
+                pii_entities_config={e: "MASK" for e in entities_for(self.policy, (group,))},
+                presidio_score_thresholds=g.get("thresholds"),
+                presidio_language=lang,
+                guardrail_name=f"cloud-pii-{group}-{lang}",
+                event_hook="pre_call",
+                default_on=False,
+            )
+        return self._helpers[(group, lang)]
+
+    async def _mask(self, text: str, groups: tuple[str, ...], data: dict) -> str:
+        key = (hashlib.sha256(text.encode()).hexdigest(), groups)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        spans: list[tuple[int, int, str]] = []
+        for g in groups:
+            for lang in self.policy["groups"][g]["languages"]:
+                helper = self._helper(g, lang)
+                for start, end in chunk_text(text, self.chunk_chars, self.chunk_overlap):
+                    found = await asyncio.wait_for(
+                        helper.analyze_text(text=text[start:end], presidio_config=None, request_data=data),
+                        timeout=self.timeout,
+                    )
+                    for r in helper.filter_analyze_results_by_score(found):
+                        t = r["entity_type"]
+                        spans.append((start + r["start"], start + r["end"], str(getattr(t, "value", t))))
+        self._cache[key] = _replace(text, spans)
+        if len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
+        return self._cache[key]
+
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
-        if decide(self.policy, data.get("model"), None).mask:
-            check_sendable(data)
-        else:
+        model = data.get("model")
+        # The team is the authenticated key's team_id, never anything the request body says; a
+        # team alias can be duplicated or renamed, the id cannot. No team: the strictest set.
+        team = getattr(user_api_key_dict, "team_id", None) or None
+        decision = decide(self.policy, model, team)
+
+        if not decision.mask:
             # A local request may carry its own fallbacks: if one names a cloud alias, the router
             # would retry there with the prompt we left unmasked. Every name must be local.
             for key in FALLBACK_KEYS:
                 for name in _strings(data.get(key)):
                     if name not in self.policy["local_models"]:
                         raise _refuse(f"'{name}' is not a local model; it cannot be a fallback of a local request")
+            return data  # local: the data never leaves the Macs
+
+        if call_type not in ALLOWED_CALL_TYPES:
+            raise _refuse(f"the '{call_type}' endpoint is not available toward a non-local model (it is not masked)")
+        slots = check_sendable(data)  # refuse before touching anything
+        try:
+            for container, key in slots:
+                container[key] = await self._mask(container[key], decision.groups, data)
+        except HTTPException:
+            raise
+        except Exception:
+            # Fail closed, and never put the text in the error.
+            raise HTTPException(status_code=503, detail="cloud-pii: PII scanning unavailable, request refused") from None
         return data
 
 

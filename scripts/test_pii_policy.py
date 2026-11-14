@@ -99,6 +99,14 @@ def test_validate_rejects_local_model_on_a_provider():
     assert has(errors(p=p), "cloud-anthropic"), errors(p=p)
 
 
+def test_validate_rejects_local_model_not_on_ollama():
+    c = copy.deepcopy(CONFIG)
+    c["model_list"].append({"model_name": "vertex-thing", "litellm_params": {"model": "vertex_ai/gemini-pro"}})
+    p = copy.deepcopy(P)
+    p["local_models"].append("vertex-thing")
+    assert has(errors(p=p, c=c), "vertex-thing"), errors(p=p, c=c)  # any non-Ollama provider, not just three
+
+
 def test_validate_rejects_unknown_group():
     p = copy.deepcopy(P)
     p["teams"]["famille"] = ["identifiants", "secrets"]
@@ -157,9 +165,9 @@ def _config():
     return yaml.safe_load(open(os.path.join(ROOT, "litellm", "config.yaml")))
 
 
-def test_cloud_pii_is_the_only_default_on_guardrail():
-    on = [g["guardrail_name"] for g in _config().get("guardrails", []) if g["litellm_params"].get("default_on")]
-    assert on == ["cloud-pii"], on
+def test_masking_is_a_callback_not_a_guardrail():
+    # LiteLLM hands a guardrail only the text its endpoint handler finds; the callback sees everything.
+    assert not [g for g in _config().get("guardrails", []) if g["litellm_params"].get("default_on")]
 
 
 def test_old_pii_guardrails_are_gone():
@@ -170,13 +178,13 @@ def test_old_pii_guardrails_are_gone():
 def test_no_fallbacks_configured():
     c = _config()
     for section in ("router_settings", "litellm_settings"):
-        assert "fallbacks" not in (c.get(section) or {}), section  # masking is decided on the requested alias
+        for key in ("fallbacks", "default_fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
+            assert key not in (c.get(section) or {}), (section, key)  # masking is decided on the requested alias
 
 
 def test_gate_is_registered_as_a_callback():
-    # LiteLLM calls a guardrail only when it finds text; the gate refuses image-only requests.
-    assert "cloud_pii.gate" in ((_config().get("litellm_settings") or {}).get("callbacks") or []) or \
-        (_config().get("litellm_settings") or {}).get("callbacks") == "cloud_pii.gate"
+    # A list: the string form would replace litellm.callbacks and drop the budget limiter.
+    assert (_config().get("litellm_settings") or {}).get("callbacks") == ["cloud_pii.gate"]
 
 
 def test_compose_mounts_the_guardrail_files():

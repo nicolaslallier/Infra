@@ -168,37 +168,43 @@ never orphans another app that's still attached to it):
   counts 0).
   Personal information is masked only toward cloud models (`cloud-pii`, below
   under `presidio-*`); `second-brain` is refused toward them for now.
-- **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio,
-  LiteLLM's PII guardrail (Quebec's Loi 25). The single guardrail `cloud-pii`
+- **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio, behind
+  LiteLLM's PII masking (Quebec's Loi 25), done by **`cloud_pii.gate`**
   (`litellm/cloud_pii.py`, policy `litellm/pii_policy.yaml`, both bind-mounted
-  into `/app`) masks NAS, RAMQ, permis SAAQ, passeport, cartes, comptes,
-  courriels, téléphones, adresses civiques and codes postaux as `<ENTITY>`, and
-  people's names (spaCy, fr then en) for every team but `dev-sessions`, **only
-  on requests to non-local models**: the Ollama aliases listed as
-  `local_models` see the real data, which never leaves the Macs. The rule is
-  inverted on purpose: everything not listed local is masked, so a model added
-  in the admin UI under a free name is masked, not leaked; a key without a team
-  (the master key) gets the strictest set. Toward a cloud model it also
-  refuses (400) what Presidio cannot read (images, files, audio, unknown
-  blocks) and `vector_store_ids`/`file_search` (`second-brain`) until a live
-  check proves retrieved text is masked; `cloud_pii.gate`
-  (`litellm_settings.callbacks`) applies those refusals to text-less requests,
-  which LiteLLM never hands to a guardrail, and refuses a local request whose
-  own `fallbacks`/`context_window_fallbacks`/`content_policy_fallbacks` name a
-  non-local alias (the router would retry in the cloud with the prompt unmasked);
-  fallbacks stored in the database or on a key are invisible to it, so keep
-  none that lead to a cloud alias. The team comes only from the proxy's own
-  authenticated-key object, never from a `metadata` string the client wrote
-  (without it: the strictest set). Tool descriptions, `system`, `instructions`,
-  `user`, message `name` and function-call arguments are masked too.
-  `cloud-pii` asks only
-  presidio-analyzer for spans and replaces them itself;
-  `presidio-anonymizer` is deployed but unused. Recognizers and models live in
-  `presidio/` (bind-mounted); the French spaCy model is downloaded on the
-  analyzer's first start into the `presidio-models` volume. Fail closed: with
-  the analyzer down a cloud request gets 503, a local one is unaffected. On
-  infra-net only, no vhost. `make test` checks the policy against `teams.yaml`
-  and `config.yaml` and runs the guardrail against the pinned LiteLLM.
+  into `/app`, registered as `litellm_settings.callbacks: [cloud_pii.gate]`). It is
+  a callback and not a `guardrails:` entry because LiteLLM gives a guardrail only the
+  text its endpoint handler finds (nothing for a text-less request, no `system` or
+  `tool_use` on `/v1/messages`) and rewrites `tools` on the way back. It masks NAS,
+  RAMQ, permis SAAQ, passeport, cartes, comptes, courriels, téléphones, adresses
+  civiques and codes postaux as `<ENTITY>`, and people's names (spaCy, fr then en)
+  for every team but `dev-sessions`, **only on requests to non-local models**: the
+  Ollama aliases listed as `local_models` see the real data, which never leaves the
+  Macs. The rule is inverted on purpose: everything not listed local is masked, so a
+  model added in the admin UI under a free name is masked, not leaked. The team is
+  the authenticated key's **`team_id`** (never a `metadata` string the client wrote,
+  never an alias, which can be duplicated); `litellm-provision` creates each team
+  with its alias as id, and a key with no team, or a team with another id, gets the
+  strictest set. Toward a non-local model it also refuses (400) what Presidio cannot
+  read (images, files, audio, unknown blocks), `vector_store_ids`/`file_search`
+  (`second-brain`) until a live check proves retrieved text is masked, and every
+  endpoint it does not know how to read (moderations, files, batches, pass-through);
+  on a local request it refuses a `fallbacks`/`context_window_fallbacks`/
+  `content_policy_fallbacks` that names a non-local alias, because the router would
+  retry in the cloud with the prompt unmasked. It makes provider token counting local
+  (`/v1/messages/count_tokens` would otherwise post the whole conversation to
+  Anthropic with no hook). Fallbacks saved in the database or on a key are invisible
+  to it: keep none that lead to a cloud alias. Not covered: Gemini-native
+  `/v1beta/...:generateContent` and the provider pass-through prefixes run no hook,
+  so `nginx/conf.d/litellm.conf` 403s them for LAN clients; a container calling
+  `litellm:4000` directly still reaches them. `thinking` blocks pass unchanged (a
+  signature breaks otherwise). Only presidio-analyzer is called, for spans, and the
+  `<ENTITY>` replacement is done in the gate (`presidio-anonymizer` is deployed but
+  unused, though Presidio's helper still wants its URL). Fail closed: analyzer down
+  or slow (15 s) gives a cloud request 503, a local one is unaffected. Recognizers
+  and models live in `presidio/` (bind-mounted); the French spaCy model is
+  downloaded on the analyzer's first start into the `presidio-models` volume. On
+  infra-net only, no vhost. `make test` checks the policy against `teams.yaml` and
+  `config.yaml` and runs the gate against the pinned LiteLLM.
 - **`litellm-pgvector`** — `infra-litellm-pgvector`, built by `make app-images`
   from a pinned commit of BerriAI/litellm-pgvector (`LITELLM_PGVECTOR_REF` in
   the Makefile; keep the compose tag in step). LiteLLM has no pgvector driver

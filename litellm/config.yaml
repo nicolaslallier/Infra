@@ -36,8 +36,8 @@ model_list:
   # Cloud models, one per provider. Real money: the 200 CAD/month cap is
   # litellm_settings.max_budget below, split per team in teams.yaml; a team
   # reaches these only if it lists the alias in `models:`. No fallback to or
-  # from the local models. Prompts leave the house here, so the cloud-pii
-  # guardrail below masks them (and refuses what it cannot read).
+  # from the local models. Prompts leave the house here, so the cloud_pii.gate
+  # callback below masks them (and refuses what it cannot read).
   - model_name: cloud-anthropic
     litellm_params:
       model: anthropic/claude-sonnet-5-5
@@ -80,33 +80,31 @@ vector_store_registry:
       api_base: http://litellm-pgvector:8000
       vector_store_description: "Second cerveau : notes et documents indexés (qwen3-embedding, pgvector)"
 
-# PII guardrail (Quebec's Loi 25): cloud-pii, litellm/cloud_pii.py, mounted next
-# to this file. Personal information is masked ONLY on requests that leave for a
-# cloud provider; local models (Ollama on the Macs) see the real data, which
-# never leaves the house. The rule is inverted: everything is masked except the
-# aliases listed as local_models in pii_policy.yaml, so a model added in the
-# admin UI under a free name is masked, not leaked. Which entities, and which
-# teams also get people's names, is pii_policy.yaml (checked against teams.yaml
-# and this file by `make test`).
+# PII masking (Quebec's Loi 25): `cloud_pii.gate`, litellm/cloud_pii.py, a pre-call
+# callback registered under litellm_settings.callbacks below, with the policy in
+# litellm/pii_policy.yaml (both mounted next to this file; `make test` checks the
+# policy against teams.yaml and this file). It is a callback and not a `guardrails:`
+# entry because LiteLLM hands a guardrail only the text its endpoint handler finds
+# (nothing for a request without text, no `system` or `tool_use` on /v1/messages)
+# and rewrites `tools` on the way back; a callback always runs and sees it all.
 #
-# It finds spans with presidio-analyzer (recognizers in presidio/recognizers.yaml)
-# and replaces each with <ENTITY_TYPE>. Pre-call only: the answer is not
-# rewritten. Fails closed: with the analyzer down, a cloud request is refused
-# (503); a local one is unaffected. Refused (400) toward a cloud model, because
-# Presidio only reads text: images, files, audio and unknown block types, and a
-# request with vector_store_ids or a file_search tool (second-brain), until a
-# live check shows the retrieved text is masked too.
+# Personal information is masked ONLY on requests that leave for a non-local model;
+# the Ollama aliases listed as local_models see the real data, which never leaves
+# the house. The rule is inverted: everything not listed local is masked, so a model
+# added in the admin UI under a free name is masked, not leaked. Which entities, and
+# which teams (by team id) also get people's names, is pii_policy.yaml. It asks
+# presidio-analyzer for spans and replaces them with <ENTITY_TYPE>; pre-call only,
+# the answer is not rewritten.
 #
-# LiteLLM calls a guardrail only when it finds text in the request, so
-# `cloud_pii.gate` (litellm_settings.callbacks below) applies the same refusals
-# to every request. No `fallbacks:` anywhere: the decision is taken on the
-# alias that was asked for, before routing.
-guardrails:
-  - guardrail_name: cloud-pii
-    litellm_params:
-      guardrail: cloud_pii.CloudPII
-      mode: pre_call
-      default_on: true
+# Fails closed: analyzer down or slow, a cloud request is refused (503); a local one
+# is unaffected. Refused (400) toward a cloud model: what Presidio cannot read
+# (images, files, audio, unknown block types), `vector_store_ids`/`file_search`
+# (second-brain, until a live check shows retrieved text is masked), every endpoint
+# the gate does not know how to read (moderations, files, batches, pass-through...),
+# and, on a local request, a `fallbacks` that names a cloud alias. No `fallbacks:`
+# here either: the decision is taken on the alias asked for, before routing. It also
+# makes provider token counting local, because /v1/messages/count_tokens would post
+# the whole conversation to Anthropic without any hook.
 
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
@@ -116,8 +114,9 @@ litellm_settings:
   # (global_budget_cad x cad_to_usd); `make test` fails if they disagree.
   max_budget: 144.0
   budget_duration: 30d
-  # Refusals for every request, text or not (see the guardrails comment above).
-  callbacks: cloud_pii.gate
+  # The PII gate (see the comment above). A list: the string form would replace
+  # litellm.callbacks and drop the budget limiter.
+  callbacks: [cloud_pii.gate]
   # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
   # carries MCP tools, keep only the top_k whose name + description are
   # closest to the last user message. The index of the registry's tools is

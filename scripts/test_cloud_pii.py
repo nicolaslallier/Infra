@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,11 +29,14 @@ class Stub(ThreadingHTTPServer):
 
     def __init__(self):
         self.calls = 0
+        self.delay = 0.0
 
         class H(BaseHTTPRequestHandler):
             def do_POST(h):  # noqa: N805
                 body = json.loads(h.rfile.read(int(h.headers["Content-Length"])))
                 self.calls += 1
+                if self.delay:
+                    time.sleep(self.delay)
                 text, wanted = body["text"], body.get("entities") or []
                 out = []
                 if "EMAIL_ADDRESS" in wanted:
@@ -48,7 +52,7 @@ class Stub(ThreadingHTTPServer):
                 h.end_headers()
                 h.wfile.write(data)
 
-            def log_message(h, *a):  # noqa: N805
+            def log_message(h, *args):  # noqa: N805
                 pass
 
         super().__init__(("127.0.0.1", 0), H)
@@ -63,23 +67,22 @@ STUB = Stub()
 
 
 def guard(url=None, **kw):
-    u = url or STUB.url
-    return cp.CloudPII(
-        guardrail_name="cloud-pii", event_hook="pre_call", default_on=True,
-        presidio_analyzer_api_base=u, presidio_anonymizer_api_base=u,
+    return cp.CloudPIIGate(
+        presidio_analyzer_api_base=url or STUB.url,
         policy_path=os.path.join(ROOT, "litellm", "pii_policy.yaml"), **kw,
     )
 
 
-def run(g, model, texts, team="apps", messages=None, extra=None, images=None, input_type="request", spoof=None):
-    # What the proxy does: it puts the authenticated key's object in the route's metadata.
-    meta = {"user_api_key_auth": UserAPIKeyAuth(team_alias=team)}
-    data = {"model": model, "messages": messages if messages is not None else [], "metadata": meta, **(extra or {}), **(spoof or {})}
-    inputs = {"texts": list(texts), "model": model}
-    if images:
-        inputs["images"] = images
-    out = asyncio.run(g.apply_guardrail(inputs=inputs, request_data=data, input_type=input_type))
-    return out, data
+def call(g, model, messages=None, team="apps", extra=None, call_type="acompletion", auth=True):
+    """Run the pre-call hook as the proxy would: the authenticated key's team_id is the team."""
+    data = {"model": model, "messages": messages if messages is not None else [], **(extra or {})}
+    key = UserAPIKeyAuth(team_id=team) if auth else None
+    return asyncio.run(g.async_pre_call_hook(user_api_key_dict=key, cache=None, data=data, call_type=call_type))
+
+
+def text(g, model, t, team="apps", **kw):
+    """Masked form of one user message."""
+    return call(g, model, [{"role": "user", "content": t}], team=team, **kw)["messages"][0]["content"]
 
 
 def refused(fn, code):
@@ -93,57 +96,83 @@ def refused(fn, code):
 
 def test_local_alias_passes_untouched_without_calling_presidio():
     before = STUB.calls
-    out, data = run(guard(), LOCAL, ["write to a@b.co"], messages=[{"role": "user", "content": "a@b.co"}])
-    assert out["texts"] == ["write to a@b.co"] and data["messages"][0]["content"] == "a@b.co"
+    msgs = [{"role": "user", "content": "a@b.co"}]
+    tools = [{"name": "t", "cache_control": {"type": "ephemeral"}}]
+    want = copy.deepcopy({"model": LOCAL, "messages": msgs, "tools": tools})
+    assert call(guard(), LOCAL, msgs, extra={"tools": tools}) == want  # byte-identical
     assert STUB.calls == before
 
 
 def test_cloud_alias_masks_identifiers():
-    out, _ = run(guard(), CLOUD, ["write to a@b.co now"], team="dev-sessions")
-    assert out["texts"] == ["write to <EMAIL_ADDRESS> now"], out
+    assert text(guard(), CLOUD, "write to a@b.co now", team="dev-sessions") == "write to <EMAIL_ADDRESS> now"
 
 
 def test_cloud_alias_masks_names_for_famille_not_dev_sessions():
-    assert run(guard(), CLOUD, [f"salut {NAME}"], team="famille")[0]["texts"] == ["salut <PERSON>"]
-    assert run(guard(), CLOUD, [f"salut {NAME}"], team="dev-sessions")[0]["texts"] == [f"salut {NAME}"]
+    assert text(guard(), CLOUD, f"salut {NAME}", team="famille") == "salut <PERSON>"
+    assert text(guard(), CLOUD, f"salut {NAME}", team="dev-sessions") == f"salut {NAME}"
 
 
 def test_unknown_alias_is_masked():
-    assert run(guard(), "gpt-x", ["a@b.co"])[0]["texts"] == ["<EMAIL_ADDRESS>"]
+    assert text(guard(), "gpt-x", "a@b.co") == "<EMAIL_ADDRESS>"
 
 
 def test_no_team_masks_names():
-    assert run(guard(), CLOUD, [f"salut {NAME}"], team=None)[0]["texts"] == ["salut <PERSON>"]
+    assert text(guard(), CLOUD, f"salut {NAME}", team=None) == "salut <PERSON>"
+    assert text(guard(), CLOUD, f"salut {NAME}", auth=False) == "salut <PERSON>"
+
+
+def test_a_team_alias_is_not_the_team():
+    # Aliases can be duplicated or renamed; the policy is keyed on the team's id.
+    g = guard()
+    key = UserAPIKeyAuth(team_id="some-uuid", team_alias="dev-sessions")
+    data = {"model": CLOUD, "messages": [{"role": "user", "content": f"salut {NAME}"}]}
+    out = asyncio.run(g.async_pre_call_hook(user_api_key_dict=key, cache=None, data=data, call_type="acompletion"))
+    assert out["messages"][0]["content"] == "salut <PERSON>"  # unknown id: the strictest default
+
+
+def test_client_supplied_team_in_the_body_is_ignored():
+    spoof = {"metadata": {"user_api_key_team_id": "dev-sessions", "user_api_key_team_alias": "dev-sessions"},
+             "litellm_metadata": {"user_api_key_team_id": "dev-sessions"}}
+    assert text(guard(), CLOUD, f"salut {NAME}", team="famille", extra=spoof) == "salut <PERSON>"
+    assert text(guard(), CLOUD, f"salut {NAME}", team=None, extra=spoof) == "salut <PERSON>"
 
 
 def test_presidio_down_refuses_cloud_and_passes_local():
     g = guard(url="http://127.0.0.1:1")
-    refused(lambda: run(g, CLOUD, ["a@b.co"]), 503)
-    assert run(g, LOCAL, ["a@b.co"])[0]["texts"] == ["a@b.co"]
+    refused(lambda: text(g, CLOUD, "a@b.co"), 503)
+    assert text(g, LOCAL, "a@b.co") == "a@b.co"
 
 
-def test_image_block_refused_for_cloud_passes_for_local():
+def test_a_hung_presidio_is_refused_not_awaited_forever():
+    STUB.delay = 1.0
+    try:
+        refused(lambda: text(guard(timeout=0.2), CLOUD, "a@b.co"), 503)
+    finally:
+        STUB.delay = 0.0
+
+
+def test_image_block_refused_for_cloud_even_without_text_passes_for_local():
     msg = [{"role": "user", "content": [{"type": "image", "source": {"data": "AAAA"}}]}]
-    refused(lambda: run(guard(), CLOUD, [], messages=msg, images=["AAAA"]), 400)
-    refused(lambda: run(guard(), CLOUD, [], messages=copy.deepcopy(msg)), 400)  # even when the framework listed none
-    run(guard(), LOCAL, [], messages=msg, images=["AAAA"])
+    refused(lambda: call(guard(), CLOUD, copy.deepcopy(msg)), 400)
+    refused(lambda: call(guard(), "gpt-x", copy.deepcopy(msg)), 400)
+    call(guard(), LOCAL, msg)
 
 
 def test_unknown_block_type_refused_for_cloud():
     msg = [{"role": "user", "content": [{"type": "document", "source": {"data": "x"}}]}]
-    refused(lambda: run(guard(), CLOUD, [], messages=msg), 400)
+    refused(lambda: call(guard(), CLOUD, msg), 400)
 
 
 def test_long_text_with_email_on_chunk_boundary_is_masked():
-    text = "a" * 40 + " bob@example.com " + "b" * 60
-    out, _ = run(guard(chunk_chars=50, chunk_overlap=20), CLOUD, [text], team="dev-sessions")
-    assert "bob@example.com" not in out["texts"][0] and "<EMAIL_ADDRESS>" in out["texts"][0], out
+    t = "a" * 40 + " bob@example.com " + "b" * 60
+    out = text(guard(chunk_chars=50, chunk_overlap=20), CLOUD, t, team="dev-sessions")
+    assert "bob@example.com" not in out and "<EMAIL_ADDRESS>" in out, out
 
 
 def test_vector_store_ids_on_cloud_request_refused():
-    refused(lambda: run(guard(), CLOUD, ["q"], extra={"vector_store_ids": ["second-brain"]}), 400)
-    refused(lambda: run(guard(), CLOUD, ["q"], extra={"tools": [{"type": "file_search"}]}), 400)
-    run(guard(), LOCAL, ["q"], extra={"vector_store_ids": ["second-brain"]})
+    refused(lambda: call(guard(), CLOUD, extra={"vector_store_ids": ["second-brain"]}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "file_search"}]}), 400)
+    call(guard(), LOCAL, extra={"vector_store_ids": ["second-brain"]})
 
 
 def test_system_tool_result_and_tool_use_text_are_masked_in_place():
@@ -153,71 +182,10 @@ def test_system_tool_result_and_tool_use_text_are_masked_in_place():
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "1", "content": [{"type": "text", "text": "from a@b.co"}]}]},
         {"role": "assistant", "content": None, "tool_calls": [{"function": {"name": "f", "arguments": '{"e": "a@b.co"}'}}]},
     ]
-    _, data = run(guard(), CLOUD, [], messages=msgs, extra={"system": [{"type": "text", "text": "sys a@b.co"}]})
-    flat = json.dumps(data, default=str)
+    data = call(guard(), CLOUD, msgs, extra={"system": [{"type": "text", "text": "sys a@b.co"}]})
+    flat = json.dumps(data)
     assert "a@b.co" not in flat and flat.count("<EMAIL_ADDRESS>") == 5, flat
     assert data["messages"][1]["content"][0]["input"]["n"] == 2  # non-strings untouched
-
-
-def test_response_input_type_is_left_alone():
-    out, _ = run(guard(), CLOUD, ["a@b.co"], input_type="response")
-    assert out["texts"] == ["a@b.co"]
-
-
-def gate_call(model, data):
-    g = cp.CloudPIIGate(policy_path=os.path.join(ROOT, "litellm", "pii_policy.yaml"))
-    data = {"model": model, **data}
-    return asyncio.run(g.async_pre_call_hook(user_api_key_dict=None, cache=None, data=data, call_type="completion"))
-
-
-IMAGE_ONLY = {"messages": [{"role": "user", "content": [{"type": "image", "source": {"data": "AAAA"}}]}]}
-
-
-def test_gate_refuses_a_request_without_text_that_carries_an_image():
-    # LiteLLM calls the guardrail only when it finds text; an image-only request would skip it.
-    refused(lambda: gate_call(CLOUD, copy.deepcopy(IMAGE_ONLY)), 400)
-    refused(lambda: gate_call("gpt-x", copy.deepcopy(IMAGE_ONLY)), 400)
-    assert gate_call(LOCAL, copy.deepcopy(IMAGE_ONLY))["model"] == LOCAL
-
-
-def test_gate_refuses_vector_stores_on_cloud_but_not_local():
-    refused(lambda: gate_call(CLOUD, {"vector_store_ids": ["second-brain"]}), 400)
-    assert gate_call(LOCAL, {"vector_store_ids": ["second-brain"]})["model"] == LOCAL
-
-
-def test_gate_leaves_text_to_the_guardrail():
-    data = {"messages": [{"role": "user", "content": "a@b.co"}]}
-    assert gate_call(CLOUD, data)["messages"][0]["content"] == "a@b.co"  # masking is not its job
-
-
-def test_gate_exists_at_import_without_the_policy_file():
-    assert isinstance(cp.gate, cp.CloudPIIGate)  # config.yaml registers `cloud_pii.gate`; /app/pii_policy.yaml is absent here
-
-
-def test_client_supplied_team_alias_is_ignored():
-    # A key with no team, but a body that claims dev-sessions: the strictest set applies.
-    spoof = {"litellm_metadata": {"user_api_key_team_alias": "dev-sessions"}}
-    assert run(guard(), CLOUD, [f"salut {NAME}"], team=None, spoof=spoof)[0]["texts"] == ["salut <PERSON>"]
-    # And a client cannot overwrite the team the proxy stamped.
-    spoof = {"metadata": {"user_api_key_team_alias": "dev-sessions", "user_api_key_auth": UserAPIKeyAuth(team_alias="famille")}}
-    assert run(guard(), CLOUD, [f"salut {NAME}"], team="famille", spoof=spoof)[0]["texts"] == ["salut <PERSON>"]
-
-
-def test_a_team_alias_without_the_proxys_auth_object_is_not_trusted():
-    g = guard()
-    data = {"model": CLOUD, "messages": [], "metadata": {"user_api_key_team_alias": "dev-sessions"}}
-    inputs = {"texts": [f"salut {NAME}"], "model": CLOUD}
-    out = asyncio.run(g.apply_guardrail(inputs=inputs, request_data=data, input_type="request"))
-    assert out["texts"] == ["salut <PERSON>"]
-
-
-def test_gate_refuses_a_cloud_fallback_on_a_local_request():
-    for key in ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
-        refused(lambda: gate_call(LOCAL, {key: ["cloud-openai"]}), 400)
-        refused(lambda: gate_call(LOCAL, {key: [{LOCAL: ["cloud-openai"]}]}), 400)
-        refused(lambda: gate_call(LOCAL, {key: ["no-such-alias"]}), 400)  # unknown = not local
-    assert gate_call(LOCAL, {"fallbacks": ["gemma4:26b-a4b-it-qat"]})["model"] == LOCAL
-    assert gate_call(CLOUD, {"fallbacks": ["cloud-openai"]})["model"] == CLOUD  # masked anyway
 
 
 def test_other_free_text_fields_are_masked():
@@ -229,9 +197,63 @@ def test_other_free_text_fields_are_masked():
         {"type": "function", "function": {"name": "t", "description": "mail a@b.co", "parameters": {"properties": {"p": {"description": "e.g. a@b.co"}}}}},
         {"name": "anth", "description": "to a@b.co", "input_schema": {"properties": {"q": {"description": "a@b.co"}}}},
     ]
-    _, data = run(guard(), CLOUD, [], messages=msgs, extra={"instructions": "a@b.co", "user": "a@b.co", "tools": tools})
-    flat = json.dumps(data, default=str)
+    extra = {"instructions": "a@b.co", "user": "a@b.co", "tools": tools,
+             "prediction": {"type": "content", "content": "a@b.co"}, "prompt": {"id": "p", "variables": {"who": "a@b.co"}}}
+    flat = json.dumps(call(guard(), CLOUD, msgs, extra=extra))
     assert "a@b.co" not in flat, flat
+
+
+def test_a_token_array_embedding_input_is_refused_for_cloud():
+    refused(lambda: call(guard(), "cloud-emb", extra={"input": [[1, 2, 3]]}, call_type="aembedding"), 400)
+    assert call(guard(), "cloud-emb", extra={"input": ["a@b.co"]}, call_type="aembedding")["input"] == ["<EMAIL_ADDRESS>"]
+
+
+def test_thinking_blocks_are_passed_through_unchanged():
+    block = {"type": "thinking", "thinking": "a@b.co", "signature": "sig"}
+    data = call(guard(), CLOUD, [{"role": "assistant", "content": [copy.deepcopy(block)]}])
+    assert data["messages"][0]["content"][0] == block  # a signed block must stay byte-identical
+
+
+def test_a_cloud_fallback_on_a_local_request_is_refused():
+    for key in ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
+        refused(lambda: call(guard(), LOCAL, extra={key: ["cloud-openai"]}), 400)
+        refused(lambda: call(guard(), LOCAL, extra={key: [{LOCAL: ["cloud-openai"]}]}), 400)
+        refused(lambda: call(guard(), LOCAL, extra={key: ["no-such-alias"]}), 400)  # unknown = not local
+    assert call(guard(), LOCAL, extra={"fallbacks": ["gemma4:26b-a4b-it-qat"]})["model"] == LOCAL
+    assert call(guard(), CLOUD, extra={"fallbacks": ["cloud-openai"]})["model"] == CLOUD  # masked anyway
+
+
+def test_endpoints_without_masking_are_refused_toward_non_local_models():
+    for ct in ("amoderation", "agenerate_content", "acreate_file", "acreate_batch", "aimage_edit", "pass_through_endpoint"):
+        refused(lambda: call(guard(), CLOUD, call_type=ct), 400)
+    refused(lambda: call(guard(), None, call_type="pass_through_endpoint"), 400)  # no model: not local
+    for ct in ("acompletion", "atext_completion", "aembedding", "aresponses", "anthropic_messages"):
+        call(guard(), CLOUD, call_type=ct)
+    call(guard(), LOCAL, call_type="amoderation")  # a local model keeps every endpoint
+
+
+def test_masking_is_cached_per_text():
+    g = guard()
+    text(g, CLOUD, "a@b.co", team="dev-sessions")
+    before = STUB.calls
+    assert text(g, CLOUD, "a@b.co", team="dev-sessions") == "<EMAIL_ADDRESS>"
+    assert STUB.calls == before
+
+
+def test_overlapping_spans_are_merged_so_no_tail_leaks():
+    t = "Marie Tremblay marie@example.com x"
+    assert cp._replace(t, [(0, 20, "PERSON"), (15, 32, "EMAIL_ADDRESS")]) == "<PERSON> x"
+
+
+def test_provider_token_counting_is_turned_off():
+    # /v1/messages/count_tokens would post the whole conversation to Anthropic without any hook.
+    from litellm.proxy import proxy_server
+
+    assert asyncio.run(proxy_server._try_provider_token_count(None, "anthropic", "m", [], None, None, "m")) is None
+
+
+def test_gate_exists_at_import_without_the_policy_file():
+    assert isinstance(cp.gate, cp.CloudPIIGate)  # config.yaml registers `cloud_pii.gate`; /app/pii_policy.yaml is absent here
 
 
 if __name__ == "__main__":
