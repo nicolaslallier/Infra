@@ -548,7 +548,10 @@ Several things here are load-bearing.
   A missing one fails `runners-up` by name rather than starting five of six.
 - **Privileges differ per runner.** The Docker socket (root on the daemon) is
   mounted only on `darkangel`, `heaven` and `infra`, whose deploys need it;
-  `ai`, `ea` and `moria` get none (`ea` keeps its CA mount and `extra_hosts`).
+  `ai`, `ea` and `moria` get none. `ai` and `ea` hold deploy secrets instead
+  (repo secrets `PORTAINER_API_KEY` and `BAO_TOKEN`) and call Portainer and
+  OpenBao by URL: each has the Infra CA at `/etc/<label>/infra-ca.crt` and
+  `extra_hosts` pinning both vhosts to the LAN address. `moria` holds none.
   A runner is scoped to one repo, so a workflow elsewhere cannot use it.
 - **Self-hosted labels are never for PRs.** No workflow running on one of the
   six labels may trigger on `pull_request`/`pull_request_target`; PR checks
@@ -1444,7 +1447,9 @@ Not done here, and worth knowing before assuming otherwise: the vault's only
 login is the root token in `.openbao.env`. There is no Keycloak OIDC auth
 method, and the only consumer is the nightly backup flow (below), which holds
 a scoped periodic token (policy `backup`: raft snapshot read plus
-`renew-self`, nothing else), renewed on each run; no app reads its secrets
+`renew-self`, nothing else), renewed on each run. The AI repo's deploy (the portail) holds another
+(policy `infra-env-read`: read `infra/env` plus `renew-self`; README, Portail).
+No app container reads its secrets
 from the vault yet — they all still get them from `.env` via Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
 the listener sets `unauthenticated_metrics_access`, the same posture as
 SeaweedFS's /metrics), but there is no Grafana dashboard for it.

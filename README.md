@@ -240,6 +240,12 @@ a 401.
 **Order matters: `make up`, `pull` and `config` fail until
 `PORTAIL_DB_PASSWORD` is in the vault.**
 
+The AI repo deploys the portal itself: on a push to `main`, its Deploy job on
+`runner-ai` (label `ai`, no Docker socket) reads `PORTAIL_DB_PASSWORD` and
+`PORTAIL_LITELLM_CLE` from the vault (`infra/env`) and calls Portainer's API
+(`scripts/portainer-stack.sh up`), the way EA does. Both values live only in
+the vault, never in a commit.
+
 1. Database: `openssl rand -hex 24` (letters and digits only, it goes into a
    URL; `check-env` rejects anything else), then
    `make vault-cli args="kv patch -mount=infra env PORTAIL_DB_PASSWORD=... APP_DATABASES=<current list>,portail"`,
@@ -254,11 +260,37 @@ a 401.
      -d '{"key_alias":"portail","models":["qwen3.8:27b-mlx"]}'
    ```
 
-   The key goes only into the portail stack's `PORTAIL_LITELLM_CLE`, never
-   into this repo or `.env`. Add a model to the key when `agents.yaml` gains one.
-3. Portainer: create the stack from Git (repo `nicolaslallier/AI`, compose
-   path `deploy/portainer-stack.yml`) with `PORTAIL_DB_PASSWORD` (same value
-   as step 1), `PORTAIL_LITELLM_CLE` and optionally `IMAGE_TAG`.
+   Store it beside the database password:
+   `make vault-cli args="kv patch -mount=infra env PORTAIL_LITELLM_CLE=sk-..."`.
+   It is not in `.env.example` (nothing in this stack uses it), but
+   `make vault-env` copies every vault key into `.env`, so it rides along there
+   like the app passwords. Add a model to the key when `agents.yaml` gains one.
+3. Vault token for the AI repo's deploy, policy `infra-env-read`
+   (`openbao/policies/infra-env-read.hcl`: read `infra/env`, renew itself,
+   nothing else):
+
+   ```bash
+   make vault-cli args="policy write infra-env-read -" < openbao/policies/infra-env-read.hcl
+   make vault-cli args="token create -policy=infra-env-read -period=768h -orphan -display-name=ai-deploy -field=token"
+   ```
+
+   Shown once; it goes into the AI repo's `BAO_TOKEN` secret. It is periodic:
+   32 days without a renewal and it expires, so the deploy job should renew it
+   (`POST /v1/auth/token/renew-self`) on each run. Revoke an old one with
+   `make vault-cli args="token revoke -accessor <accessor>"`.
+4. github.com/nicolaslallier/AI (public): Settings → Environments → new
+   environment `production`, deployment branches limited to `main`, holding
+   the secrets `BAO_TOKEN` (step 3) and `PORTAINER_API_KEY` (environment
+   secrets, not repo secrets: a job from any other branch cannot read them).
+   Settings → Actions → General → "Fork pull request workflows from outside
+   collaborators" = "Require approval for all outside collaborators": a fork
+   PR brings its own workflow file and could target the `ai` label, and while
+   it holds no secret it can leave files in the runner's container (only
+   `/_work` is wiped between jobs) for the next deploy. Repo variable
+   `INFRA_CA_CERT_PATH` only if not `/etc/ai/infra-ca.crt`, where `runner-ai`
+   mounts `certs/infra-ca.crt`. Then, with `GH_RUNNER_TOKEN_AI` in
+   `.runner.env` and this compose on `main`, `make runners-up` gives
+   `runner-ai` the CA mount and the vault/Portainer host pinning.
 
 ### Jarvis login (Keycloak + oauth2-proxy)
 

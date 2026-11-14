@@ -28,8 +28,10 @@ x-runner: &runner
   environment: &runner-env
     RUNNER_SCOPE: repo
     # De-register after every job; `restart: unless-stopped` then brings up a
-    # freshly registered one. For ea and moria (tmpfs work dir) no job inherits
-    # a working tree. The socket runners (darkangel, heaven, infra) keep /_work
+    # freshly registered one. For ai, ea and moria (tmpfs work dir) no job
+    # inherits a working tree. The rest of the container's filesystem does
+    # survive (restart reuses the container): a job on a public repo's label
+    # can leave files for the next one, which is why fork PR runs need approval. The socket runners (darkangel, heaven, infra) keep /_work
     # in a named volume and their jobs can leave containers behind.
     EPHEMERAL: "true"
     # No self-update. An ephemeral runner that updates itself swaps its own
@@ -131,12 +133,21 @@ services:
       RUNNER_NAME: ai-host
       LABELS: ai
       ACCESS_TOKEN: ${GH_RUNNER_TOKEN_AI:?Set GH_RUNNER_TOKEN_AI in .runner.env}
-    # Like moria: no Docker socket, no infra-net, a work dir wiped between
-    # jobs. A job here can reach the LAN (Ollama, LiteLLM by address) but
-    # holds no deploy secret. Give it the socket only with a reason, and then
-    # count it among the runners that can read every PAT (CLAUDE.md).
+    # Like ea: no Docker socket, no infra-net, a work dir wiped between jobs.
+    # The AI repo's deploy job (the portail) holds its two repo secrets,
+    # PORTAINER_API_KEY and BAO_TOKEN (read infra/env only, README), and calls
+    # Portainer's and OpenBao's APIs by URL. Give it the socket only with a
+    # reason, and then count it among the runners that can read every PAT
+    # (CLAUDE.md). Same host pinning as runner-ea.
+    extra_hosts:
+      - "portainer.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+      - "vault.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
     tmpfs:
       - /_work:exec
+    volumes:
+      # The Infra CA (public cert, no key); the AI repo's INFRA_CA_CERT_PATH
+      # variable defaults to this path.
+      - ${INFRA_DIR:-.}/certs/infra-ca.crt:/etc/ai/infra-ca.crt:ro
 
 volumes:
   runner-darkangel-work:
