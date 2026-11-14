@@ -267,6 +267,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
                 "docker compose --env-file .env -f docker-compose.monitoring.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.auth.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.platform.yml config -q && "
+                "docker compose --env-file .env -f docker-compose.mcp.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.portainer.yml config -q && "
                 "docker compose --env-file .runner.env -f docker-compose.runners.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.dev.yml config -q && "

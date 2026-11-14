@@ -1,0 +1,52 @@
+# Who may call which MCP tool, enforced by the cloud_pii gate (litellm/cloud_pii.py) from the
+# authenticated key's team id. Read at runtime from /app/mcp_policy.yaml; `make test` checks it
+# against teams.yaml, config.yaml and the GitHub server's own --tools list.
+#
+# LiteLLM's hook gives the gate only the tool's NAME (no server, no prefix), so every server
+# lists its tools, the lists are disjoint, and a tool on no list is refused. The GitHub list is
+# an ALLOWLIST at level 2 (the agent proposes, the owner merges): merge_pull_request is on no
+# list, here or in the server's --tools or in config.yaml's allowed_tools. A key with no team
+# (the master key, a loose key) gets no tool.
+servers:
+  obsidian:
+    teams: [admin, apps]
+    tools: [list_notes, read_note, search_notes]
+  github:
+    teams: [admin]
+    tools:
+      # read
+      - search_repositories
+      - get_file_contents
+      - list_commits
+      - search_code
+      - get_commit
+      - list_branches
+      - list_tags
+      - get_repository_tree
+      - issue_read
+      - search_issues
+      - list_issues
+      - list_pull_requests
+      - pull_request_read
+      - search_pull_requests
+      - list_label
+      - get_label
+      - actions_list
+      - actions_get
+      - get_job_logs
+      # propose (write)
+      - issue_write
+      - add_issue_comment
+      - update_issue_comment
+      - create_branch
+      - create_or_update_file
+      - push_files
+      - create_pull_request
+      - update_pull_request
+      - add_reply_to_pull_request_comment
+
+# A file write must name a branch, and not a default one: an unprotected repo with a runner
+# would run it. (A default branch with an unusual name is the repo ruleset's job.)
+branch_guard:
+  tools: [create_or_update_file, push_files]
+  refuse_branches: [main, master]

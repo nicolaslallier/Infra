@@ -79,6 +79,9 @@ REQUIRED=(
 	ANTHROPIC_API_KEY
 	GEMINI_API_KEY
 	OPENAI_API_KEY
+	GITHUB_MCP_TOKEN
+	OBSIDIAN_MCP_TOKEN
+	OBSIDIAN_MCP_S3_SECRET_KEY
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start
@@ -293,6 +296,14 @@ fi
 if [ -n "${PREFECT_AUTH_STRING:-}" ] && [ "$PREFECT_AUTH_STRING" != "$PLACEHOLDER" ] \
 	&& ! [[ "$PREFECT_AUTH_STRING" =~ ^[^:]+:.+$ ]]; then
 	errors+=("PREFECT_AUTH_STRING must be user:password (e.g. \"admin:\$(openssl rand -hex 16)\")")
+fi
+
+# The GitHub MCP token is what keeps the agent to "propose, never merge": only a fine-grained
+# token can be limited to chosen repositories (a classic ghp_ token reaches every repo its owner
+# does), so a classic one is refused. Which permissions it carries is the owner's to set (README).
+if [ -n "${GITHUB_MCP_TOKEN:-}" ] && [ "$GITHUB_MCP_TOKEN" != "$PLACEHOLDER" ] \
+	&& [[ "$GITHUB_MCP_TOKEN" != github_pat_* ]]; then
+	errors+=("GITHUB_MCP_TOKEN must be a fine-grained token (github_pat_...) limited to chosen repositories; a classic token cannot be scoped")
 fi
 
 # A partly set SMB share would silently leave the backups on the local disk (or

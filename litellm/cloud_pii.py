@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.proxy.guardrails.guardrail_hooks.presidio import _OPTIONAL_PresidioPIIMasking
 
+import mcp_policy
 from pii_policy import chunk_text, decide, entities_for, load_policy
 
 TEXT_TYPES = {"text", "input_text", "output_text"}  # content blocks Presidio can read
@@ -235,8 +236,36 @@ def _strings(node: Any):
             yield from _strings(v)
 
 
+def check_mcp_tools(data: dict, masked: bool = False) -> None:
+    """A chat or Responses request may declare MCP servers or tools. A provider-native connector
+    (`mcp_servers`, an `mcp_toolset` tool) makes the PROVIDER contact a URL of the client's choosing;
+    a `{"type": "mcp", "server_url": ...}` tool names a foreign URL that the provider or LiteLLM
+    would connect to. Both bypass our MCP policy. Only LiteLLM's own gateway (`litellm_proxy...`,
+    whose calls go through `call_mcp_tool`) is allowed. Fields can also arrive inside `extra_body`,
+    which clients merge into the request: it is checked the same way."""
+    if data.get("mcp_servers"):
+        raise _refuse("provider-native MCP servers (mcp_servers) are not available; use LiteLLM's gateway")
+    for t in data.get("tools") or []:
+        kind = str(t.get("type", "")).lower() if isinstance(t, dict) else ""
+        if kind.startswith("mcp") and kind != "mcp":
+            raise _refuse(f"the '{t.get('type')}' tool type is not available; use LiteLLM's gateway")
+        if kind == "mcp":
+            url = t.get("server_url")
+            if not (isinstance(url, str) and url.startswith("litellm_proxy")):
+                raise _refuse("an MCP tool must go through LiteLLM's gateway (server_url 'litellm_proxy...')")
+            if masked and t.get("require_approval", "always") != "always":
+                # LiteLLM would run the tool and send its result upstream in an internal call that
+                # never passes this gate: the note's text would reach the cloud model unmasked.
+                raise _refuse("toward a cloud model an MCP tool must keep require_approval 'always' (or unset), "
+                              "so its result returns through this gate")
+    extra = data.get("extra_body")
+    if isinstance(extra, dict):
+        check_mcp_tools(extra, masked)
+
+
 def check_sendable(data: dict) -> list:
     """Refuse what cannot be scanned (400); otherwise return the request's text slots."""
+    check_mcp_tools(data, masked=True)
     if data.get("vector_store_ids") or any(
         isinstance(t, dict) and t.get("type") == "file_search" for t in data.get("tools") or []
     ):
@@ -285,6 +314,7 @@ class CloudPIIGate(CustomLogger):
         self,
         presidio_analyzer_api_base: str | None = None,
         policy_path: str | None = None,
+        mcp_policy_path: str | None = None,
         chunk_chars: int = 100_000,
         chunk_overlap: int = 200,
         timeout: float = 15.0,
@@ -292,6 +322,8 @@ class CloudPIIGate(CustomLogger):
     ):
         super().__init__()
         self._path = policy_path
+        self._mcp_path = mcp_policy_path
+        self._mcp_policy: dict | None = None  # loaded on first use, like the PII policy
         self._analyzer = presidio_analyzer_api_base
         self._policy: dict | None = None  # loaded on first use: importing must not need the file
         self._helpers: dict[tuple[str, str], _OPTIONAL_PresidioPIIMasking] = {}
@@ -305,6 +337,13 @@ class CloudPIIGate(CustomLogger):
         if self._policy is None:
             self._policy = load_policy(self._path or os.environ.get("PII_POLICY_PATH", "/app/pii_policy.yaml"))
         return self._policy
+
+    @property
+    def mcp_policy(self) -> dict:
+        if self._mcp_policy is None:
+            self._mcp_policy = mcp_policy.load_policy(
+                self._mcp_path or os.environ.get("MCP_POLICY_PATH", "/app/mcp_policy.yaml"))
+        return self._mcp_policy
 
     def _helper(self, group: str, lang: str) -> _OPTIONAL_PresidioPIIMasking:
         # Presidio's entities, language and thresholds are instance state, so one helper per
@@ -346,6 +385,20 @@ class CloudPIIGate(CustomLogger):
         return self._cache[key]
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        if call_type == "call_mcp_tool":
+            # An MCP tool call has no model and runs on a server we host: it is a matter of who
+            # may call what, decided by the authenticated key's team (the PII masking of what
+            # comes back to a cloud model is done on the next chat request, as a tool_result).
+            for new, old in (("mcp_tool_name", "name"), ("mcp_arguments", "arguments")):
+                if new in data and old in data and data[new] != data[old]:
+                    raise HTTPException(status_code=403, detail="mcp-policy: ambiguous tool call")
+            reason = mcp_policy.refusal(
+                self.mcp_policy, getattr(user_api_key_dict, "team_id", None) or None,
+                data.get("mcp_tool_name") or data.get("name"),  # /mcp route / REST route bodies
+                data.get("mcp_arguments") if "mcp_arguments" in data else data.get("arguments"))
+            if reason:
+                raise HTTPException(status_code=403, detail=f"mcp-policy: {reason}")
+            return data
         if call_type == "pass_through_endpoint":
             # The body's `model` does not decide where a pass-through request goes, so it cannot
             # make the request local.
@@ -357,6 +410,7 @@ class CloudPIIGate(CustomLogger):
         decision = decide(self.policy, model, team)
 
         if not decision.mask:
+            check_mcp_tools(data)
             # A local request may carry its own fallbacks: if one names a cloud alias, the router
             # would retry there with the prompt we left unmasked. Every name must be local.
             for key in FALLBACK_KEYS:

@@ -68,6 +68,7 @@ set_key PREFECT_OAUTH_COOKIE_SECRET "$cookie_d"
 set_key PORTAIL_OAUTH_COOKIE_SECRET "$cookie_d"
 set_key PREFECT_AUTH_STRING "admin:$(rand_hex 16)"
 set_key PREFECT_DB_PASSWORD "$(rand_hex 16)"
+set_key GITHUB_MCP_TOKEN "github_pat_$(rand_hex 16)"  # check-env wants a fine-grained token
 # Standard base64, padding kept: SeaweedFS's STS key is a Go []byte in JSON.
 set_key S3_STS_SIGNING_KEY "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
 

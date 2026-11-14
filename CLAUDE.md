@@ -230,6 +230,39 @@ never orphans another app that's still attached to it):
   `/v1/vector_stores/{id}/embeddings[/batch]` must use the same model.
   Secrets: `LITELLM_PGVECTOR_API_KEY`, `LITELLM_RAG_DB_PASSWORD`. infra-net
   only, no vhost.
+- **`mcp-github`** / **`mcp-obsidian`** — the MCP servers behind LiteLLM, their own stack
+  (`docker-compose.mcp.yml`, `stacks.conf` row `mcp`, homelab, before `platform`: a
+  `platform` redeploy must not cut the tools; LiteLLM picks up a server that comes up later).
+  No `ports:`, no vhost, nothing bind-mounted: only LiteLLM reaches them by service name on
+  infra-net, and it registers them under `mcp_servers:` in `litellm/config.yaml` with
+  `allow_all_keys: true` (LiteLLM otherwise denies every key without an explicit grant), because
+  **who may call what is decided by the `cloud_pii` gate**, from the authenticated key's
+  `team_id`, per `litellm/mcp_policy.yaml` (bind-mounted next to the gate): Obsidian for `admin`
+  and `apps`, GitHub for `admin`, nothing for `famille`, `dev-sessions`, a key with no team or the
+  master key (so the admin UI's tool test page does not work; use the `nicolas-admin` key). The
+  gate sees only the unprefixed tool name, so each server lists its tools there, the lists are
+  disjoint, and a tool on no list is refused. `mcp-github` is the official
+  `github/github-mcp-server` (`http` mode, pinned by digest, root path, port 8082): it holds no
+  secret, LiteLLM sends it `GITHUB_MCP_TOKEN` per request, and `--tools` loads only the allowlist
+  (a renamed tool after a bump fails the start). **Level 2: the agent proposes (issues, branches,
+  file commits, PRs), the owner merges: `merge_pull_request` is on no list**, not in the server's
+  `--tools`, not in `allowed_tools`, not in `mcp_policy.yaml`, and the gate refuses any tool on no
+  list (`make test` checks the three lists are equal). Fusing into `main` of a repo with a
+  self-hosted runner runs code on the host, so the token is fine-grained, limited to repos that
+  have an active ruleset, and never has Administration, Workflows or Actions write (`check-env`
+  refuses a classic token); the gate also refuses `create_or_update_file`/`push_files` without a
+  real branch or to `main`/`master` (spellings normalised). `mcp-obsidian` (`mcp/obsidian/`, image
+  `infra-mcp-obsidian:1` built by `make app-images`, bump the tag in compose and
+  `portainer-images.sh` together) serves `list_notes`, `read_note`, `search_notes` over the vault
+  in S3: read-only by construction (S3 identity `obsidian-mcp`, `Read,List`, no write call in the
+  code), `.md` only, never under `.obsidian/`, paths normalised, reads capped at 1 MiB, searches
+  bounded, and it refuses any request without `OBSIDIAN_MCP_TOKEN`. MCP arguments are not masked
+  (they are the owner's action); what comes back to a cloud model is, as a `tool_result`. The gate
+  also refuses provider-native MCP (`mcp_servers`, `mcp_toolset`, an `mcp` tool whose `server_url`
+  is not `litellm_proxy...`), also inside `extra_body`, because those make the provider or
+  LiteLLM contact a URL of the client's choosing. The tools list is not filtered per team (LiteLLM
+  does not run the hook for it), only the calls are. Portainer's MCP server is left out on
+  purpose (root on the Docker daemon).
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2
@@ -445,7 +478,8 @@ Keycloak alone, on the Mac mini, environment 7: nginx relays
 keycloak.famillelallier.net to 192.168.2.67:8080, Prometheus scrapes :9000,
 and it reaches Postgres through nginx on `LAN_IP:5432`), `auth`
 (`docker-compose.auth.yml`: the oauth2-proxies, also on the Mac mini; nginx
-auth_requests them on 192.168.2.67:4180-4183), `platform` (`docker-compose.platform.yml`:
+auth_requests them on 192.168.2.67:4180-4183), `mcp` (`docker-compose.mcp.yml`: the MCP servers behind LiteLLM, deployed
+before `platform`), `platform` (`docker-compose.platform.yml`:
 litellm, the ollama-proxies, prefect) and `infra` (`docker-compose.yml`:
 nginx and nginx-exporter, deployed before auth so the
 keycloak.famillelallier.net alias the oauth2-proxies use is up). More stacks follow, each
