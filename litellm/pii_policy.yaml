@@ -1,0 +1,51 @@
+# What the cloud-pii guardrail (litellm/cloud_pii.py) masks, and for whom.
+# Read at runtime from /app/pii_policy.yaml; checked against teams.yaml and
+# config.yaml by `make test` (scripts/test_pii_policy.py).
+#
+# The rule is inverted: EVERY model is masked except the aliases below, so a
+# model added in the admin UI under a free name is masked, not leaked. Local
+# models keep seeing the real data, which never leaves the Macs. Never list an
+# alias that talks to anthropic/, gemini/ or openai/ here.
+local_models:
+  - qwen3.8:27b-mlx
+  - gemma4:26b-a4b-it-qat
+  - qwen3-embedding:0.6b
+
+groups:
+  # Identifiers found by format or checksum (Loi 25). The regexes are
+  # registered for fr and en in presidio/recognizers.yaml, so one fr pass
+  # catches both. Weak patterns (a bare 9-digit NAS) only count next to a
+  # context word, which adds 0.35 to the score.
+  identifiants:
+    languages: [fr]
+    entities:
+      - CA_SIN
+      - CA_RAMQ
+      - CA_QC_DRIVER_LICENSE
+      - CA_PASSPORT
+      - CA_BANK_ACCOUNT
+      - CREDIT_CARD
+      - IBAN_CODE
+      - EMAIL_ADDRESS
+      - PHONE_NUMBER
+      - STREET_ADDRESS
+      - CA_POSTAL_CODE
+    thresholds:
+      ALL: 0.5
+      CA_BANK_ACCOUNT: 0.4
+  # People's names (spaCy NER, two passes). NER mistakes code identifiers for
+  # names, so this group is not given to dev-sessions.
+  noms:
+    languages: [fr, en]
+    entities: [PERSON]
+
+# Groups applied to a non-local request, per team.
+teams:
+  admin: [identifiants, noms]
+  famille: [identifiants, noms]
+  apps: [identifiants, noms]
+  dev-sessions: [identifiants]
+
+# A team missing above. A key with no team at all (the master key, a user's own
+# key) gets every group instead.
+default: [identifiants, noms]
