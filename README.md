@@ -509,13 +509,13 @@ Setup, in this order:
    done
    ```
 
-   Today that means `Jarvis`, `Moria`, `Glee` (and `Infra` once the point below is fixed). Leave out
-   `AI`, `EA`, `DarkAngel` and `Heaven` (self-hosted runners, no ruleset yet) and private repos (a
-   ruleset needs a paid plan). **Leave out `Infra` for now:** the nightly `pr-validation` flow clones
-   every open PR and runs `scripts/ci-fake-env.sh` and `check-env.sh` from that PR, in
-   `prefect-flows`, which holds the Docker socket; an agent that can open a PR on `Infra` can make
-   that code run as root on the host without any merge. Re-add it after those scripts run without
-   the socket, network or environment. Permissions: Contents, Issues and Pull requests read and
+   Today that means `Infra`, `Jarvis`, `Moria`, `Glee`. Leave out `AI`, `EA`, `DarkAngel` and
+   `Heaven` (self-hosted runners, no ruleset yet) and private repos (a ruleset needs a paid plan).
+   `Infra` is safe to include only because the nightly `pr-validation` flow now runs the PR's own
+   scripts (`scripts/ci-fake-env.sh`, `check-env.sh`) in a sandbox container with no network, no
+   environment, no Docker socket and a read-only clone (`_sandbox_kwargs` in
+   `prefect/flows/pr_validation.py`): before that, a PR from the agent would have run as root on the
+   host at 03:00 without any merge. Keep that sandbox if you touch the flow. Permissions: Contents, Issues and Pull requests read and
    write, Actions **read** (CI status and logs), Metadata read; **never** Administration, Workflows
    or Actions write. Before merging an agent's PR, look at its last commits: level 2 can also push
    onto an existing open PR branch.
@@ -537,6 +537,36 @@ unreachable, read its logs in Portainer: the image is distroless (no shell). Fro
 in `--tools` that does not exist makes it refuse to start (the names are those of
 `pkg/github/__toolsnaps__` at the tag; recheck them on every bump). Only LiteLLM's `/mcp` route and
 the REST route `/mcp-rest/tools/call` run the team check.
+
+## LiteLLM: memory, skills, agents
+
+- **Memory** is LiteLLM's own `/v1/memory` (rows in the `litellm` database). Read from the 1.83.14
+  source, not run live: a team key cannot reach it (it has no `allowed_routes` for `/v1/memory`,
+  so it answers "Only proxy admin..."), and a key without a user, even once granted the route, can
+  create a team row but not update or delete it. Today it is **admin-only**: the master key sees and
+  rewrites every row of every team. Keys are globally unique across teams (a second team gets a 409
+  on a key another team holds), so prefix them `<team>/<agent>/<subject>`, short values, never a
+  secret. For real per-team or per-person memory: give the keys `allowed_routes: ["/v1/memory",
+  "/v1/memory/*"]` and add the family under `users:` in `litellm/teams.yaml` (`users: []` today), then
+  `make litellm-provision`; neither is done here, so check live before relying on it. LiteLLM does not
+  read memory back into prompts; text an agent re-sends to a cloud model is masked by the gate.
+- **Skills** (`/v1/skills`) and **A2A agents** (`/a2a/...`, `/v1/a2a/...`) answer 403 at
+  `litellm.infra.famillelallier.net`. A container calling `litellm:4000` directly is not covered.
+  No agent is registered: Jarvis does not speak A2A. To open one later, re-open `/v1/a2a/` for that
+  agent only, check whether LiteLLM runs the pre-call hook for A2A (a registered agent can also be
+  called as model `a2a/<name>` on `/v1/chat/completions`), and add the team check to `cloud_pii.gate`.
+
+Check, with the master key in `$M`, a key of the `apps` team in `$J` and
+`URL=https://litellm.infra.famillelallier.net`:
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer $M" -H 'Content-Type: application/json' \
+  -d '{"value":"test","team_id":"apps"}' $URL/v1/memory/apps/jarvis/test   # written
+curl -s -H "Authorization: Bearer $M" $URL/v1/memory                        # listed
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/memory   # expect 401/403
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/skills   # 403 from nginx
+curl -s -X DELETE -H "Authorization: Bearer $M" $URL/v1/memory/apps/jarvis/test
+```
 
 ## Secrets (OpenBao)
 

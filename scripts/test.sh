@@ -85,6 +85,12 @@ if out="$(uv run -q --no-project --with pyyaml python scripts/test_mcp_policy.py
 else
 	fail "scripts/test_mcp_policy.py" "$out"
 fi
+echo "== litellm vhost: skills and A2A routes closed, docs"
+if out="$(python3 scripts/test_litellm_routes.py 2>&1)"; then
+	pass "scripts/test_litellm_routes.py"
+else
+	fail "scripts/test_litellm_routes.py" "$out"
+fi
 echo "== Obsidian MCP server (against a stub S3, with the image's own pinned requirements)"
 if out="$(uv run -q --no-project --with pyyaml --with-requirements mcp/obsidian/requirements.txt python scripts/test_mcp_obsidian.py 2>&1)"; then
 	pass "scripts/test_mcp_obsidian.py"
