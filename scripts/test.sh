@@ -85,6 +85,12 @@ if out="$(uv run -q --no-project --with pyyaml python scripts/test_mcp_policy.py
 else
 	fail "scripts/test_mcp_policy.py" "$out"
 fi
+echo "== Obsidian MCP server (against a stub S3, with the image's own pinned requirements)"
+if out="$(uv run -q --no-project --with pyyaml --with-requirements mcp/obsidian/requirements.txt python scripts/test_mcp_obsidian.py 2>&1)"; then
+	pass "scripts/test_mcp_obsidian.py"
+else
+	fail "scripts/test_mcp_obsidian.py" "$out"
+fi
 echo "== cloud-pii guardrail (against the pinned LiteLLM)"
 # The version Renovate bumps in docker-compose.platform.yml, as for prefect above.
 LITELLM_VERSION="$(grep -m1 -oE 'litellm-database:v[0-9]+\.[0-9]+\.[0-9]+' docker-compose.platform.yml | sed 's/.*:v//')"
