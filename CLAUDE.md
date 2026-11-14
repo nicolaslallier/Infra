@@ -920,11 +920,25 @@ Four things here are load-bearing.
 - **Each check runs in the image the real service uses**, mounted the way the
   real service mounts the repo — `nginx -t` inside the pinned nginx image (the same ref as docker-compose.yml),
   `promtool check config` with `monitoring/prometheus/` at `/etc/prometheus`.
-- **`scripts/ci-fake-env.sh` comes from the PR's own checkout**, so a PR that
-  breaks it fails on its own change. It renders values shaped the way
-  `check-env.sh` demands, which is why running the preflight against it is a
-  meaningful check. It refuses to overwrite an existing `.env` unless
-  `CI_FAKE_ENV_FORCE=1`.
+- **`scripts/ci-fake-env.sh` and `scripts/check-env.sh` come from the PR's own
+  checkout**, so a PR that breaks them fails on its own change -- and so they
+  are untrusted code, and **never run inside `prefect-flows`** (Docker socket,
+  flow secrets): anyone who can open a PR would otherwise run code on the
+  daemon at 03:00 with no merge. They run in a throwaway sibling container
+  (`_sandbox_kwargs`, image `IMG_SANDBOX`, the postgres pin): `--network none`,
+  no environment, no socket, no capabilities, `no-new-privileges`, the clone
+  mounted read-only, writes only to a tmpfs (no writable host mount), 512m / 1 CPU /
+  256 pids, 120 s timeout. ci-fake-env runs on a copy in the tmpfs; only
+  `.env`, `.runner.env`, `openbao/seal.key` and `certs/` come back, as a
+  size-capped base64 tar on stdout whose members are filtered and extracted over paths the flow first deletes
+  (a symlink in the PR cannot redirect the write). The clone's `.git` is
+  deleted before any of this: its URL holds the GitHub token. The `compose config` check
+  has no socket either (`config -q` only parses). Never add `-v docker.sock`, a
+  network or `environment=` to the sandbox: `test_pr_validation.py` fails on
+  each. The other checks run pinned tool images over the PR's *data*, not its
+  scripts. It renders values shaped the way `check-env.sh` demands, which is why
+  running the preflight against it is a meaningful check. It refuses to
+  overwrite an existing `.env` unless `CI_FAKE_ENV_FORCE=1`.
 
 Setup, once: in the Prefect UI, **Blocks → Secret**, name
 `infra-ci-github-token`, value a PAT with `pull_requests:write`. The repo is
