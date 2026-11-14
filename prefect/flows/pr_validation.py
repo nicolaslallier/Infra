@@ -40,6 +40,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import base64
+import io
 import tarfile
 import urllib.request
 from typing import Any
@@ -152,14 +154,14 @@ def _docker_run(
             pass
 
 
-def _sandbox_kwargs(workspace: str, scratch: str, command: list[str]) -> dict[str, Any]:
+def _sandbox_kwargs(workspace: str, command: list[str]) -> dict[str, Any]:
     """The container that runs a script taken from the PR under test.
 
     The flow holds the Docker socket and its secrets, so a PR's own
     scripts must never run in it: anyone who can open a PR would run code on
     the daemon at 03:00 without a merge. Here they get no network, no
-    environment, no socket, a read-only clone, one scratch directory (mounted
-    at the same path rule as the workspace) plus tmpfs, and hard limits.
+    environment, no socket, a read-only clone, tmpfs only (no writable host
+    mount: output leaves on stdout, size-capped), and hard limits.
     """
     return {
         "image": IMG_SANDBOX,
@@ -169,7 +171,6 @@ def _sandbox_kwargs(workspace: str, scratch: str, command: list[str]) -> dict[st
         "user": f"{os.getuid()}:{os.getgid()}",
         "volumes": {
             workspace: {"bind": "/repo", "mode": "ro"},
-            scratch: {"bind": "/out", "mode": "rw"},
         },
         "network_mode": "none",
         "read_only": True,
@@ -187,21 +188,30 @@ def _sandbox_kwargs(workspace: str, scratch: str, command: list[str]) -> dict[st
 _GENERATED = (".env", ".runner.env", "openbao", "certs")
 
 
-def _adopt_generated(workspace: str, tar_path: str) -> None:
-    """Put the sandbox's generated files into the workspace.
+_TAR_BEGIN, _TAR_END = "===GEN-TAR-BEGIN===", "===GEN-TAR-END==="
+_TAR_MAX = 4_000_000  # bytes of base64 taken from the sandbox's stdout
 
-    The tar is untrusted output: only regular files and directories under
-    _GENERATED are extracted, and what the clone already has at those paths
-    is removed first, so a symlink committed by the PR (.env -> /etc/...)
-    cannot redirect the write.
+
+def _adopt_generated(workspace: str, logs: str) -> str:
+    """Put the sandbox's generated files into the workspace; return the logs
+    without the tar.
+
+    The tar arrives base64 on stdout between markers, which is untrusted
+    output: only regular files and directories under _GENERATED are
+    extracted, and what the clone already has at those paths is removed
+    first, so a symlink committed by the PR (.env -> /etc/...) cannot redirect
+    the write.
     """
+    head, _, rest = logs.partition(_TAR_BEGIN)
+    blob, _, _ = rest.partition(_TAR_END)
+    raw = base64.b64decode("".join(blob.split())[:_TAR_MAX])
     for name in _GENERATED:
         path = os.path.join(workspace, name)
         if os.path.islink(path) or os.path.isfile(path):
             os.unlink(path)
         elif os.path.isdir(path):
             shutil.rmtree(path)
-    with tarfile.open(tar_path) as tar:
+    with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
         members = [
             m
             for m in tar.getmembers()
@@ -211,6 +221,7 @@ def _adopt_generated(workspace: str, tar_path: str) -> None:
             and ".." not in m.name.split("/")
         ]
         tar.extractall(workspace, members=members, filter="data")
+    return head
 
 
 def _checks(workspace: str) -> list[dict[str, Any]]:
@@ -350,14 +361,9 @@ def _check_env_script(workspace: str) -> tuple[int, str]:
     rendered. It asserts that every key .env.example defines is present and
     correctly shaped, which is exactly what a PR adding a service forgets.
     Sandboxed: the script is the PR's."""
-    scratch = workspace + ".check"
-    os.makedirs(scratch, exist_ok=True)
-    try:
-        code, out = _docker_run(
-            **_sandbox_kwargs(workspace, scratch, ["SKIP_DOCKER_CHECK=1 bash scripts/check-env.sh"])
-        )
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+    code, out = _docker_run(
+        **_sandbox_kwargs(workspace, ["SKIP_DOCKER_CHECK=1 bash scripts/check-env.sh"])
+    )
     return code, out.strip() or "ok"
 
 
@@ -373,24 +379,20 @@ def _run_all(workspace: str) -> list[dict[str, Any]]:
     # Throwaway .env / seal key / certs, from the PR's own copy of the
     # script -- so a PR that breaks it fails right here. It runs on a copy of
     # the clone inside the sandbox; only what it generated comes back.
-    scratch = workspace + ".out"
-    os.makedirs(scratch, exist_ok=True)
-    try:
-        code, out = _docker_run(
-            **_sandbox_kwargs(
-                workspace,
-                scratch,
-                [
-                    "cp -r /repo/. /work/ && cd /work && "
-                    "CI_FAKE_ENV_FORCE=1 bash scripts/ci-fake-env.sh /work && "
-                    "tar -cf /out/gen.tar .env .runner.env openbao/seal.key $(ls -d certs 2>/dev/null)"
-                ],
-            )
+    code, out = _docker_run(
+        **_sandbox_kwargs(
+            workspace,
+            [
+                "cp -r /repo/. /work/ && cd /work && "
+                "CI_FAKE_ENV_FORCE=1 bash scripts/ci-fake-env.sh /work && "
+                f"echo {_TAR_BEGIN} && "
+                "tar -cf - .env .runner.env openbao/seal.key $(ls -d certs 2>/dev/null) | base64 | head -c 4000000 && "
+                f"echo && echo {_TAR_END}"
+            ],
         )
-        if code == 0:
-            _adopt_generated(workspace, os.path.join(scratch, "gen.tar"))
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+    )
+    if code == 0:
+        out = _adopt_generated(workspace, out)
     results.append({"name": "prepare workspace", "code": code, "output": out.strip()})
     if code != 0:
         return results
@@ -478,6 +480,9 @@ def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
                 "results": [{"name": "clone", "code": code, "output": out}],
             }
 
+        # The clone URL carries the token and git stores it in .git/config,
+        # which the sandbox could read and print into the PR comment.
+        shutil.rmtree(os.path.join(workspace, ".git"), ignore_errors=True)
         return {"pr": pr, "results": _run_all(workspace)}
     finally:
         shutil.rmtree(workspace, ignore_errors=True)

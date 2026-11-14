@@ -8,6 +8,7 @@ Run from the repo root:
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import tarfile
@@ -29,12 +30,11 @@ def _assert_sandboxed(kw, workspace):
     assert kw["tmpfs"], "writes go to a tmpfs"
     assert not any("docker.sock" in v for v in kw["volumes"]), kw["volumes"]
     assert kw["volumes"][workspace]["mode"] == "ro", "the clone is read-only"
-    rw = [p for p, v in kw["volumes"].items() if v["mode"] != "ro"]
-    assert len(rw) == 1 and rw[0] != workspace, "one scratch dir, not the clone"
+    assert all(v["mode"] == "ro" for v in kw["volumes"].values()), "no writable host mount"
 
 
 def test_sandbox_spec():
-    kw = pv._sandbox_kwargs("/tmp/infra-ci/pr-1", "/tmp/infra-ci/pr-1.out", ["true"])
+    kw = pv._sandbox_kwargs("/tmp/infra-ci/pr-1", ["true"])
     _assert_sandboxed(kw, "/tmp/infra-ci/pr-1")
 
 
@@ -47,12 +47,13 @@ def test_pr_scripts_only_run_in_sandbox():
     def fake(**kw):
         calls.append(kw)
         if kw["image"] == pv.IMG_SANDBOX and "ci-fake-env" in " ".join(kw["command"]):
-            out = next(p for p, v in kw["volumes"].items() if v["mode"] != "ro")
-            with tarfile.open(os.path.join(out, "gen.tar"), "w") as t:
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w") as t:
                 data = b"A=1\n"
                 info = tarfile.TarInfo(".env")
                 info.size = len(data)
                 t.addfile(info, io.BytesIO(data))
+            return 0, "log\n%s\n%s\n%s\n" % (pv._TAR_BEGIN, base64.b64encode(buf.getvalue()).decode(), pv._TAR_END)
         return 0, "ok"
 
     real_run, real_docker = subprocess.run, pv._docker_run
