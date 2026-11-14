@@ -79,6 +79,12 @@ if out="$(uv run -q --no-project --with pyyaml python scripts/test_pii_policy.py
 else
 	fail "scripts/test_pii_policy.py" "$out"
 fi
+echo "== litellm MCP policy (mcp_policy.yaml vs teams.yaml, config.yaml, the GitHub tool lists)"
+if out="$(uv run -q --no-project --with pyyaml python scripts/test_mcp_policy.py 2>&1)"; then
+	pass "scripts/test_mcp_policy.py"
+else
+	fail "scripts/test_mcp_policy.py" "$out"
+fi
 echo "== cloud-pii guardrail (against the pinned LiteLLM)"
 # The version Renovate bumps in docker-compose.platform.yml, as for prefect above.
 LITELLM_VERSION="$(grep -m1 -oE 'litellm-database:v[0-9]+\.[0-9]+\.[0-9]+' docker-compose.platform.yml | sed 's/.*:v//')"

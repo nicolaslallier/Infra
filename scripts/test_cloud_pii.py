@@ -69,7 +69,8 @@ STUB = Stub()
 def guard(url=None, **kw):
     return cp.CloudPIIGate(
         presidio_analyzer_api_base=url or STUB.url,
-        policy_path=os.path.join(ROOT, "litellm", "pii_policy.yaml"), **kw,
+        policy_path=os.path.join(ROOT, "litellm", "pii_policy.yaml"),
+        mcp_policy_path=os.path.join(ROOT, "litellm", "mcp_policy.yaml"), **kw,
     )
 
 
@@ -353,6 +354,51 @@ def test_provider_token_counting_is_turned_off():
     from litellm.proxy import proxy_server
 
     assert asyncio.run(proxy_server._try_provider_token_count(None, "anthropic", "m", [], None, None, "m")) is None
+
+
+def mcp_call(g, tool, team="admin", args=None, auth=True):
+    """What the proxy hands the gate for an MCP tool call (observed on LiteLLM 1.83.14)."""
+    data = {"model": "mcp-tool-call", "messages": [{"role": "user", "content": f"Tool: {tool}"}],
+            "mcp_tool_name": tool, "mcp_arguments": args or {}}
+    key = UserAPIKeyAuth(team_id=team) if auth else None
+    return asyncio.run(g.async_pre_call_hook(user_api_key_dict=key, cache=None, data=data, call_type="call_mcp_tool"))
+
+
+def test_an_mcp_call_is_allowed_for_a_team_with_access():
+    assert mcp_call(guard(), "read_note", team="admin")["mcp_tool_name"] == "read_note"
+    assert mcp_call(guard(), "read_note", team="apps")["mcp_tool_name"] == "read_note"
+    assert mcp_call(guard(), "search_repositories", team="admin")["mcp_tool_name"] == "search_repositories"
+
+
+def test_an_mcp_call_is_refused_with_403_for_a_team_without_access():
+    for tool, team in (("read_note", "famille"), ("read_note", "dev-sessions"), ("search_repositories", "apps"),
+                       ("create_or_update_file", "apps")):
+        try:
+            mcp_call(guard(), tool, team=team, args={"branch": "feat"})
+            raise AssertionError(f"{tool}/{team} not refused")
+        except HTTPException as e:
+            assert e.status_code == 403, e.status_code
+
+
+def test_an_mcp_call_without_a_team_is_refused():
+    refused(lambda: mcp_call(guard(), "read_note", team=None), 403)  # no team: the master key or a loose key
+
+
+def test_merge_pull_request_is_refused_even_for_admin():
+    refused(lambda: mcp_call(guard(), "merge_pull_request", team="admin"), 403)  # on no list
+
+
+def test_a_github_write_to_a_default_branch_is_refused():
+    for args in ({}, {"branch": ""}, {"branch": "main"}, {"branch": "master"}):
+        for tool in ("create_or_update_file", "push_files"):
+            refused(lambda: mcp_call(guard(), tool, args=dict(args)), 403)
+    mcp_call(guard(), "create_or_update_file", args={"branch": "claude/feature"})
+    mcp_call(guard(), "push_files", args={"branch": "claude/feature"})
+
+
+def test_mcp_arguments_are_not_masked_and_need_no_model():
+    out = mcp_call(guard(), "issue_write", args={"body": "write to a@b.co"})
+    assert out["mcp_arguments"]["body"] == "write to a@b.co"  # the owner's own action
 
 
 def test_gate_exists_at_import_without_the_policy_file():
