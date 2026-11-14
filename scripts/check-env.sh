@@ -275,6 +275,13 @@ if [ -n "${MORIA_AMQP_PASSWORD:-}" ] && [ "$MORIA_AMQP_PASSWORD" != "$PLACEHOLDE
 	errors+=("MORIA_AMQP_PASSWORD must be letters and digits only (it goes into an amqp:// URL); generate one with \"openssl rand -hex 24\"")
 fi
 
+# The portal (AI repo) embeds this in postgresql+psycopg://portail:<password>@...,
+# so a reserved URL character would break the connection string.
+if [ -n "${PORTAIL_DB_PASSWORD:-}" ] && [ "$PORTAIL_DB_PASSWORD" != "$PLACEHOLDER" ] \
+	&& ! [[ "$PORTAIL_DB_PASSWORD" =~ ^[A-Za-z0-9]+$ ]]; then
+	errors+=("PORTAIL_DB_PASSWORD must be letters and digits only (it goes into a postgresql:// URL); generate one with \"openssl rand -hex 24\"")
+fi
+
 # Prefect's basic auth splits the string on its first ':'. Without one, every
 # API call -- the UI's and prefect-flows' alike -- is refused with a bare 401.
 if [ -n "${PREFECT_AUTH_STRING:-}" ] && [ "$PREFECT_AUTH_STRING" != "$PLACEHOLDER" ] \
