@@ -60,3 +60,27 @@ def validate(policy: dict, teams: dict, config: dict) -> list[str]:
         elif any(model.startswith(PROVIDER_PREFIXES) for model in by_name[name]):
             errs.append(f"local model '{name}' talks to a cloud provider; it must not be in local_models")
     return errs
+
+
+def chunk_text(text: str, max_chars: int = 100_000, overlap: int = 200) -> list[tuple[int, int]]:
+    """(start, end) spans covering `text`, cut at line ends when possible.
+
+    Each span after the first starts `overlap` characters before the previous end,
+    so an email or a SIN cut by a hard boundary still lies whole inside one span.
+    """
+    if overlap >= max_chars:
+        raise ValueError("overlap must be smaller than max_chars")
+    n = len(text)
+    spans: list[tuple[int, int]] = []
+    start = 0
+    while n:
+        end = min(start + max_chars, n)
+        if end < n:
+            cut = text.rfind("\n", start + overlap + 1, end)  # past the overlap, so we always advance
+            if cut != -1:
+                end = cut + 1
+        spans.append((start, end))
+        if end >= n:
+            return spans
+        start = end - overlap
+    return spans

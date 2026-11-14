@@ -112,6 +112,45 @@ def test_repo_policy_is_consistent():
     assert pp.validate(p, t, c) == [], pp.validate(p, t, c)
 
 
+def test_short_text_is_one_chunk():
+    assert pp.chunk_text("abc") == [(0, 3)]
+    assert pp.chunk_text("") == []
+
+
+def test_chunks_cover_the_whole_text():
+    text = ("x" * 37 + "\n") * 40
+    spans = pp.chunk_text(text, max_chars=100, overlap=10)
+    assert spans[0][0] == 0 and spans[-1][1] == len(text)
+    covered = set()
+    for s, e in spans:
+        assert e - s <= 100 and s < e
+        covered.update(range(s, e))
+    assert covered == set(range(len(text)))
+
+
+def test_chunks_cut_at_line_ends_when_possible():
+    text = ("y" * 30 + "\n") * 20
+    spans = pp.chunk_text(text, max_chars=100, overlap=10)
+    assert len(spans) > 1
+    for s, e in spans[:-1]:
+        assert text[e - 1] == "\n", (s, e)
+
+
+def test_email_across_a_boundary_lies_whole_inside_one_chunk():
+    email = "bob@example.com"
+    text = "a" * 40 + " " + email + " " + "b" * 60  # no newline: a hard cut at 50 splits it
+    spans = pp.chunk_text(text, max_chars=50, overlap=20)
+    assert any(email in text[s:e] for s, e in spans), spans
+
+
+def test_overlap_not_smaller_than_chunk_is_rejected():
+    try:
+        pp.chunk_text("abc", max_chars=10, overlap=10)
+        raise AssertionError("accepted")
+    except ValueError:
+        pass
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
