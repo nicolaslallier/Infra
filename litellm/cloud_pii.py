@@ -30,6 +30,12 @@ ALLOWED_CALL_TYPES = {
     "completion", "acompletion", "text_completion", "atext_completion",
     "embedding", "aembedding", "responses", "aresponses", "anthropic_messages",
 }
+# The message fields this module reads. Any other field, toward a non-local model, is refused
+# rather than guessed at: it could carry free text that would leave unscanned.
+MESSAGE_KEYS = {
+    "role", "content", "name", "tool_calls", "tool_call_id", "function_call",
+    "thinking_blocks", "reasoning_content", "refusal", "cache_control",
+}
 FALLBACK_KEYS = ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks")
 
 
@@ -72,7 +78,9 @@ def _blocks(content: Any, slots: list) -> None:
             raise _refuse("unreadable content block")
         elif b.get("type") in TEXT_TYPES:
             if "text" in b:
-                _add(slots, b, "text")
+                if not isinstance(b["text"], str):
+                    raise _refuse("a text block whose text is not a string cannot be scanned")
+                slots.append((b, "text"))
         elif b.get("type") == "tool_use":
             _string_leaves(b.get("input"), slots)
         elif b.get("type") == "tool_result":
@@ -84,8 +92,12 @@ def _blocks(content: Any, slots: list) -> None:
         elif b.get("type") in ("thinking", "redacted_thinking"):
             # Signed: altering the text breaks the signature, so it is scanned and refused (the
             # third element marks the slot strict), not masked. Real ones come from masked prompts.
+            if set(b) - {"type", "thinking", "signature", "data", "cache_control"}:
+                raise _refuse("a thinking block with unexpected fields cannot be scanned")
             for field in ("thinking", "data"):
-                if isinstance(b.get(field), str):
+                if field in b:
+                    if not isinstance(b[field], str):
+                        raise _refuse("a thinking block whose text is not a string cannot be scanned")
                     slots.append((b, field, True))
         else:
             raise _refuse(f"'{b.get('type')}' content is not sent to a non-local model (it cannot be scanned)")
@@ -121,6 +133,17 @@ def _slots(data: dict) -> list:
             _blocks(prediction["content"], slots)
     _descriptions(data.get("tools"), slots)
     for m in data.get("messages") or []:
+        unknown = set(m) - MESSAGE_KEYS
+        if unknown:
+            raise _refuse(f"message field '{sorted(unknown)[0]}' is not sent to a non-local model (it cannot be scanned)")
+        tb = m.get("thinking_blocks")
+        if isinstance(tb, list):
+            _blocks(tb, slots)
+        elif tb is not None:
+            raise _refuse("thinking_blocks must be a list")
+        for field in ("reasoning_content", "refusal"):
+            if isinstance(m.get(field), str):
+                slots.append((m, field))
         if isinstance(m.get("name"), str):
             slots.append((m, "name"))
         fc = m.get("function_call")

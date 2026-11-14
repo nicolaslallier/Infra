@@ -198,7 +198,11 @@ never orphans another app that's still attached to it):
   so `nginx/conf.d/litellm.conf` 403s them for LAN clients; a container calling
   `litellm:4000` directly still reaches them. `thinking` blocks cannot be
   masked (the signature would break), so they are scanned and the request is
-  refused if one carries personal information; provider pass-through is refused
+  refused if one carries personal information (message-level `thinking_blocks` too,
+  and a malformed block is refused, not skipped); `reasoning_content` is masked; a
+  message field outside a closed list (role, content, name, tool_calls,
+  tool_call_id, function_call, thinking_blocks, reasoning_content, refusal,
+  cache_control) is refused toward a non-local model; provider pass-through is refused
   whatever `model` its body names. Only presidio-analyzer is called, for spans, and the
   `<ENTITY>` replacement is done in the gate (`presidio-anonymizer` is deployed but
   unused, though Presidio's helper still wants its URL). Fail closed: analyzer down

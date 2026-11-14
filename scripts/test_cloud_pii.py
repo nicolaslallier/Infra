@@ -221,6 +221,31 @@ def test_a_thinking_block_carrying_personal_information_is_refused():
         refused(lambda: call(guard(), CLOUD, [{"role": "assistant", "content": [copy.deepcopy(block)]}]), 400)
 
 
+def test_message_level_thinking_blocks_are_scanned_strictly():
+    ok = {"type": "thinking", "thinking": "je compare", "signature": "s"}
+    msg = lambda blocks: [{"role": "assistant", "content": "x", "thinking_blocks": blocks}]  # noqa: E731
+    assert call(guard(), CLOUD, msg([copy.deepcopy(ok)]))["messages"][0]["thinking_blocks"] == [ok]
+    refused(lambda: call(guard(), CLOUD, msg([{**ok, "thinking": "mail a@b.co"}])), 400)
+
+
+def test_reasoning_content_is_masked():
+    out = call(guard(), CLOUD, [{"role": "assistant", "content": "x", "reasoning_content": "mail a@b.co"}])
+    assert out["messages"][0]["reasoning_content"] == "mail <EMAIL_ADDRESS>"
+
+
+def test_a_message_field_that_cannot_be_scanned_is_refused_for_cloud():
+    msg = [{"role": "user", "content": "x", "weird": {"a": "b"}}]
+    refused(lambda: call(guard(), CLOUD, copy.deepcopy(msg)), 400)
+    call(guard(), LOCAL, msg)
+
+
+def test_malformed_blocks_are_refused_not_skipped():
+    ok = {"type": "thinking", "thinking": "je compare", "signature": "s"}
+    for bad in ({**ok, "thinking": ["a@b.co"]}, {**ok, "note": "a@b.co"}, {"type": "text", "text": ["a@b.co"]},
+                {"type": "redacted_thinking", "data": {"x": "a@b.co"}}):
+        refused(lambda: call(guard(), CLOUD, [{"role": "assistant", "content": [copy.deepcopy(bad)]}]), 400)
+
+
 def test_pass_through_is_refused_whatever_model_the_body_names():
     # The body's `model` does not decide where a pass-through request goes.
     refused(lambda: call(guard(), LOCAL, call_type="pass_through_endpoint"), 400)
