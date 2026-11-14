@@ -184,6 +184,16 @@ def test_litellm_mounts_the_mcp_policy_and_receives_the_two_tokens():
         assert ":?" in svc["environment"][k], k
 
 
+def test_docs_name_the_mcp_stack_and_the_no_merge_rule():
+    claude = open(os.path.join(ROOT, "CLAUDE.md")).read()
+    readme = open(os.path.join(ROOT, "README.md")).read()
+    for needle in ("mcp-obsidian", "mcp-github", "docker-compose.mcp.yml", "merge_pull_request", "mcp_policy.yaml", "allow_all_keys"):
+        assert needle in claude, f"CLAUDE.md does not mention {needle}"
+    assert "## LiteLLM: MCP tools" in readme
+    for needle in ("github_pat_", "obsidian-mcp", "actions=Read,List", "nicolas-admin", "gh api repos/nicolaslallier/", "make app-images"):
+        assert needle in readme, f"README.md does not mention {needle}"
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

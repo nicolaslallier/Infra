@@ -237,19 +237,25 @@ def _strings(node: Any):
 
 
 def check_mcp_tools(data: dict) -> None:
-    """A chat or Responses request may declare `{"type": "mcp", "server_url": ...}` tools. One that
-    names a foreign URL would be run by the provider or connected to by LiteLLM, outside our MCP
-    policy; only LiteLLM's own gateway (`litellm_proxy...`, whose calls go through `call_mcp_tool`)
-    is allowed."""
-    if data.get("mcp_servers"):  # Anthropic's connector: the provider would connect to these itself
+    """A chat or Responses request may declare MCP servers or tools. A provider-native connector
+    (`mcp_servers`, an `mcp_toolset` tool) makes the PROVIDER contact a URL of the client's choosing;
+    a `{"type": "mcp", "server_url": ...}` tool names a foreign URL that the provider or LiteLLM
+    would connect to. Both bypass our MCP policy. Only LiteLLM's own gateway (`litellm_proxy...`,
+    whose calls go through `call_mcp_tool`) is allowed. Fields can also arrive inside `extra_body`,
+    which clients merge into the request: it is checked the same way."""
+    if data.get("mcp_servers"):
         raise _refuse("provider-native MCP servers (mcp_servers) are not available; use LiteLLM's gateway")
     for t in data.get("tools") or []:
-        if isinstance(t, dict) and str(t.get("type", "")).startswith("mcp") and t.get("type") != "mcp":
+        kind = str(t.get("type", "")).lower() if isinstance(t, dict) else ""
+        if kind.startswith("mcp") and kind != "mcp":
             raise _refuse(f"the '{t.get('type')}' tool type is not available; use LiteLLM's gateway")
-        if isinstance(t, dict) and t.get("type") == "mcp":
+        if kind == "mcp":
             url = t.get("server_url")
             if not (isinstance(url, str) and url.startswith("litellm_proxy")):
                 raise _refuse("an MCP tool must go through LiteLLM's gateway (server_url 'litellm_proxy...')")
+    extra = data.get("extra_body")
+    if isinstance(extra, dict):
+        check_mcp_tools(extra)
 
 
 def check_sendable(data: dict) -> list:

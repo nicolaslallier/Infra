@@ -420,6 +420,16 @@ def test_provider_native_mcp_connectors_are_refused():
     call(guard(), CLOUD, extra={"mcp_servers": []})  # empty is nothing
 
 
+def test_mcp_connectors_hidden_in_extra_body_or_with_odd_casing_are_refused():
+    inner = {"mcp_servers": [{"type": "url", "url": "https://evil.example/mcp", "name": "x"}]}
+    refused(lambda: call(guard(), CLOUD, extra={"extra_body": copy.deepcopy(inner)}), 400)
+    refused(lambda: call(guard(), LOCAL, extra={"extra_body": copy.deepcopy(inner)}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"extra_body": {"tools": [{"type": "mcp_toolset"}]}}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "MCP_Toolset"}]}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "MCP", "server_url": "https://evil.example/mcp"}]}), 400)
+    call(guard(), CLOUD, extra={"extra_body": {"top_k": 5}})  # ordinary extra_body content is not our business
+
+
 def test_gate_exists_at_import_without_the_policy_file():
     assert isinstance(cp.gate, cp.CloudPIIGate)  # config.yaml registers `cloud_pii.gate`; /app/pii_policy.yaml is absent here
 
