@@ -150,6 +150,11 @@ guardrails:
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true
+  # Global spend cap across all cloud providers: 200 CAD/month, in USD (LiteLLM
+  # counts in USD; local models cost 0). Source of truth is teams.yaml
+  # (global_budget_cad x cad_to_usd); `make test` fails if they disagree.
+  max_budget: 144.0
+  budget_duration: 30d
   # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
   # carries MCP tools, keep only the top_k whose name + description are
   # closest to the last user message. The index of the registry's tools is

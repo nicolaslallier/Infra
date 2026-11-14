@@ -67,6 +67,13 @@ for t in prefect/flows/test_*.py; do
 	fi
 done
 
+echo "== litellm provisioning (teams.yaml vs config.yaml, validation)"
+if out="$(uv run -q --no-project --with pyyaml python scripts/test_litellm_provision.py 2>&1)"; then
+	pass "scripts/test_litellm_provision.py"
+else
+	fail "scripts/test_litellm_provision.py" "$out"
+fi
+
 if [ "${TEST_ONLY:-}" != "unit" ]; then
 	# Under $HOME, not $TMPDIR: the checks bind-mount this path and the daemon
 	# resolves it, and $HOME is shared with the VM by Docker Desktop and Colima

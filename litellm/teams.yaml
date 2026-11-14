@@ -1,0 +1,42 @@
+# LiteLLM teams, users, keys and budgets: the source of truth, applied by
+# `make litellm-provision` (idempotent; a re-run pushes this file over what
+# the admin UI holds). Budgets are in CAD; LiteLLM counts in USD, so the
+# script multiplies by cad_to_usd.
+#
+# The global cap is litellm_settings.max_budget in config.yaml, in USD: it
+# must equal global_budget_cad x cad_to_usd (make test checks it), so change
+# the two together. The caps below sum to the global cap; `admin` is the
+# 30 CAD reserve.
+
+# TO CONFIRM by the owner at delivery: today's CAD -> USD rate. Revisit now
+# and then; a stale rate moves the real cap, it does not break anything.
+cad_to_usd: 0.72
+global_budget_cad: 200
+
+teams:
+  admin:
+    max_budget_cad: 30
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
+  famille:
+    max_budget_cad: 30
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-gemini, qwen3-embedding:0.6b]
+  apps:
+    max_budget_cad: 70
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, cloud-gemini, qwen3-embedding:0.6b]
+  dev-sessions:
+    max_budget_cad: 70
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, qwen3-embedding:0.6b]
+
+# Internal users (no UI login, no invitation). The family is the owner's to
+# add: one line per person.
+#   - {email: prenom@example.com, team: famille}
+users: []
+
+# Virtual keys, shown once when created. user: an email from `users`, or null.
+keys:
+  - {alias: nicolas-admin, team: admin, user: null}
+  - {alias: jarvis, team: apps, user: null}
+  - {alias: darkangel, team: apps, user: null}
+  - {alias: ea, team: apps, user: null}
+  - {alias: ai, team: apps, user: null}
+  - {alias: dev-sessions, team: dev-sessions, user: null}
