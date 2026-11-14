@@ -133,17 +133,28 @@ services:
       RUNNER_NAME: ai-host
       LABELS: ai
       ACCESS_TOKEN: ${GH_RUNNER_TOKEN_AI:?Set GH_RUNNER_TOKEN_AI in .runner.env}
+      # The entrypoint configures as root, then gosu's to `runner` for jobs,
+      # so the PAT in PID 1's environment is out of a job's reach.
+      RUN_AS_ROOT: "false"
     # Like ea: no Docker socket, no infra-net, a work dir wiped between jobs.
-    # The AI repo's deploy job (the portail) holds its two repo secrets,
-    # PORTAINER_API_KEY and BAO_TOKEN (read infra/env only, README), and calls
+    # The AI repo's deploy job (the portail) holds its two secrets,
+    # PORTAINER_API_KEY and BAO_TOKEN (read infra/portail only, README), and calls
     # Portainer's and OpenBao's APIs by URL. Give it the socket only with a
     # reason, and then count it among the runners that can read every PAT
     # (CLAUDE.md). Same host pinning as runner-ea.
     extra_hosts:
       - "portainer.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
       - "vault.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+    # The AI repo is public: jobs run as `runner`, and no-new-privileges
+    # disables the image's passwordless sudo. tmpfs is wiped on every restart.
+    # ponytail: /actions-runner (runner-owned binaries) still survives a
+    # restart; a fresh container per job needs an outside controller (README).
+    security_opt:
+      - no-new-privileges:true
     tmpfs:
       - /_work:exec
+      - /tmp:exec
+      - /home/runner
     volumes:
       # The Infra CA (public cert, no key); the AI repo's INFRA_CA_CERT_PATH
       # variable defaults to this path.

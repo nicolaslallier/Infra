@@ -552,6 +552,9 @@ Several things here are load-bearing.
   (repo secrets `PORTAINER_API_KEY` and `BAO_TOKEN`) and call Portainer and
   OpenBao by URL: each has the Infra CA at `/etc/<label>/infra-ca.crt` and
   `extra_hosts` pinning both vhosts to the LAN address. `moria` holds none.
+  `ai` also runs its jobs as `runner` with `no-new-privileges` and tmpfs on
+  `/_work`, `/tmp`, `/home/runner`; `/actions-runner` still survives a
+  restart, so it is not a fresh container per job (README, Portail).
   A runner is scoped to one repo, so a workflow elsewhere cannot use it.
 - **Self-hosted labels are never for PRs.** No workflow running on one of the
   six labels may trigger on `pull_request`/`pull_request_target`; PR checks
@@ -1448,7 +1451,8 @@ login is the root token in `.openbao.env`. There is no Keycloak OIDC auth
 method, and the only consumer is the nightly backup flow (below), which holds
 a scoped periodic token (policy `backup`: raft snapshot read plus
 `renew-self`, nothing else), renewed on each run. The AI repo's deploy (the portail) holds another
-(policy `infra-env-read`: read `infra/env` plus `renew-self`; README, Portail).
+(policy `portail-deploy`: read on `infra/portail` only, never `infra/env`,
+since the AI repo is public; README, Portail).
 No app container reads its secrets
 from the vault yet — they all still get them from `.env` via Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
 the listener sets `unauthenticated_metrics_access`, the same posture as
