@@ -338,7 +338,7 @@ keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
 
 s3-provision: check-env ## Create/update an app's S3 bucket + identity (app=<name> [bucket=] [versioned=1] [actions=Read,List])
-	@test -n "$(app)" || { echo "usage: make s3-provision app=<name> [bucket=<bucket>] [versioned=1]" >&2; exit 1; }
+	@test -n "$(app)" || { echo "usage: make s3-provision app=<name> [bucket=<bucket>] [versioned=1] [actions=<Read,Write,List,Tagging>]" >&2; exit 1; }
 	@./scripts/provision-s3.sh "$(app)" "$(or $(bucket),$(app))" "$(or $(versioned),0)" "$(or $(actions),$(S3_ACTIONS_DEFAULT))"
 
 ntfy-provision: check-env ## Create an app's ntfy user + write-only token (app=<name> [topic=<prefix>])

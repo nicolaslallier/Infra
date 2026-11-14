@@ -1,0 +1,50 @@
+# MCP servers behind LiteLLM (chantier 3): Obsidian, read-only; GitHub, at the "propose" level
+# (the agent opens issues, branches and PRs, the owner merges). Their own stack so a `platform`
+# redeploy does not cut the tools. Nothing here publishes a port or has an NGINX vhost: LiteLLM
+# reaches both by service name on infra-net, and decides who may call what (litellm/cloud_pii.py,
+# litellm/mcp_policy.yaml). Nothing is bind-mounted from the checkout. Design:
+# docs/superpowers/specs/2026-11-14-litellm-mcp-design.md
+
+services:
+  mcp-github:
+    # GitHub's official MCP server in Streamable HTTP mode (root path, port 8082). It takes the
+    # token PER REQUEST in `Authorization: Bearer` (LiteLLM sends GITHUB_MCP_TOKEN), so it holds
+    # no secret and is useless without one. `--tools` loads ONLY these tools and the server
+    # refuses to start on an unknown name: a renamed tool after a version bump is caught at
+    # deploy. merge_pull_request is not here, and is on no list anywhere: the same list is in
+    # litellm/mcp_policy.yaml and litellm/config.yaml (`make test` checks the three are equal).
+    image: ghcr.io/github/github-mcp-server:v1.12.2@sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6
+    command: ["http", "--port", "8082", "--tools", "search_repositories,get_file_contents,list_commits,search_code,get_commit,list_branches,list_tags,get_repository_tree,issue_read,search_issues,list_issues,list_pull_requests,pull_request_read,search_pull_requests,list_labels,get_label,actions_list,actions_get,actions_get_job_logs,issue_write,add_issue_comment,update_issue_comment,create_branch,create_or_update_file,push_files,create_pull_request,update_pull_request,add_reply_to_pull_request_comment"]
+    restart: unless-stopped
+    networks:
+      - infra-net
+
+  mcp-obsidian:
+    # Read-only Obsidian MCP server over the vault in S3 (mcp/obsidian/). Built by `make app-images`
+    # from this repo's main (scripts/portainer-images.sh), not pulled: bump the tag there and here
+    # together when mcp/obsidian/ changes. Its S3 identity `obsidian-mcp` is Read,List only
+    # (make s3-provision app=obsidian-mcp bucket=obsidian actions=Read,List), and it refuses any
+    # request without OBSIDIAN_MCP_TOKEN: infra-net is shared with other containers.
+    image: infra-mcp-obsidian:1
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      S3_ENDPOINT: http://s3:8333
+      OBSIDIAN_BUCKET: obsidian
+      OBSIDIAN_VAULT_PREFIX: ${ORGANIZER_VAULT_PREFIX:-}
+      OBSIDIAN_MCP_S3_ACCESS_KEY: obsidian-mcp
+      OBSIDIAN_MCP_S3_SECRET_KEY: ${OBSIDIAN_MCP_S3_SECRET_KEY:?Set OBSIDIAN_MCP_S3_SECRET_KEY in .env (openssl rand -hex 24)}
+      OBSIDIAN_MCP_TOKEN: ${OBSIDIAN_MCP_TOKEN:?Set OBSIDIAN_MCP_TOKEN in .env (openssl rand -hex 32)}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - infra-net
+
+networks:
+  infra-net:
+    external: true
+    name: infra-net
