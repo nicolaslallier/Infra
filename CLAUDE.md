@@ -183,7 +183,15 @@ never orphans another app that's still attached to it):
   blocks) and `vector_store_ids`/`file_search` (`second-brain`) until a live
   check proves retrieved text is masked; `cloud_pii.gate`
   (`litellm_settings.callbacks`) applies those refusals to text-less requests,
-  which LiteLLM never hands to a guardrail. `cloud-pii` asks only
+  which LiteLLM never hands to a guardrail, and refuses a local request whose
+  own `fallbacks`/`context_window_fallbacks`/`content_policy_fallbacks` name a
+  non-local alias (the router would retry in the cloud with the prompt unmasked);
+  fallbacks stored in the database or on a key are invisible to it, so keep
+  none that lead to a cloud alias. The team comes only from the proxy's own
+  authenticated-key object, never from a `metadata` string the client wrote
+  (without it: the strictest set). Tool descriptions, `system`, `instructions`,
+  `user`, message `name` and function-call arguments are masked too.
+  `cloud-pii` asks only
   presidio-analyzer for spans and replaces them itself;
   `presidio-anonymizer` is deployed but unused. Recognizers and models live in
   `presidio/` (bind-mounted); the French spaCy model is downloaded on the

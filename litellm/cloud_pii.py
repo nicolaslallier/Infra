@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import HTTPException
 from litellm.integrations.custom_guardrail import CustomGuardrail
 from litellm.integrations.custom_logger import CustomLogger
+from litellm.proxy._types import UserAPIKeyAuth
 from litellm.proxy.guardrails.guardrail_hooks.presidio import _OPTIONAL_PresidioPIIMasking
 
 from pii_policy import chunk_text, decide, entities_for, load_policy
@@ -61,10 +62,20 @@ def _blocks(content: Any, slots: list) -> None:
             raise _refuse(f"'{b.get('type')}' content is not sent to a non-local model (it cannot be scanned)")
 
 
+def _descriptions(node: Any, slots: list) -> None:
+    """Tool definitions are sent to the provider too: their `description` strings, at any depth."""
+    items = node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
+    for k, v in list(items):
+        if k == "description" and isinstance(v, str):
+            slots.append((node, k))
+        else:
+            _descriptions(v, slots)
+
+
 def _slots(data: dict) -> list:
     """Every string in the request that can carry text, as (container, key)."""
     slots: list = []
-    for field in ("system", "prompt", "input"):
+    for field in ("system", "prompt", "input", "instructions", "user"):
         v = data.get(field)
         if isinstance(v, str):
             slots.append((data, field))
@@ -79,7 +90,13 @@ def _slots(data: dict) -> list:
                         _blocks(item["content"], slots)
                 elif isinstance(item, dict):
                     _blocks([item], slots)
+    _descriptions(data.get("tools"), slots)
     for m in data.get("messages") or []:
+        if isinstance(m.get("name"), str):
+            slots.append((m, "name"))
+        fc = m.get("function_call")
+        if isinstance(fc, dict) and isinstance(fc.get("arguments"), str):
+            slots.append((fc, "arguments"))
         c = m.get("content")
         if isinstance(c, str):
             slots.append((m, "content"))
@@ -90,6 +107,22 @@ def _slots(data: dict) -> list:
             if isinstance(fn, dict):
                 _add(slots, fn, "arguments") if "arguments" in fn else None
     return slots
+
+
+FALLBACK_KEYS = ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks")
+
+
+def _strings(node: Any):
+    """Every string in a JSON-like tree, dict keys included."""
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            yield from _strings(k)
+            yield from _strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _strings(v)
 
 
 def check_sendable(data: dict, images: list | None = None) -> list:
@@ -148,10 +181,16 @@ class CloudPII(CustomGuardrail):
 
     @staticmethod
     def _team(request_data: dict) -> str | None:
+        """The authenticated key's team, or None (the strictest set).
+
+        Only the proxy's own UserAPIKeyAuth object counts: a JSON body cannot contain a Python
+        object, whereas any `user_api_key_team_alias` string in `metadata` or `litellm_metadata`
+        may have been written by the client.
+        """
         for key in ("metadata", "litellm_metadata"):
-            alias = (request_data.get(key) or {}).get("user_api_key_team_alias")
-            if alias:
-                return alias
+            auth = (request_data.get(key) or {}).get("user_api_key_auth")
+            if isinstance(auth, UserAPIKeyAuth):
+                return auth.team_alias or None
         return None
 
     async def _mask(self, text: str, groups: tuple[str, ...], request_data: dict, memo: dict) -> str:
@@ -216,6 +255,13 @@ class CloudPIIGate(CustomLogger):
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
         if decide(self.policy, data.get("model"), None).mask:
             check_sendable(data)
+        else:
+            # A local request may carry its own fallbacks: if one names a cloud alias, the router
+            # would retry there with the prompt we left unmasked. Every name must be local.
+            for key in FALLBACK_KEYS:
+                for name in _strings(data.get(key)):
+                    if name not in self.policy["local_models"]:
+                        raise _refuse(f"'{name}' is not a local model; it cannot be a fallback of a local request")
         return data
 
 

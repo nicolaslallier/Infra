@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "litellm"))
 from fastapi import HTTPException  # noqa: E402
+from litellm.proxy._types import UserAPIKeyAuth  # noqa: E402
 
 import cloud_pii as cp  # noqa: E402
 
@@ -70,9 +71,10 @@ def guard(url=None, **kw):
     )
 
 
-def run(g, model, texts, team="apps", messages=None, extra=None, images=None, input_type="request"):
-    meta = {"user_api_key_team_alias": team} if team else {}
-    data = {"model": model, "messages": messages if messages is not None else [], "metadata": meta, **(extra or {})}
+def run(g, model, texts, team="apps", messages=None, extra=None, images=None, input_type="request", spoof=None):
+    # What the proxy does: it puts the authenticated key's object in the route's metadata.
+    meta = {"user_api_key_auth": UserAPIKeyAuth(team_alias=team)}
+    data = {"model": model, "messages": messages if messages is not None else [], "metadata": meta, **(extra or {}), **(spoof or {})}
     inputs = {"texts": list(texts), "model": model}
     if images:
         inputs["images"] = images
@@ -152,7 +154,7 @@ def test_system_tool_result_and_tool_use_text_are_masked_in_place():
         {"role": "assistant", "content": None, "tool_calls": [{"function": {"name": "f", "arguments": '{"e": "a@b.co"}'}}]},
     ]
     _, data = run(guard(), CLOUD, [], messages=msgs, extra={"system": [{"type": "text", "text": "sys a@b.co"}]})
-    flat = json.dumps(data)
+    flat = json.dumps(data, default=str)
     assert "a@b.co" not in flat and flat.count("<EMAIL_ADDRESS>") == 5, flat
     assert data["messages"][1]["content"][0]["input"]["n"] == 2  # non-strings untouched
 
@@ -190,6 +192,46 @@ def test_gate_leaves_text_to_the_guardrail():
 
 def test_gate_exists_at_import_without_the_policy_file():
     assert isinstance(cp.gate, cp.CloudPIIGate)  # config.yaml registers `cloud_pii.gate`; /app/pii_policy.yaml is absent here
+
+
+def test_client_supplied_team_alias_is_ignored():
+    # A key with no team, but a body that claims dev-sessions: the strictest set applies.
+    spoof = {"litellm_metadata": {"user_api_key_team_alias": "dev-sessions"}}
+    assert run(guard(), CLOUD, [f"salut {NAME}"], team=None, spoof=spoof)[0]["texts"] == ["salut <PERSON>"]
+    # And a client cannot overwrite the team the proxy stamped.
+    spoof = {"metadata": {"user_api_key_team_alias": "dev-sessions", "user_api_key_auth": UserAPIKeyAuth(team_alias="famille")}}
+    assert run(guard(), CLOUD, [f"salut {NAME}"], team="famille", spoof=spoof)[0]["texts"] == ["salut <PERSON>"]
+
+
+def test_a_team_alias_without_the_proxys_auth_object_is_not_trusted():
+    g = guard()
+    data = {"model": CLOUD, "messages": [], "metadata": {"user_api_key_team_alias": "dev-sessions"}}
+    inputs = {"texts": [f"salut {NAME}"], "model": CLOUD}
+    out = asyncio.run(g.apply_guardrail(inputs=inputs, request_data=data, input_type="request"))
+    assert out["texts"] == ["salut <PERSON>"]
+
+
+def test_gate_refuses_a_cloud_fallback_on_a_local_request():
+    for key in ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks"):
+        refused(lambda: gate_call(LOCAL, {key: ["cloud-openai"]}), 400)
+        refused(lambda: gate_call(LOCAL, {key: [{LOCAL: ["cloud-openai"]}]}), 400)
+        refused(lambda: gate_call(LOCAL, {key: ["no-such-alias"]}), 400)  # unknown = not local
+    assert gate_call(LOCAL, {"fallbacks": ["gemma4:26b-a4b-it-qat"]})["model"] == LOCAL
+    assert gate_call(CLOUD, {"fallbacks": ["cloud-openai"]})["model"] == CLOUD  # masked anyway
+
+
+def test_other_free_text_fields_are_masked():
+    msgs = [
+        {"role": "user", "name": "a@b.co", "content": "x"},
+        {"role": "assistant", "content": None, "function_call": {"name": "f", "arguments": '{"e": "a@b.co"}'}},
+    ]
+    tools = [
+        {"type": "function", "function": {"name": "t", "description": "mail a@b.co", "parameters": {"properties": {"p": {"description": "e.g. a@b.co"}}}}},
+        {"name": "anth", "description": "to a@b.co", "input_schema": {"properties": {"q": {"description": "a@b.co"}}}},
+    ]
+    _, data = run(guard(), CLOUD, [], messages=msgs, extra={"instructions": "a@b.co", "user": "a@b.co", "tools": tools})
+    flat = json.dumps(data, default=str)
+    assert "a@b.co" not in flat, flat
 
 
 if __name__ == "__main__":
