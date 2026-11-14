@@ -1,0 +1,36 @@
+# The portail's command containers' network box, Portainer stack "run" on the
+# local environment (stacks.conf), the host that carries the AI repo's
+# `portail` stack (infra-net). The AI repo's lanceur starts the command
+# containers on run-net (LANCEUR_RESEAU); their only way out is run-egress.
+# See CLAUDE.md "Portail command containers".
+#
+# No bind mounts: the config is baked into the image, which `make run-image`
+# builds on the daemon from GitHub main (like the dev proxy).
+name: run
+
+services:
+  run-egress:
+    image: run-egress:1
+    pull_policy: never
+    container_name: run-egress
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/var/run/squid, /var/cache/squid, /var/log/squid, /tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3128/squid-internal-mgr/info"]
+      interval: 30s
+      timeout: 5s
+    # run-out is the route out; run-net is where the command containers are.
+    networks: [run-net, run-out]
+
+networks:
+  # internal: no route out of it. Fixed name: the lanceur attaches containers
+  # to it by name. Distinct from dev-net, so dev sessions and portail commands
+  # never see each other.
+  run-net:
+    name: run-net
+    internal: true
+  run-out:

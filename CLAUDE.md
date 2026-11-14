@@ -1056,6 +1056,18 @@ postgres dump holds every app's data, so nothing is world-readable.
   target keeps its old time. Grafana rules `Backup stale` (over 26 h) and
   `Backup metric missing` (absent for 30 m).
 
+### Portail command containers
+
+The AI repo's `lanceur` (Docker socket, portail stack) starts the portail's
+agent commands in throwaway containers on `run-net` (`docker-compose.run.yml`,
+Portainer stack `run` on the local environment, the host with `infra-net`):
+`internal: true`, distinct from `dev-net`. Their only way out is `run-egress`
+(squid, `dev/run-egress`, image `run-egress:1` built on the daemon by
+`make run-image`/`make run-up`, never pulled), allow-list: PyPI, npm, crates.io,
+GitHub. Same squid rule order and `dstdomain -n` as `dev-egress` (names before
+addresses; no s3, no private address). The first `make up` needs the image
+first: `make run-up`. Needs Docker Engine 26+ on the host (lanceur volume subpaths).
+
 ### Dev sessions
 
 Claude Code in containers, one per GitHub repo, reached over SSH from the

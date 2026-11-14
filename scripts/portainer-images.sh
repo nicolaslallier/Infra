@@ -38,6 +38,13 @@ if [ "${1:-}" = dev ] || [ "${1:-}" = dev-plumbing ]; then
   exit 0
 fi
 
+# `make run-image`: the portail's command-container proxy, on the local
+# environment, from the Infra repo on GitHub (RUN_IMAGE_REF, default main).
+if [ "${1:-}" = run ]; then
+  build "run-egress:1" "https://github.com/nicolaslallier/Infra.git#${RUN_IMAGE_REF:-main}:dev/run-egress"
+  exit 0
+fi
+
 : "${OLLAMA_PROXY_REF:?}"
 build "infra-ollama-proxy:${OLLAMA_PROXY_REF:0:7}" "https://github.com/nicolaslallier/ollama-metrics.git#$OLLAMA_PROXY_REF"
 : "${LITELLM_PGVECTOR_REF:?}"
