@@ -26,6 +26,13 @@ model_list:
       api_base: http://ollama-proxy:11434
       order: 2
 
+  # Gemma 4 26B (MoE, ~4B active: fast for its size), on the Mac Studio's
+  # Ollama only, through the stack's ollama-proxy.
+  - model_name: gemma4:26b-a4b-it-qat
+    litellm_params:
+      model: ollama_chat/gemma4:26b-a4b-it-qat
+      api_base: http://ollama-proxy:11434
+
   # Embeddings for the MCP semantic tool filter (litellm_settings below):
   # the Ollama on .10 (192.168.2.10, the Windows homelab host the stack runs
   # on), through ollama-proxy-laptop (its metrics proxy, despite the name).
