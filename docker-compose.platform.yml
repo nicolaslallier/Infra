@@ -187,6 +187,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
       GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      # MCP servers (mcp_servers in config.yaml): LiteLLM sends each its token.
+      GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN:?Set GITHUB_MCP_TOKEN in .env (a fine-grained github_pat_ token, see .env.example)}
+      OBSIDIAN_MCP_TOKEN: ${OBSIDIAN_MCP_TOKEN:?Set OBSIDIAN_MCP_TOKEN in .env (openssl rand -hex 32)}
       # PII guardrails (guardrails: in config.yaml).
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
@@ -197,6 +200,9 @@ services:
       - ${INFRA_DIR:-.}/litellm/cloud_pii.py:/app/cloud_pii.py:ro
       - ${INFRA_DIR:-.}/litellm/pii_policy.py:/app/pii_policy.py:ro
       - ${INFRA_DIR:-.}/litellm/pii_policy.yaml:/app/pii_policy.yaml:ro
+      # Who may call which MCP tool, enforced by the same gate (cloud_pii.py).
+      - ${INFRA_DIR:-.}/litellm/mcp_policy.py:/app/mcp_policy.py:ro
+      - ${INFRA_DIR:-.}/litellm/mcp_policy.yaml:/app/mcp_policy.yaml:ro
     networks:
       - infra-net
 

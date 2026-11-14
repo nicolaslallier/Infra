@@ -486,6 +486,58 @@ team and one cloud alias (the stub-free equivalent of `scripts/test_cloud_pii.py
    local tokenizer; Gemini-native (`/v1beta/...`) and `/anthropic/...`-style routes
    answer 403 through nginx.
 
+## LiteLLM: MCP tools
+
+The `mcp` stack (`docker-compose.mcp.yml`) runs two MCP servers that only LiteLLM reaches: **Obsidian**
+(read your notes: list, read, search; read-only) and **GitHub** (at the "propose" level: issues,
+branches, file commits and pull requests; you merge). `litellm/mcp_policy.yaml` says who may call
+what: Obsidian for `admin` and `apps`, GitHub for `admin`, nothing for `famille`, `dev-sessions` or the
+master key. `merge_pull_request` is not available to anyone.
+
+Setup, in this order:
+
+1. **Before merging**, put the three secrets in the vault (a merge deploys, and `check-env` refuses a
+   missing one): `OBSIDIAN_MCP_TOKEN` (`openssl rand -hex 32`), `OBSIDIAN_MCP_S3_SECRET_KEY`
+   (`openssl rand -hex 24`) and `GITHUB_MCP_TOKEN`, then `make vault-env`.
+2. **Create the GitHub token** as a *fine-grained* token (`github_pat_...`; `check-env` refuses a
+   classic one), "Only select repositories", and choose only repos that have an active ruleset:
+
+   ```bash
+   for r in $(gh repo list nicolaslallier --limit 60 --json name,isArchived,isFork \
+       --jq '.[]|select(.isArchived==false and .isFork==false)|.name'); do
+     echo "$r $(gh api repos/nicolaslallier/$r/rulesets --jq '[.[]|select(.enforcement=="active")]|length' 2>/dev/null || echo '?')"
+   done
+   ```
+
+   Today that means `Jarvis`, `Moria`, `Glee` (and `Infra` once the point below is fixed). Leave out
+   `AI`, `EA`, `DarkAngel` and `Heaven` (self-hosted runners, no ruleset yet) and private repos (a
+   ruleset needs a paid plan). **Leave out `Infra` for now:** the nightly `pr-validation` flow clones
+   every open PR and runs `scripts/ci-fake-env.sh` and `check-env.sh` from that PR, in
+   `prefect-flows`, which holds the Docker socket; an agent that can open a PR on `Infra` can make
+   that code run as root on the host without any merge. Re-add it after those scripts run without
+   the socket, network or environment. Permissions: Contents, Issues and Pull requests read and
+   write, Actions **read** (CI status and logs), Metadata read; **never** Administration, Workflows
+   or Actions write. Before merging an agent's PR, look at its last commits: level 2 can also push
+   onto an existing open PR branch.
+3. **The read-only S3 identity:** `make s3-provision app=obsidian-mcp bucket=obsidian actions=Read,List`
+   (it uses `OBSIDIAN_MCP_S3_SECRET_KEY`).
+4. **Merge, then deploy** in this order: `make app-images` (builds `infra-mcp-obsidian:1` on the
+   daemon from main), `make up stack=mcp`, `make up stack=platform`.
+5. **Check, with the `nicolas-admin` key** (the master key has no MCP tool, so the UI test page does
+   not work):
+   - list the tools (`github-...` and `obsidian-...`), read a note, search a note;
+   - open a PR from a test branch on a repo of the token;
+   - with an `apps` key a GitHub tool is refused (403);
+   - a file write to `main` is refused, and `merge_pull_request` is not in the list;
+   - `curl` the tools list and confirm there is no `merge_pull_request`.
+
+LiteLLM picks up an MCP server that came up after it without a restart. If `mcp-github` is
+unreachable, read its logs in Portainer: the image is distroless (no shell). From its source
+(`v1.12.2`), `http` listens on all interfaces by default and needs no server-side token; a tool name
+in `--tools` that does not exist makes it refuse to start (the names are those of
+`pkg/github/__toolsnaps__` at the tag; recheck them on every bump). Only LiteLLM's `/mcp` route and
+the REST route `/mcp-rest/tools/call` run the team check.
+
 ## Secrets (OpenBao)
 
 `openbao` is the stack's vault — OpenBao, the MPL-licensed fork of

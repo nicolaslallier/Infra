@@ -49,3 +49,6 @@ fi
 build "infra-ollama-proxy:${OLLAMA_PROXY_REF:0:7}" "https://github.com/nicolaslallier/ollama-metrics.git#$OLLAMA_PROXY_REF"
 : "${LITELLM_PGVECTOR_REF:?}"
 build "infra-litellm-pgvector:${LITELLM_PGVECTOR_REF:0:7}" "https://github.com/BerriAI/litellm-pgvector.git#$LITELLM_PGVECTOR_REF"
+# The Obsidian MCP server (mcp/obsidian/), from this repo's main: merge a change there first, then bump the tag here and in
+# docker-compose.mcp.yml together (a tag already on the daemon is not rebuilt).
+build "infra-mcp-obsidian:1" "https://github.com/nicolaslallier/Infra.git#main:mcp/obsidian"

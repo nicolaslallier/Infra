@@ -69,7 +69,8 @@ STUB = Stub()
 def guard(url=None, **kw):
     return cp.CloudPIIGate(
         presidio_analyzer_api_base=url or STUB.url,
-        policy_path=os.path.join(ROOT, "litellm", "pii_policy.yaml"), **kw,
+        policy_path=os.path.join(ROOT, "litellm", "pii_policy.yaml"),
+        mcp_policy_path=os.path.join(ROOT, "litellm", "mcp_policy.yaml"), **kw,
     )
 
 
@@ -353,6 +354,109 @@ def test_provider_token_counting_is_turned_off():
     from litellm.proxy import proxy_server
 
     assert asyncio.run(proxy_server._try_provider_token_count(None, "anthropic", "m", [], None, None, "m")) is None
+
+
+def mcp_call(g, tool, team="admin", args=None, auth=True):
+    """What the proxy hands the gate for an MCP tool call (observed on LiteLLM 1.83.14)."""
+    data = {"model": "mcp-tool-call", "messages": [{"role": "user", "content": f"Tool: {tool}"}],
+            "mcp_tool_name": tool, "mcp_arguments": args or {}}
+    key = UserAPIKeyAuth(team_id=team) if auth else None
+    return asyncio.run(g.async_pre_call_hook(user_api_key_dict=key, cache=None, data=data, call_type="call_mcp_tool"))
+
+
+def test_an_mcp_call_is_allowed_for_a_team_with_access():
+    assert mcp_call(guard(), "read_note", team="admin")["mcp_tool_name"] == "read_note"
+    assert mcp_call(guard(), "read_note", team="apps")["mcp_tool_name"] == "read_note"
+    assert mcp_call(guard(), "search_repositories", team="admin")["mcp_tool_name"] == "search_repositories"
+
+
+def test_an_mcp_call_is_refused_with_403_for_a_team_without_access():
+    for tool, team in (("read_note", "famille"), ("read_note", "dev-sessions"), ("search_repositories", "apps"),
+                       ("create_or_update_file", "apps")):
+        try:
+            mcp_call(guard(), tool, team=team, args={"branch": "feat"})
+            raise AssertionError(f"{tool}/{team} not refused")
+        except HTTPException as e:
+            assert e.status_code == 403, e.status_code
+
+
+def test_an_mcp_call_without_a_team_is_refused():
+    refused(lambda: mcp_call(guard(), "read_note", team=None), 403)  # no team: the master key or a loose key
+
+
+def test_merge_pull_request_is_refused_even_for_admin():
+    refused(lambda: mcp_call(guard(), "merge_pull_request", team="admin"), 403)  # on no list
+
+
+def test_a_github_write_to_a_default_branch_is_refused():
+    for args in ({}, {"branch": ""}, {"branch": "main"}, {"branch": "master"}):
+        for tool in ("create_or_update_file", "push_files"):
+            refused(lambda: mcp_call(guard(), tool, args=dict(args)), 403)
+    mcp_call(guard(), "create_or_update_file", args={"branch": "claude/feature"})
+    mcp_call(guard(), "push_files", args={"branch": "claude/feature"})
+
+
+def test_mcp_arguments_are_not_masked_and_need_no_model():
+    out = mcp_call(guard(), "issue_write", args={"body": "write to a@b.co"})
+    assert out["mcp_arguments"]["body"] == "write to a@b.co"  # the owner's own action
+
+
+def test_hosted_mcp_tools_in_a_chat_request_are_refused_unless_they_go_through_litellm():
+    foreign = {"tools": [{"type": "mcp", "server_label": "x", "server_url": "https://evil.example/mcp"}]}
+    refused(lambda: call(guard(), CLOUD, extra=copy.deepcopy(foreign)), 400)
+    refused(lambda: call(guard(), LOCAL, extra=copy.deepcopy(foreign)), 400)  # LiteLLM would connect to it itself
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "mcp", "server_label": "x"}]}), 400)  # no url at all
+    ok = {"tools": [{"type": "mcp", "server_label": "litellm", "server_url": "litellm_proxy/mcp/obsidian"}]}
+    call(guard(), CLOUD, extra=copy.deepcopy(ok))  # goes through the gateway, so through call_mcp_tool
+
+
+def test_gateway_mcp_auto_execution_is_refused_toward_cloud_models():
+    # require_approval "never" makes LiteLLM run the tool and send its RESULT upstream in an internal
+    # call that never passes this gate: unmasked. Toward a cloud model the call must come back to the client.
+    def tool(**kw):
+        return {"tools": [{"type": "mcp", "server_label": "l", "server_url": "litellm_proxy", **kw}]}
+    for kw in ({"require_approval": "never"}, {"require_approval": {"never": {"tool_names": ["read_note"]}}},
+               {"require_approval": "anything"}, {"require_approval": None}):
+        refused(lambda: call(guard(), CLOUD, extra=tool(**copy.deepcopy(kw))), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"extra_body": tool(require_approval="never")}), 400)
+    call(guard(), CLOUD, extra=tool())  # absent: the client approves each call
+    call(guard(), CLOUD, extra=tool(require_approval="always"))
+    call(guard(), LOCAL, extra=tool(require_approval="never"))  # a local model sees real data anyway
+
+
+def test_the_rest_call_shape_is_decided_like_the_mcp_route():
+    def rest(body, team="admin"):
+        return asyncio.run(guard().async_pre_call_hook(user_api_key_dict=UserAPIKeyAuth(team_id=team), cache=None,
+                                                       data=body, call_type="call_mcp_tool"))
+    rest({"name": "read_note", "arguments": {}, "server_id": "x"})
+    refused(lambda: rest({"name": "read_note", "arguments": {}}, team="famille"), 403)
+    refused(lambda: rest({"name": "merge_pull_request", "arguments": {}}), 403)
+    refused(lambda: rest({"name": "push_files", "arguments": {"branch": "main"}}), 403)
+    # both shapes at once, disagreeing: ambiguous, refused whichever one is the harmless one
+    refused(lambda: rest({"mcp_tool_name": "read_note", "name": "push_files", "arguments": {}}, team="apps"), 403)
+    refused(lambda: rest({"name": "push_files", "mcp_tool_name": "read_note", "mcp_arguments": {}}, team="admin"), 403)
+    refused(lambda: rest({"mcp_tool_name": "create_or_update_file", "mcp_arguments": {"branch": "f"},
+                          "arguments": {"branch": "main"}}), 403)
+
+
+def test_provider_native_mcp_connectors_are_refused():
+    # Anthropic's connector (`mcp_servers` + an `mcp_toolset` tool) and similar make the PROVIDER
+    # contact a URL of the client's choosing, outside our MCP policy.
+    servers = {"mcp_servers": [{"type": "url", "url": "https://evil.example/mcp", "name": "x"}]}
+    refused(lambda: call(guard(), CLOUD, extra=copy.deepcopy(servers)), 400)
+    refused(lambda: call(guard(), LOCAL, extra=copy.deepcopy(servers)), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "mcp_toolset", "mcp_server_name": "x"}]}), 400)
+    call(guard(), CLOUD, extra={"mcp_servers": []})  # empty is nothing
+
+
+def test_mcp_connectors_hidden_in_extra_body_or_with_odd_casing_are_refused():
+    inner = {"mcp_servers": [{"type": "url", "url": "https://evil.example/mcp", "name": "x"}]}
+    refused(lambda: call(guard(), CLOUD, extra={"extra_body": copy.deepcopy(inner)}), 400)
+    refused(lambda: call(guard(), LOCAL, extra={"extra_body": copy.deepcopy(inner)}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"extra_body": {"tools": [{"type": "mcp_toolset"}]}}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "MCP_Toolset"}]}), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "MCP", "server_url": "https://evil.example/mcp"}]}), 400)
+    call(guard(), CLOUD, extra={"extra_body": {"top_k": 5}})  # ordinary extra_body content is not our business
 
 
 def test_gate_exists_at_import_without_the_policy_file():
