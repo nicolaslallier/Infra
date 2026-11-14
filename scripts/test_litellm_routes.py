@@ -39,9 +39,10 @@ def test_the_block_comes_before_the_catch_all():
 def test_docs_say_memory_is_per_team_skills_are_closed_and_there_is_no_agent():
     claude = open(os.path.join(ROOT, "CLAUDE.md")).read()
     readme = open(os.path.join(ROOT, "README.md")).read()
-    for needle in ("/v1/memory", "/v1/skills", "A2A"):
+    for needle in ("/v1/memory", "/v1/skills", "A2A", "admin-only"):
         assert needle in claude, f"CLAUDE.md does not mention {needle}"
-    for needle in ("## LiteLLM: memory, skills, agents", "/v1/memory", "users: []", "litellm:4000"):
+    for needle in ("## LiteLLM: memory, skills, agents", "/v1/memory", "users: []", "litellm:4000",
+                   "allowed_routes", "master key", "globally unique"):
         assert needle in readme, f"README.md does not mention {needle}"
 
 
