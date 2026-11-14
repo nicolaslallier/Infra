@@ -14,7 +14,8 @@ services:
     # deploy. merge_pull_request is not here, and is on no list anywhere: the same list is in
     # litellm/mcp_policy.yaml and litellm/config.yaml (`make test` checks the three are equal).
     image: ghcr.io/github/github-mcp-server:v1.12.2@sha256:508a0857ec762b1ab1cece29193345b501fab1dd9d1228a7b617062954cecac6
-    command: ["http", "--port", "8082", "--tools", "search_repositories,get_file_contents,list_commits,search_code,get_commit,list_branches,list_tags,get_repository_tree,issue_read,search_issues,list_issues,list_pull_requests,pull_request_read,search_pull_requests,list_labels,get_label,actions_list,actions_get,actions_get_job_logs,issue_write,add_issue_comment,update_issue_comment,create_branch,create_or_update_file,push_files,create_pull_request,update_pull_request,add_reply_to_pull_request_comment"]
+    # tool names: pkg/github/__toolsnaps__ at the pinned tag (a wrong one fails the start)
+    command: ["http", "--port", "8082", "--tools", "search_repositories,get_file_contents,list_commits,search_code,get_commit,list_branches,list_tags,get_repository_tree,issue_read,search_issues,list_issues,list_pull_requests,pull_request_read,search_pull_requests,list_label,get_label,actions_list,actions_get,get_job_logs,issue_write,add_issue_comment,update_issue_comment,create_branch,create_or_update_file,push_files,create_pull_request,update_pull_request,add_reply_to_pull_request_comment"]
     restart: unless-stopped
     networks:
       - infra-net

@@ -29,11 +29,11 @@ servers:
       - list_pull_requests
       - pull_request_read
       - search_pull_requests
-      - list_labels
+      - list_label
       - get_label
       - actions_list
       - actions_get
-      - actions_get_job_logs
+      - get_job_logs
       # propose (write)
       - issue_write
       - add_issue_comment

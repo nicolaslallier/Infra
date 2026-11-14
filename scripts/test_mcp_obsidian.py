@@ -165,6 +165,16 @@ def test_search_stops_after_max_scan_objects():
     assert STUB.gets - before <= 2, STUB.gets - before
 
 
+def test_a_truncated_search_says_so():
+    old, notes.MAX_SCAN_OBJECTS = notes.MAX_SCAN_OBJECTS, 2
+    try:
+        hits = notes.search_notes(s3(), BUCKET, "zzz-no-such-text")
+    finally:
+        notes.MAX_SCAN_OBJECTS = old
+    assert hits and "truncated" in hits[-1], hits
+    assert not any("truncated" in h for h in notes.search_notes(s3(), BUCKET, "marie"))
+
+
 def test_vault_prefix_is_applied_and_stripped():
     DATA["Vault/Inbox/z.md"] = b"zed"
     try:

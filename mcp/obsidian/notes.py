@@ -95,6 +95,7 @@ def search_notes(s3, bucket: str, query: str, prefix: str = "", limit: int = 20,
     needle, hits, scanned = query.lower(), [], 0
     for path, size in _note_keys(s3, bucket, prefix, vault_prefix, MAX_LIST_KEYS):
         if scanned >= MAX_SCAN_OBJECTS:
+            hits.append({"truncated": f"scan stopped after {MAX_SCAN_OBJECTS} notes; narrow with prefix"})
             break
         scanned += 1
         if size > MAX_READ_BYTES:

@@ -509,10 +509,16 @@ Setup, in this order:
    done
    ```
 
-   Today that means `Infra`, `Jarvis`, `Moria`, `Glee`. Leave out `AI`, `EA`, `DarkAngel` and `Heaven`
-   (self-hosted runners, no ruleset yet) and private repos (a ruleset needs a paid plan). Permissions:
-   Contents, Issues and Pull requests read and write, Metadata read; **never** Administration,
-   Workflows or Actions write.
+   Today that means `Jarvis`, `Moria`, `Glee` (and `Infra` once the point below is fixed). Leave out
+   `AI`, `EA`, `DarkAngel` and `Heaven` (self-hosted runners, no ruleset yet) and private repos (a
+   ruleset needs a paid plan). **Leave out `Infra` for now:** the nightly `pr-validation` flow clones
+   every open PR and runs `scripts/ci-fake-env.sh` and `check-env.sh` from that PR, in
+   `prefect-flows`, which holds the Docker socket; an agent that can open a PR on `Infra` can make
+   that code run as root on the host without any merge. Re-add it after those scripts run without
+   the socket, network or environment. Permissions: Contents, Issues and Pull requests read and
+   write, Actions **read** (CI status and logs), Metadata read; **never** Administration, Workflows
+   or Actions write. Before merging an agent's PR, look at its last commits: level 2 can also push
+   onto an existing open PR branch.
 3. **The read-only S3 identity:** `make s3-provision app=obsidian-mcp bucket=obsidian actions=Read,List`
    (it uses `OBSIDIAN_MCP_S3_SECRET_KEY`).
 4. **Merge, then deploy** in this order: `make app-images` (builds `infra-mcp-obsidian:1` on the
@@ -525,10 +531,12 @@ Setup, in this order:
    - a file write to `main` is refused, and `merge_pull_request` is not in the list;
    - `curl` the tools list and confirm there is no `merge_pull_request`.
 
-If LiteLLM lists no tool, it probably started before the `mcp` stack: restart it. If `mcp-github` is
-unreachable, read its logs in Portainer: the image is distroless (no shell), and two things were not
-verifiable without Docker: that it listens on all interfaces in the container, and that it starts
-without a server-side token (the token comes per request from LiteLLM).
+LiteLLM picks up an MCP server that came up after it without a restart. If `mcp-github` is
+unreachable, read its logs in Portainer: the image is distroless (no shell). From its source
+(`v1.12.2`), `http` listens on all interfaces by default and needs no server-side token; a tool name
+in `--tools` that does not exist makes it refuse to start (the names are those of
+`pkg/github/__toolsnaps__` at the tag; recheck them on every bump). Only LiteLLM's `/mcp` route and
+the REST route `/mcp-rest/tools/call` run the team check.
 
 ## Secrets (OpenBao)
 

@@ -236,7 +236,7 @@ def _strings(node: Any):
             yield from _strings(v)
 
 
-def check_mcp_tools(data: dict) -> None:
+def check_mcp_tools(data: dict, masked: bool = False) -> None:
     """A chat or Responses request may declare MCP servers or tools. A provider-native connector
     (`mcp_servers`, an `mcp_toolset` tool) makes the PROVIDER contact a URL of the client's choosing;
     a `{"type": "mcp", "server_url": ...}` tool names a foreign URL that the provider or LiteLLM
@@ -253,14 +253,19 @@ def check_mcp_tools(data: dict) -> None:
             url = t.get("server_url")
             if not (isinstance(url, str) and url.startswith("litellm_proxy")):
                 raise _refuse("an MCP tool must go through LiteLLM's gateway (server_url 'litellm_proxy...')")
+            if masked and t.get("require_approval", "always") != "always":
+                # LiteLLM would run the tool and send its result upstream in an internal call that
+                # never passes this gate: the note's text would reach the cloud model unmasked.
+                raise _refuse("toward a cloud model an MCP tool must keep require_approval 'always' (or unset), "
+                              "so its result returns through this gate")
     extra = data.get("extra_body")
     if isinstance(extra, dict):
-        check_mcp_tools(extra)
+        check_mcp_tools(extra, masked)
 
 
 def check_sendable(data: dict) -> list:
     """Refuse what cannot be scanned (400); otherwise return the request's text slots."""
-    check_mcp_tools(data)
+    check_mcp_tools(data, masked=True)
     if data.get("vector_store_ids") or any(
         isinstance(t, dict) and t.get("type") == "file_search" for t in data.get("tools") or []
     ):
@@ -386,7 +391,8 @@ class CloudPIIGate(CustomLogger):
             # comes back to a cloud model is done on the next chat request, as a tool_result).
             reason = mcp_policy.refusal(
                 self.mcp_policy, getattr(user_api_key_dict, "team_id", None) or None,
-                data.get("mcp_tool_name"), data.get("mcp_arguments"))
+                data.get("mcp_tool_name") or data.get("name"),  # /mcp route / REST route bodies
+                data.get("mcp_arguments") if "mcp_arguments" in data else data.get("arguments"))
             if reason:
                 raise HTTPException(status_code=403, detail=f"mcp-policy: {reason}")
             return data

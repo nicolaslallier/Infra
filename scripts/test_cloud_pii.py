@@ -410,6 +410,30 @@ def test_hosted_mcp_tools_in_a_chat_request_are_refused_unless_they_go_through_l
     call(guard(), CLOUD, extra=copy.deepcopy(ok))  # goes through the gateway, so through call_mcp_tool
 
 
+def test_gateway_mcp_auto_execution_is_refused_toward_cloud_models():
+    # require_approval "never" makes LiteLLM run the tool and send its RESULT upstream in an internal
+    # call that never passes this gate: unmasked. Toward a cloud model the call must come back to the client.
+    def tool(**kw):
+        return {"tools": [{"type": "mcp", "server_label": "l", "server_url": "litellm_proxy", **kw}]}
+    for kw in ({"require_approval": "never"}, {"require_approval": {"never": {"tool_names": ["read_note"]}}},
+               {"require_approval": "anything"}, {"require_approval": None}):
+        refused(lambda: call(guard(), CLOUD, extra=tool(**copy.deepcopy(kw))), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"extra_body": tool(require_approval="never")}), 400)
+    call(guard(), CLOUD, extra=tool())  # absent: the client approves each call
+    call(guard(), CLOUD, extra=tool(require_approval="always"))
+    call(guard(), LOCAL, extra=tool(require_approval="never"))  # a local model sees real data anyway
+
+
+def test_the_rest_call_shape_is_decided_like_the_mcp_route():
+    def rest(body, team="admin"):
+        return asyncio.run(guard().async_pre_call_hook(user_api_key_dict=UserAPIKeyAuth(team_id=team), cache=None,
+                                                       data=body, call_type="call_mcp_tool"))
+    rest({"name": "read_note", "arguments": {}, "server_id": "x"})
+    refused(lambda: rest({"name": "read_note", "arguments": {}}, team="famille"), 403)
+    refused(lambda: rest({"name": "merge_pull_request", "arguments": {}}), 403)
+    refused(lambda: rest({"name": "push_files", "arguments": {"branch": "main"}}), 403)
+
+
 def test_provider_native_mcp_connectors_are_refused():
     # Anthropic's connector (`mcp_servers` + an `mcp_toolset` tool) and similar make the PROVIDER
     # contact a URL of the client's choosing, outside our MCP policy.

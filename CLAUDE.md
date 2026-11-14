@@ -232,7 +232,7 @@ never orphans another app that's still attached to it):
   only, no vhost.
 - **`mcp-github`** / **`mcp-obsidian`** — the MCP servers behind LiteLLM, their own stack
   (`docker-compose.mcp.yml`, `stacks.conf` row `mcp`, homelab, before `platform`: a
-  `platform` redeploy must not cut the tools; if LiteLLM started before them, restart it).
+  `platform` redeploy must not cut the tools; LiteLLM picks up a server that comes up later).
   No `ports:`, no vhost, nothing bind-mounted: only LiteLLM reaches them by service name on
   infra-net, and it registers them under `mcp_servers:` in `litellm/config.yaml` with
   `allow_all_keys: true` (LiteLLM otherwise denies every key without an explicit grant), because
