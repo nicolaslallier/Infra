@@ -410,6 +410,16 @@ def test_hosted_mcp_tools_in_a_chat_request_are_refused_unless_they_go_through_l
     call(guard(), CLOUD, extra=copy.deepcopy(ok))  # goes through the gateway, so through call_mcp_tool
 
 
+def test_provider_native_mcp_connectors_are_refused():
+    # Anthropic's connector (`mcp_servers` + an `mcp_toolset` tool) and similar make the PROVIDER
+    # contact a URL of the client's choosing, outside our MCP policy.
+    servers = {"mcp_servers": [{"type": "url", "url": "https://evil.example/mcp", "name": "x"}]}
+    refused(lambda: call(guard(), CLOUD, extra=copy.deepcopy(servers)), 400)
+    refused(lambda: call(guard(), LOCAL, extra=copy.deepcopy(servers)), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "mcp_toolset", "mcp_server_name": "x"}]}), 400)
+    call(guard(), CLOUD, extra={"mcp_servers": []})  # empty is nothing
+
+
 def test_gate_exists_at_import_without_the_policy_file():
     assert isinstance(cp.gate, cp.CloudPIIGate)  # config.yaml registers `cloud_pii.gate`; /app/pii_policy.yaml is absent here
 

@@ -241,7 +241,11 @@ def check_mcp_tools(data: dict) -> None:
     names a foreign URL would be run by the provider or connected to by LiteLLM, outside our MCP
     policy; only LiteLLM's own gateway (`litellm_proxy...`, whose calls go through `call_mcp_tool`)
     is allowed."""
+    if data.get("mcp_servers"):  # Anthropic's connector: the provider would connect to these itself
+        raise _refuse("provider-native MCP servers (mcp_servers) are not available; use LiteLLM's gateway")
     for t in data.get("tools") or []:
+        if isinstance(t, dict) and str(t.get("type", "")).startswith("mcp") and t.get("type") != "mcp":
+            raise _refuse(f"the '{t.get('type')}' tool type is not available; use LiteLLM's gateway")
         if isinstance(t, dict) and t.get("type") == "mcp":
             url = t.get("server_url")
             if not (isinstance(url, str) and url.startswith("litellm_proxy")):
