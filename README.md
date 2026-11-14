@@ -509,13 +509,13 @@ Setup, in this order:
    done
    ```
 
-   Today that means `Jarvis`, `Moria`, `Glee` (and `Infra` once the point below is fixed). Leave out
-   `AI`, `EA`, `DarkAngel` and `Heaven` (self-hosted runners, no ruleset yet) and private repos (a
-   ruleset needs a paid plan). **Leave out `Infra` for now:** the nightly `pr-validation` flow clones
-   every open PR and runs `scripts/ci-fake-env.sh` and `check-env.sh` from that PR, in
-   `prefect-flows`, which holds the Docker socket; an agent that can open a PR on `Infra` can make
-   that code run as root on the host without any merge. Re-add it after those scripts run without
-   the socket, network or environment. Permissions: Contents, Issues and Pull requests read and
+   Today that means `Infra`, `Jarvis`, `Moria`, `Glee`. Leave out `AI`, `EA`, `DarkAngel` and
+   `Heaven` (self-hosted runners, no ruleset yet) and private repos (a ruleset needs a paid plan).
+   `Infra` is safe to include only because the nightly `pr-validation` flow now runs the PR's own
+   scripts (`scripts/ci-fake-env.sh`, `check-env.sh`) in a sandbox container with no network, no
+   environment, no Docker socket and a read-only clone (`_sandbox_kwargs` in
+   `prefect/flows/pr_validation.py`): before that, a PR from the agent would have run as root on the
+   host at 03:00 without any merge. Keep that sandbox if you touch the flow. Permissions: Contents, Issues and Pull requests read and
    write, Actions **read** (CI status and logs), Metadata read; **never** Administration, Workflows
    or Actions write. Before merging an agent's PR, look at its last commits: level 2 can also push
    onto an existing open PR branch.
