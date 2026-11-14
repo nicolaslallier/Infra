@@ -17,6 +17,10 @@ SHELL := bash
 	runners-env \
 	dev-image dev-up dev-down dev-test
 
+# SeaweedFS actions of an app's S3 identity unless `make s3-provision actions=...` narrows them
+# (Read,List for a read-only identity, as the Obsidian MCP server's).
+S3_ACTIONS_DEFAULT := Read,Write,List,Tagging
+
 # Portainer's hostname, served by nginx/conf.d/portainer.conf. Covered by
 # the wildcard cert and the wildcard DNS zone -- no per-host setup needed.
 PORTAINER_HOST ?= portainer.infra.famillelallier.net
@@ -333,9 +337,9 @@ dns-check: check-env ## Query the dns service to verify answers
 keycloak-seed-users: check-env ## Set nurse.demo / examiner.demo login passwords
 	@./scripts/keycloak-seed-users.sh
 
-s3-provision: check-env ## Create/update an app's S3 bucket + identity (app=<name> [bucket=] [versioned=1])
+s3-provision: check-env ## Create/update an app's S3 bucket + identity (app=<name> [bucket=] [versioned=1] [actions=Read,List])
 	@test -n "$(app)" || { echo "usage: make s3-provision app=<name> [bucket=<bucket>] [versioned=1]" >&2; exit 1; }
-	@./scripts/provision-s3.sh "$(app)" "$(or $(bucket),$(app))" "$(or $(versioned),0)"
+	@./scripts/provision-s3.sh "$(app)" "$(or $(bucket),$(app))" "$(or $(versioned),0)" "$(or $(actions),$(S3_ACTIONS_DEFAULT))"
 
 ntfy-provision: check-env ## Create an app's ntfy user + write-only token (app=<name> [topic=<prefix>])
 	@test -n "$(app)" || { echo "usage: make ntfy-provision app=<name> [topic=<topic-prefix>]" >&2; exit 1; }

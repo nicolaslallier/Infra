@@ -401,6 +401,22 @@ FAKE
 		pass "github-harden --apply: missing check refused, named, nothing written"
 	else fail "github-harden --apply: missing check refused" "exit $code: $out"; fi
 
+	echo "== provision-s3 actions"
+	# The MCP Obsidian server's identity must be Read,List only: the fourth argument says so, an unknown
+	# action is refused before anything is sent, and the default for every other caller is unchanged.
+	if out="$(cd "$ws" && bash scripts/provision-s3.sh obsidian-mcp obsidian 0 Bogus 2>&1)"; then
+		fail "provision-s3 refuses an unknown action" "it ran: $out"
+	elif grep -qi 'actions' <<<"$out"; then
+		pass "provision-s3 refuses an unknown action"
+	else
+		fail "provision-s3 refuses an unknown action" "$out"
+	fi
+	if grep -qF -- '-actions $S3P_ACTIONS -apply' "$ws/scripts/provision-s3.sh" && grep -qF 'Read,Write,List,Tagging' "$ws/scripts/provision-s3.sh"; then
+		pass "provision-s3 passes the actions on, default unchanged"
+	else
+		fail "provision-s3 passes the actions on, default unchanged"
+	fi
+
 	echo "== check-env rejects broken .env files"
 	if [ ! -f "$ws/.baseline-ok" ]; then
 		# Already a failure above; every case would be rejected for that reason.
@@ -436,6 +452,11 @@ FAKE
 		expect_reject "amqp password not url-safe" "MORIA_AMQP_PASSWORD must be letters and digits" "set_env MORIA_AMQP_PASSWORD 'a@b/c'"
 		expect_reject "portail db password not url-safe" "PORTAIL_DB_PASSWORD must be letters and digits" "set_env PORTAIL_DB_PASSWORD 'a@b/c'"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
+		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY; do
+			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
+			expect_reject "$k empty" "set but empty" "set_env $k ''"
+		done
+		expect_reject "GITHUB_MCP_TOKEN must be fine-grained" "github_pat_" "set_env GITHUB_MCP_TOKEN ghp_classicTokenCannotBeScopedToRepos1234"
 		for k in ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY; do
 			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
 			expect_reject "$k empty" "set but empty" "set_env $k ''"

@@ -4,15 +4,18 @@
 # Idempotent: re-run it to rotate <APP>_S3_SECRET_KEY. The access key stays
 # the app name, so the new secret replaces the old one in place.
 #
-# Usage: scripts/provision-s3.sh <app> [bucket] [versioned]
+# Usage: scripts/provision-s3.sh <app> [bucket] [versioned] [actions]
 #   bucket    defaults to <app>
 #   versioned 1 enables bucket versioning (default 0)
+#   actions   comma-separated SeaweedFS actions for the identity (default Read,Write,List,Tagging;
+#             Read,List makes a read-only identity, as the Obsidian MCP server uses)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 app="${1:?usage: scripts/provision-s3.sh <app> [bucket] [versioned]}"
 bucket="${2:-$app}"
 versioned="${3:-0}"
+actions="${4:-Read,Write,List,Tagging}"
 
 # Every value below ends up inside a `weed shell` command line, which splits
 # on whitespace and runs `;`-separated commands -- so validate, don't quote.
@@ -21,6 +24,8 @@ name_re='^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$'
 [[ "$app" =~ $app_re ]] || { echo "provision-s3.sh: app '$app' must be 2-63 chars of a-z, 0-9, '-'" >&2; exit 1; }
 [[ "$bucket" =~ $name_re ]] || { echo "provision-s3.sh: bucket '$bucket' must be 3-63 chars of a-z, 0-9, '-'" >&2; exit 1; }
 case "$versioned" in 0 | 1) ;; *) echo "provision-s3.sh: versioned must be 0 or 1" >&2; exit 1 ;; esac
+actions_re='^(Read|Write|List|Tagging)(,(Read|Write|List|Tagging))*$'
+[[ "$actions" =~ $actions_re ]] || { echo "provision-s3.sh: actions '$actions' must be a comma-separated list of Read, Write, List, Tagging" >&2; exit 1; }
 
 if [ ! -f .env ]; then
   echo "provision-s3.sh: .env not found (run 'make init' first)" >&2
@@ -41,8 +46,8 @@ fi
 
 # `-e NAME` with no value: docker takes it from this process's environment,
 # so the secret never appears in an argv (ps).
-export S3P_APP="$app" S3P_BUCKET="$bucket" S3P_SECRET="$secret" S3P_VERSIONED="$versioned"
-docker compose -f docker-compose.data.yml exec -T -e S3P_APP -e S3P_BUCKET -e S3P_SECRET -e S3P_VERSIONED \
+export S3P_APP="$app" S3P_BUCKET="$bucket" S3P_SECRET="$secret" S3P_VERSIONED="$versioned" S3P_ACTIONS="$actions"
+docker compose -f docker-compose.data.yml exec -T -e S3P_APP -e S3P_BUCKET -e S3P_SECRET -e S3P_VERSIONED -e S3P_ACTIONS \
   s3 sh -eu -s <<'EOF'
 ws() { printf '%s\n' "$1" | weed shell -master=s3:9333; }
 
@@ -55,7 +60,7 @@ if ! printf '%s\n' "$list" | awk '{print $1}' | grep -qxF "$S3P_BUCKET"; then
   ws "s3.bucket.create -name $S3P_BUCKET"
 fi
 
-ws "s3.configure -user $S3P_APP -access_key $S3P_APP -secret_key $S3P_SECRET -buckets $S3P_BUCKET -actions Read,Write,List,Tagging -apply" >/dev/null
+ws "s3.configure -user $S3P_APP -access_key $S3P_APP -secret_key $S3P_SECRET -buckets $S3P_BUCKET -actions $S3P_ACTIONS -apply" >/dev/null
 
 if [ "$S3P_VERSIONED" = 1 ]; then
   ws "s3.bucket.versioning -name $S3P_BUCKET -enable"
