@@ -133,9 +133,15 @@ services:
       RUNNER_NAME: ai-host
       LABELS: ai
       ACCESS_TOKEN: ${GH_RUNNER_TOKEN_AI:?Set GH_RUNNER_TOKEN_AI in .runner.env}
-      # The entrypoint configures as root, then gosu's to `runner` for jobs,
-      # so the PAT in PID 1's environment is out of a job's reach.
+      # Jobs run as `runner` (the entrypoint registers as root, then gosu's).
       RUN_AS_ROOT: "false"
+      # The entrypoint unsets ACCESS_TOKEN and the other config vars after
+      # registering, so the runner and its jobs do not inherit the PAT. It
+      # stays in the root entrypoint's /proc/<pid>/environ, which `runner`
+      # cannot read. A PAT and not a registration token (RUNNER_TOKEN): that
+      # one expires after an hour, and an ephemeral runner registers again
+      # on every restart.
+      UNSET_CONFIG_VARS: "true"
     # Like ea: no Docker socket, no infra-net, a work dir wiped between jobs.
     # The AI repo's deploy job (the portail) holds its two secrets,
     # PORTAINER_API_KEY and BAO_TOKEN (read infra/portail only, README), and calls

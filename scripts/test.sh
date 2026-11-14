@@ -130,10 +130,10 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		else
 			fail "docker socket only on darkangel, heaven, infra" "got: $socks"
 		fi
-		if jq -e '.services["runner-ai"] | .environment.RUN_AS_ROOT == "false" and (.security_opt | index("no-new-privileges:true")) and (.volumes | all(.source != "/var/run/docker.sock" and .type != "volume"))' <<<"$cfg" >/dev/null; then
-			pass "runner-ai: non-root, no-new-privileges, no socket or named volume"
+		if jq -e '.services["runner-ai"] | .environment.RUN_AS_ROOT == "false" and .environment.UNSET_CONFIG_VARS == "true" and (.security_opt | index("no-new-privileges:true")) and (.volumes | all(.source != "/var/run/docker.sock" and .type != "volume"))' <<<"$cfg" >/dev/null; then
+			pass "runner-ai: non-root, config vars unset, no-new-privileges, no socket or named volume"
 		else
-			fail "runner-ai: non-root, no-new-privileges, no socket or named volume"
+			fail "runner-ai: non-root, config vars unset, no-new-privileges, no socket or named volume"
 		fi
 		for n in ai ea; do
 			if jq -e --arg n "$n" '.services["runner-"+$n] | any(.volumes[]?; .target == "/etc/\($n)/infra-ca.crt" and .read_only) and any(.extra_hosts[]?; startswith("vault.infra.famillelallier.net"))' <<<"$cfg" >/dev/null; then
