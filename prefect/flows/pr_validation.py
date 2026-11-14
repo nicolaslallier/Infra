@@ -14,7 +14,8 @@ How a run works, per open PR:
      like every check)
   2. render a throwaway .env, seal key and certs into it
      (scripts/ci-fake-env.sh, from the PR's own checkout, so a PR that breaks
-     that script fails here)
+     that script fails here -- but run in a sandbox container, never in this
+     process: see _sandbox_kwargs)
   3. run each check, most of them in the same image the real service uses
   4. post or update one comment on the PR
 
@@ -39,7 +40,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import subprocess
+import base64
+import io
+import tarfile
 import urllib.request
 from typing import Any
 
@@ -64,6 +67,9 @@ IMG_GIT = "alpine/git:latest"
 IMG_SHELLCHECK = "koalaman/shellcheck-alpine:stable"
 IMG_DOCKER_CLI = "docker:28-cli"
 IMG_NGINX = "nginx:1.31.5-alpine-otel@sha256:bae73de6d7d335de5fd156db9e53db5cfa3b74164aa350ebb1a36853ae197b5b"
+# Runs the PR's own scripts (see _sandbox_kwargs): bash, openssl and coreutils, and it is
+# already deployed (postgres, the backup flow's pg_dumpall), so same pin as docker-compose.postgres.yml.
+IMG_SANDBOX = "pgvector/pgvector:0.8.6-pg18-bookworm@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a"
 IMG_PROMETHEUS = "prom/prometheus:v3.5.0@sha256:63805ebb8d2b3920190daf1cb14a60871b16fd38bed42b857a3182bc621f4996"
 
 
@@ -105,6 +111,8 @@ def _docker_run(
     working_dir: str | None = None,
     user: str | None = None,
     entrypoint: str | None = None,
+    timeout: int = 600,
+    **hardening: Any,
 ) -> tuple[int, str]:
     """Run one container to completion; return (exit code, combined output).
 
@@ -128,11 +136,15 @@ def _docker_run(
         working_dir=working_dir,
         user=user,
         entrypoint=entrypoint,
-        network_mode="bridge",
+        **{"network_mode": "bridge", **hardening},
     )
     try:
         container.start()
-        status = container.wait(timeout=600)
+        try:
+            status = container.wait(timeout=timeout)
+        except Exception:  # noqa: BLE001 - docker-py raises a requests timeout; either way, stop it
+            container.kill()
+            return 124, f"timed out after {timeout}s"
         logs = container.logs(stdout=True, stderr=True).decode("utf-8", "replace")
         return int(status.get("StatusCode", 1)), logs
     finally:
@@ -140,6 +152,78 @@ def _docker_run(
             container.remove(force=True)
         except Exception:  # noqa: BLE001 - a leaked container must not fail the check
             pass
+
+
+def _sandbox_kwargs(workspace: str, command: list[str]) -> dict[str, Any]:
+    """The container that runs a script taken from the PR under test.
+
+    The flow holds the Docker socket and its secrets, so a PR's own
+    scripts must never run in it: anyone who can open a PR would run code on
+    the daemon at 03:00 without a merge. Here they get no network, no
+    environment, no socket, a read-only clone, tmpfs only (no writable host
+    mount: output leaves on stdout, size-capped), and hard limits.
+    """
+    return {
+        "image": IMG_SANDBOX,
+        "entrypoint": "bash",
+        "command": ["-c", *command],
+        "working_dir": "/repo",
+        "user": f"{os.getuid()}:{os.getgid()}",
+        "volumes": {
+            workspace: {"bind": "/repo", "mode": "ro"},
+        },
+        "network_mode": "none",
+        "read_only": True,
+        "tmpfs": {"/work": "rw,nosuid,nodev,size=256m,mode=1777", "/tmp": "rw,nosuid,nodev,size=64m,mode=1777"},
+        "cap_drop": ["ALL"],
+        "security_opt": ["no-new-privileges"],
+        "mem_limit": "512m",
+        "pids_limit": 256,
+        "nano_cpus": 1_000_000_000,
+        "timeout": 120,
+    }
+
+
+# What ci-fake-env.sh generates, and the only paths taken back from its output.
+_GENERATED = (".env", ".runner.env", "openbao", "certs")
+
+
+_TAR_BEGIN, _TAR_END = "===GEN-TAR-BEGIN===", "===GEN-TAR-END==="
+_TAR_MAX = 4_000_000  # bytes of base64 taken from the sandbox's stdout
+
+
+def _adopt_generated(workspace: str, logs: str) -> str:
+    """Put the sandbox's generated files into the workspace; return the logs
+    without the tar.
+
+    The tar arrives base64 on stdout between markers, which is untrusted
+    output: only regular files and directories under _GENERATED are
+    extracted, and what the clone already has at those paths is removed
+    first, so a symlink committed by the PR (.env -> /etc/...) cannot redirect
+    the write.
+    """
+    head, _, rest = logs.partition(_TAR_BEGIN)
+    blob, _, _ = rest.partition(_TAR_END)
+    raw = base64.b64decode("".join(blob.split())[:_TAR_MAX])
+    for name in _GENERATED:
+        path = os.path.join(workspace, name)
+        if os.path.islink(path) or os.path.isfile(path):
+            os.unlink(path)
+        elif os.path.isdir(path):
+            shutil.rmtree(path)
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:  # "r:" = uncompressed only
+        members = [
+            m
+            for m in tar.getmembers()
+            if (m.isreg() or m.isdir())
+            and os.path.normpath(m.name).split(os.sep)[0] in _GENERATED
+            and not os.path.isabs(m.name)
+            and ".." not in m.name.split("/")
+        ]
+        if len(members) > 100 or sum(m.size for m in members) > 10_000_000:
+            raise ValueError("sandbox output too large")
+        tar.extractall(workspace, members=members, filter="data")
+    return head
 
 
 def _checks(workspace: str) -> list[dict[str, Any]]:
@@ -191,10 +275,9 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
                 "docker compose --env-file /dev/null -f dev/session.compose.yml config -q",
             ],
             "working_dir": "/repo",
-            "volumes": {
-                workspace: ro("/repo"),
-                "/var/run/docker.sock": ro("/var/run/docker.sock"),
-            },
+            # `config -q` only parses the files: no daemon, so no socket (the
+            # files are the PR's).
+            "volumes": {workspace: ro("/repo")},
         },
         {
             # The highest-value check in this repo: every `make up`
@@ -279,16 +362,12 @@ def _check_json_yaml(workspace: str) -> tuple[int, str]:
 def _check_env_script(workspace: str) -> tuple[int, str]:
     """The repo's own preflight, run against the .env ci-fake-env.sh just
     rendered. It asserts that every key .env.example defines is present and
-    correctly shaped, which is exactly what a PR adding a service forgets."""
-    proc = subprocess.run(
-        ["bash", "scripts/check-env.sh"],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env={**os.environ, "SKIP_DOCKER_CHECK": "1"},
+    correctly shaped, which is exactly what a PR adding a service forgets.
+    Sandboxed: the script is the PR's."""
+    code, out = _docker_run(
+        **_sandbox_kwargs(workspace, ["SKIP_DOCKER_CHECK=1 bash scripts/check-env.sh"])
     )
-    return proc.returncode, (proc.stdout + proc.stderr).strip() or "ok"
+    return code, out.strip() or "ok"
 
 
 def _run_all(workspace: str) -> list[dict[str, Any]]:
@@ -301,23 +380,24 @@ def _run_all(workspace: str) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
     # Throwaway .env / seal key / certs, from the PR's own copy of the
-    # script -- so a PR that breaks it fails right here.
-    prep = subprocess.run(
-        ["bash", "scripts/ci-fake-env.sh", workspace],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env={**os.environ, "CI_FAKE_ENV_FORCE": "1"},
+    # script -- so a PR that breaks it fails right here. It runs on a copy of
+    # the clone inside the sandbox; only what it generated comes back.
+    code, out = _docker_run(
+        **_sandbox_kwargs(
+            workspace,
+            [
+                "cp -r /repo/. /work/ && cd /work && "
+                "CI_FAKE_ENV_FORCE=1 bash scripts/ci-fake-env.sh /work && "
+                f"echo {_TAR_BEGIN} && "
+                "tar -cf - .env .runner.env openbao/seal.key $(ls -d certs 2>/dev/null) | base64 | head -c 4000000 && "
+                f"echo && echo {_TAR_END}"
+            ],
+        )
     )
-    results.append(
-        {
-            "name": "prepare workspace",
-            "code": prep.returncode,
-            "output": (prep.stdout + prep.stderr).strip(),
-        }
-    )
-    if prep.returncode != 0:
+    if code == 0:
+        out = _adopt_generated(workspace, out)
+    results.append({"name": "prepare workspace", "code": code, "output": out.strip()})
+    if code != 0:
         return results
 
     for name, fn in (
@@ -403,6 +483,9 @@ def run_checks(pr: dict[str, Any]) -> dict[str, Any]:
                 "results": [{"name": "clone", "code": code, "output": out}],
             }
 
+        # The clone URL carries the token and git stores it in .git/config,
+        # which the sandbox could read and print into the PR comment.
+        shutil.rmtree(os.path.join(workspace, ".git"), ignore_errors=True)
         return {"pr": pr, "results": _run_all(workspace)}
     finally:
         shutil.rmtree(workspace, ignore_errors=True)
