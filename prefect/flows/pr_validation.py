@@ -211,7 +211,7 @@ def _adopt_generated(workspace: str, logs: str) -> str:
             os.unlink(path)
         elif os.path.isdir(path):
             shutil.rmtree(path)
-    with tarfile.open(fileobj=io.BytesIO(raw)) as tar:
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:") as tar:  # "r:" = uncompressed only
         members = [
             m
             for m in tar.getmembers()
@@ -220,6 +220,8 @@ def _adopt_generated(workspace: str, logs: str) -> str:
             and not os.path.isabs(m.name)
             and ".." not in m.name.split("/")
         ]
+        if len(members) > 100 or sum(m.size for m in members) > 10_000_000:
+            raise ValueError("sandbox output too large")
         tar.extractall(workspace, members=members, filter="data")
     return head
 
