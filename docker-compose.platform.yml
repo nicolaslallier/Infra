@@ -192,6 +192,11 @@ services:
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
     volumes:
       - ${INFRA_DIR:-.}/litellm/config.yaml:/app/config.yaml:ro
+      # The cloud-pii guardrail (config.yaml `guardrails:`): code, its pure policy
+      # module and the policy, read from /app next to config.yaml.
+      - ${INFRA_DIR:-.}/litellm/cloud_pii.py:/app/cloud_pii.py:ro
+      - ${INFRA_DIR:-.}/litellm/pii_policy.py:/app/pii_policy.py:ro
+      - ${INFRA_DIR:-.}/litellm/pii_policy.yaml:/app/pii_policy.yaml:ro
     networks:
       - infra-net
 

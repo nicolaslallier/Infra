@@ -166,18 +166,31 @@ never orphans another app that's still attached to it):
   cloud keys are in the vault; also set hard limits in the provider consoles,
   and check a cloud alias records spend > 0 (a model missing from the cost map
   counts 0).
-  Never pass `vector_store_ids` on a cloud request: unchecked whether the
-  PII guardrail also masks retrieved text.
+  Personal information is masked only toward cloud models (`cloud-pii`, below
+  under `presidio-*`); `second-brain` is refused toward them for now.
 - **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio,
-  LiteLLM's PII guardrails (Quebec's Loi 25; `guardrails:` in
-  `litellm/config.yaml`). `pii-identifiants` is on for every key and masks
-  NAS, RAMQ, permis SAAQ, passeport, cartes, comptes, courriels, téléphones,
-  adresses civiques and codes postaux as `<ENTITY>`; `pii-noms-fr`/`-en`
-  (spaCy names) are opt-in per key/team or per request, because NER mangles
-  code. Recognizers and models live in `presidio/` (bind-mounted); the
-  French spaCy model is downloaded on the analyzer's first start into the
-  `presidio-models` volume. Fail closed: with the analyzer down, LiteLLM
-  rejects the requests the guardrails cover. On infra-net only, no vhost.
+  LiteLLM's PII guardrail (Quebec's Loi 25). The single guardrail `cloud-pii`
+  (`litellm/cloud_pii.py`, policy `litellm/pii_policy.yaml`, both bind-mounted
+  into `/app`) masks NAS, RAMQ, permis SAAQ, passeport, cartes, comptes,
+  courriels, téléphones, adresses civiques and codes postaux as `<ENTITY>`, and
+  people's names (spaCy, fr then en) for every team but `dev-sessions`, **only
+  on requests to non-local models**: the Ollama aliases listed as
+  `local_models` see the real data, which never leaves the Macs. The rule is
+  inverted on purpose: everything not listed local is masked, so a model added
+  in the admin UI under a free name is masked, not leaked; a key without a team
+  (the master key) gets the strictest set. Toward a cloud model it also
+  refuses (400) what Presidio cannot read (images, files, audio, unknown
+  blocks) and `vector_store_ids`/`file_search` (`second-brain`) until a live
+  check proves retrieved text is masked; `cloud_pii.gate`
+  (`litellm_settings.callbacks`) applies those refusals to text-less requests,
+  which LiteLLM never hands to a guardrail. `cloud-pii` asks only
+  presidio-analyzer for spans and replaces them itself;
+  `presidio-anonymizer` is deployed but unused. Recognizers and models live in
+  `presidio/` (bind-mounted); the French spaCy model is downloaded on the
+  analyzer's first start into the `presidio-models` volume. Fail closed: with
+  the analyzer down a cloud request gets 503, a local one is unaffected. On
+  infra-net only, no vhost. `make test` checks the policy against `teams.yaml`
+  and `config.yaml` and runs the guardrail against the pinned LiteLLM.
 - **`litellm-pgvector`** — `infra-litellm-pgvector`, built by `make app-images`
   from a pinned commit of BerriAI/litellm-pgvector (`LITELLM_PGVECTOR_REF` in
   the Makefile; keep the compose tag in step). LiteLLM has no pgvector driver

@@ -151,6 +151,43 @@ def test_overlap_not_smaller_than_chunk_is_rejected():
         pass
 
 
+def _config():
+    import yaml
+
+    return yaml.safe_load(open(os.path.join(ROOT, "litellm", "config.yaml")))
+
+
+def test_cloud_pii_is_the_only_default_on_guardrail():
+    on = [g["guardrail_name"] for g in _config().get("guardrails", []) if g["litellm_params"].get("default_on")]
+    assert on == ["cloud-pii"], on
+
+
+def test_old_pii_guardrails_are_gone():
+    names = {g["guardrail_name"] for g in _config().get("guardrails", [])}
+    assert not names & {"pii-identifiants", "pii-noms-fr", "pii-noms-en"}, names
+
+
+def test_no_fallbacks_configured():
+    c = _config()
+    for section in ("router_settings", "litellm_settings"):
+        assert "fallbacks" not in (c.get(section) or {}), section  # masking is decided on the requested alias
+
+
+def test_gate_is_registered_as_a_callback():
+    # LiteLLM calls a guardrail only when it finds text; the gate refuses image-only requests.
+    assert "cloud_pii.gate" in ((_config().get("litellm_settings") or {}).get("callbacks") or []) or \
+        (_config().get("litellm_settings") or {}).get("callbacks") == "cloud_pii.gate"
+
+
+def test_compose_mounts_the_guardrail_files():
+    import yaml
+
+    svc = yaml.safe_load(open(os.path.join(ROOT, "docker-compose.platform.yml")))["services"]["litellm"]
+    vols = svc["volumes"]
+    for f in ("cloud_pii.py", "pii_policy.py", "pii_policy.yaml"):
+        assert any(v.endswith(f"/litellm/{f}:/app/{f}:ro") for v in vols), (f, vols)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
