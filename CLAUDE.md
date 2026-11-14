@@ -166,10 +166,13 @@ never orphans another app that's still attached to it):
   cloud keys are in the vault; also set hard limits in the provider consoles,
   and check a cloud alias records spend > 0 (a model missing from the cost map
   counts 0).
-  Memory is LiteLLM's native `/v1/memory` (key/value rows in the `litellm` database, readable by the
-  key's `user_id` or `team_id`, writable by their owner): the keys in `teams.yaml` have no user, so it
-  is per team until family members are added under `users:`. LiteLLM never reads it back into a
-  prompt; if an agent re-sends it to a cloud model the gate masks it like any message. `/v1/skills`
+  Memory is LiteLLM's native `/v1/memory` (rows in the `litellm` database, keys globally unique across
+  teams). From reading the 1.83.14 source (not run live): it is **admin-only** today, because a team key
+  has no `allowed_routes` for it, and even if granted, a key without a user can create a team row but
+  never change or delete it (only a team admin or the master key can); the master key sees and rewrites
+  every row. Real per-team or per-person memory needs `allowed_routes` on the keys and users under
+  `users:` (README). LiteLLM never reads it back into a prompt; if an agent re-sends it to a cloud model
+  the gate masks it like any message. `/v1/skills`
   (a relay to Anthropic's Skills API, so a skill would leave unmasked) and the A2A routes (`/a2a/`,
   `/v1/a2a/`: no policy decides which team calls which agent) are 403 at the vhost; no agent is
   registered (Jarvis does not speak A2A). A container calling `litellm:4000` directly bypasses nginx.

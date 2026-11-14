@@ -540,31 +540,33 @@ the REST route `/mcp-rest/tools/call` run the team check.
 
 ## LiteLLM: memory, skills, agents
 
-- **Memory** is LiteLLM's own `/v1/memory` (rows in the `litellm` database). A key reads the rows of
-  its `user_id` and of its team, and writes only its own. The keys in `litellm/teams.yaml` have no
-  user (`users: []`), so today memory is per team; add the family under `users:` and re-run
-  `make litellm-provision` to get it per person. Key convention: `<agent>/<subject>`, short values,
-  never a secret. LiteLLM does not read memory back into prompts; text an agent re-sends to a cloud
-  model is masked by the gate like any other.
+- **Memory** is LiteLLM's own `/v1/memory` (rows in the `litellm` database). Read from the 1.83.14
+  source, not run live: a team key cannot reach it (it has no `allowed_routes` for `/v1/memory`,
+  so it answers "Only proxy admin..."), and a key without a user, even once granted the route, can
+  create a team row but not update or delete it. Today it is **admin-only**: the master key sees and
+  rewrites every row of every team. Keys are globally unique across teams (a second team gets a 409
+  on a key another team holds), so prefix them `<team>/<agent>/<subject>`, short values, never a
+  secret. For real per-team or per-person memory: give the keys `allowed_routes: ["/v1/memory",
+  "/v1/memory/*"]` and add the family under `users:` in `litellm/teams.yaml` (`users: []` today), then
+  `make litellm-provision`; neither is done here, so check live before relying on it. LiteLLM does not
+  read memory back into prompts; text an agent re-sends to a cloud model is masked by the gate.
 - **Skills** (`/v1/skills`) and **A2A agents** (`/a2a/...`, `/v1/a2a/...`) answer 403 at
   `litellm.infra.famillelallier.net`. A container calling `litellm:4000` directly is not covered.
-  No agent is registered: Jarvis does not speak A2A and calls LM Studio, not LiteLLM. To open one
-  later, re-open `/v1/a2a/` for that agent only, check whether LiteLLM runs the pre-call hook for
-  A2A, and add the team check to `cloud_pii.gate` first.
+  No agent is registered: Jarvis does not speak A2A. To open one later, re-open `/v1/a2a/` for that
+  agent only, check whether LiteLLM runs the pre-call hook for A2A (a registered agent can also be
+  called as model `a2a/<name>` on `/v1/chat/completions`), and add the team check to `cloud_pii.gate`.
 
-Checks, with the virtual keys of two teams (`$J` = `jarvis`, `$E` = `ea`, `$F` = `famille`, `$N` = a
-key with no team) against `https://litellm.infra.famillelallier.net`:
+Check, with the master key in `$M`, a key of the `apps` team in `$J` and
+`URL=https://litellm.infra.famillelallier.net`:
 
 ```bash
-curl -s -X PUT -H "Authorization: Bearer $J" -H 'Content-Type: application/json' \
-  -d '{"value":"test"}' $URL/v1/memory/jarvis/test       # written
-curl -s -H "Authorization: Bearer $E" $URL/v1/memory/jarvis/test   # same team: visible
-curl -s -H "Authorization: Bearer $F" $URL/v1/memory/jarvis/test   # other team: not found
-curl -s -H "Authorization: Bearer $N" $URL/v1/memory               # no team: nothing
-curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/skills   # 403
+curl -s -X PUT -H "Authorization: Bearer $M" -H 'Content-Type: application/json' \
+  -d '{"value":"test","team_id":"apps"}' $URL/v1/memory/apps/jarvis/test   # written
+curl -s -H "Authorization: Bearer $M" $URL/v1/memory                        # listed
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/memory   # expect 401/403
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/skills   # 403 from nginx
+curl -s -X DELETE -H "Authorization: Bearer $M" $URL/v1/memory/apps/jarvis/test
 ```
-
-Delete the test row afterwards (`DELETE /v1/memory/jarvis/test` with `$J`).
 
 ## Secrets (OpenBao)
 
