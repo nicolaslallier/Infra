@@ -5,6 +5,8 @@ name (LiteLLM's hook carries the unprefixed name and no server), so each server 
 tools here, the lists are disjoint, and a tool on no list is refused. That is also what keeps
 `merge_pull_request` out. See docs/superpowers/specs/2026-11-14-litellm-mcp-design.md.
 """
+import re
+
 import yaml
 
 
@@ -31,7 +33,21 @@ def refusal(policy: dict, team_id: str | None, tool_name: str | None, arguments:
         return f"this key's team may not call tools of the '{server}' MCP server"
     guard = policy.get("branch_guard") or {}
     if tool_name in guard.get("tools", []):
-        branch = (arguments or {}).get("branch")
-        if not branch or branch in guard.get("refuse_branches", []):
-            return f"'{tool_name}' needs a branch other than {', '.join(guard.get('refuse_branches', []))}"
+        refused = guard.get("refuse_branches", [])
+        if _default_branch(((arguments or {}).get("branch")), refused):
+            return f"'{tool_name}' needs a real branch, not {', '.join(refused)}"
     return None
+
+
+def _default_branch(branch, refused: list[str]) -> bool:
+    """True when `branch` must be refused: missing, not text, odd characters, a ref other than a
+    plain branch, or a default branch once the usual spellings are normalised (refs/heads/main, Main...)."""
+    if not isinstance(branch, str) or not branch.strip():
+        return True
+    name = branch.strip()
+    for prefix in ("refs/heads/", "heads/"):
+        if name.lower().startswith(prefix):
+            name = name[len(prefix):]
+    if name.lower().startswith("refs/") or not re.fullmatch(r"[A-Za-z0-9._/-]+", name):
+        return True
+    return name.lower() in {r.lower() for r in refused}

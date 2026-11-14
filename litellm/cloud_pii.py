@@ -236,8 +236,21 @@ def _strings(node: Any):
             yield from _strings(v)
 
 
+def check_mcp_tools(data: dict) -> None:
+    """A chat or Responses request may declare `{"type": "mcp", "server_url": ...}` tools. One that
+    names a foreign URL would be run by the provider or connected to by LiteLLM, outside our MCP
+    policy; only LiteLLM's own gateway (`litellm_proxy...`, whose calls go through `call_mcp_tool`)
+    is allowed."""
+    for t in data.get("tools") or []:
+        if isinstance(t, dict) and t.get("type") == "mcp":
+            url = t.get("server_url")
+            if not (isinstance(url, str) and url.startswith("litellm_proxy")):
+                raise _refuse("an MCP tool must go through LiteLLM's gateway (server_url 'litellm_proxy...')")
+
+
 def check_sendable(data: dict) -> list:
     """Refuse what cannot be scanned (400); otherwise return the request's text slots."""
+    check_mcp_tools(data)
     if data.get("vector_store_ids") or any(
         isinstance(t, dict) and t.get("type") == "file_search" for t in data.get("tools") or []
     ):
@@ -378,6 +391,7 @@ class CloudPIIGate(CustomLogger):
         decision = decide(self.policy, model, team)
 
         if not decision.mask:
+            check_mcp_tools(data)
             # A local request may carry its own fallbacks: if one names a cloud alias, the router
             # would retry there with the prompt we left unmasked. Every name must be local.
             for key in FALLBACK_KEYS:

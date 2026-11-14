@@ -62,6 +62,14 @@ def test_github_write_to_main_or_master_is_refused():
             assert mp.refusal(P, "admin", tool, {"branch": b}) is not None
 
 
+def test_the_branch_is_normalised_before_it_is_compared():
+    for b in ("refs/heads/main", "heads/main", "MAIN", "Main", "refs/heads/Master", " main ", "refs/tags/v1",
+              "refs/pull/1/head", "bad branch", "x;rm", 123, ["main"], {"a": 1}, True):
+        assert mp.refusal(P, "admin", "create_or_update_file", {"branch": b}) is not None, b
+    for b in ("refs/heads/feature/x", "claude/feat-1", "fix_2.0"):
+        assert mp.refusal(P, "admin", "push_files", {"branch": b}) is None, b
+
+
 def test_github_write_to_a_feature_branch_passes():
     assert mp.refusal(P, "admin", "create_or_update_file", {"branch": "claude/x"}) is None
     assert mp.refusal(P, "admin", "issue_write", {}) is None  # not a branch-guarded tool

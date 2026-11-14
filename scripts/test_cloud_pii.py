@@ -401,6 +401,15 @@ def test_mcp_arguments_are_not_masked_and_need_no_model():
     assert out["mcp_arguments"]["body"] == "write to a@b.co"  # the owner's own action
 
 
+def test_hosted_mcp_tools_in_a_chat_request_are_refused_unless_they_go_through_litellm():
+    foreign = {"tools": [{"type": "mcp", "server_label": "x", "server_url": "https://evil.example/mcp"}]}
+    refused(lambda: call(guard(), CLOUD, extra=copy.deepcopy(foreign)), 400)
+    refused(lambda: call(guard(), LOCAL, extra=copy.deepcopy(foreign)), 400)  # LiteLLM would connect to it itself
+    refused(lambda: call(guard(), CLOUD, extra={"tools": [{"type": "mcp", "server_label": "x"}]}), 400)  # no url at all
+    ok = {"tools": [{"type": "mcp", "server_label": "litellm", "server_url": "litellm_proxy/mcp/obsidian"}]}
+    call(guard(), CLOUD, extra=copy.deepcopy(ok))  # goes through the gateway, so through call_mcp_tool
+
+
 def test_gate_exists_at_import_without_the_policy_file():
     assert isinstance(cp.gate, cp.CloudPIIGate)  # config.yaml registers `cloud_pii.gate`; /app/pii_policy.yaml is absent here
 
