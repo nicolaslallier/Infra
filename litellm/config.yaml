@@ -36,8 +36,11 @@ model_list:
   # Cloud models, one per provider. Real money: the 200 CAD/month cap is
   # litellm_settings.max_budget below, split per team in teams.yaml; a team
   # reaches these only if it lists the alias in `models:`. No fallback to or
-  # from the local models. Prompts leave the house here, after
-  # pii-identifiants (default_on) has masked them.
+  # from the local models. Prompts leave the house here: pii-identifiants
+  # (default_on, pre_call) masks the request, but NOT checked yet whether it
+  # also covers text LiteLLM adds from a vector store (`second-brain`).
+  # Until the policies chantier settles it, do not pass vector_store_ids on
+  # a cloud-* request, and keep opted_out_global_guardrails off cloud keys.
   - model_name: cloud-anthropic
     litellm_params:
       model: anthropic/claude-sonnet-5-5
