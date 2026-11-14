@@ -196,8 +196,10 @@ never orphans another app that's still attached to it):
   to it: keep none that lead to a cloud alias. Not covered: Gemini-native
   `/v1beta/...:generateContent` and the provider pass-through prefixes run no hook,
   so `nginx/conf.d/litellm.conf` 403s them for LAN clients; a container calling
-  `litellm:4000` directly still reaches them. `thinking` blocks pass unchanged (a
-  signature breaks otherwise). Only presidio-analyzer is called, for spans, and the
+  `litellm:4000` directly still reaches them. `thinking` blocks cannot be
+  masked (the signature would break), so they are scanned and the request is
+  refused if one carries personal information; provider pass-through is refused
+  whatever `model` its body names. Only presidio-analyzer is called, for spans, and the
   `<ENTITY>` replacement is done in the gate (`presidio-anonymizer` is deployed but
   unused, though Presidio's helper still wants its URL). Fail closed: analyzer down
   or slow (15 s) gives a cloud request 503, a local one is unaffected. Recognizers

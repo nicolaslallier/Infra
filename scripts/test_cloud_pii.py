@@ -209,9 +209,23 @@ def test_a_token_array_embedding_input_is_refused_for_cloud():
 
 
 def test_thinking_blocks_are_passed_through_unchanged():
-    block = {"type": "thinking", "thinking": "a@b.co", "signature": "sig"}
+    block = {"type": "thinking", "thinking": "je compare les deux options", "signature": "sig"}
     data = call(guard(), CLOUD, [{"role": "assistant", "content": [copy.deepcopy(block)]}])
     assert data["messages"][0]["content"][0] == block  # a signed block must stay byte-identical
+
+
+def test_a_thinking_block_carrying_personal_information_is_refused():
+    # Signed blocks cannot be altered, but a client can write anything in one: scan, and refuse.
+    for block in ({"type": "thinking", "thinking": "mail a@b.co", "signature": "sig"},
+                  {"type": "redacted_thinking", "data": "a@b.co"}):
+        refused(lambda: call(guard(), CLOUD, [{"role": "assistant", "content": [copy.deepcopy(block)]}]), 400)
+
+
+def test_pass_through_is_refused_whatever_model_the_body_names():
+    # The body's `model` does not decide where a pass-through request goes.
+    refused(lambda: call(guard(), LOCAL, call_type="pass_through_endpoint"), 400)
+    refused(lambda: call(guard(), CLOUD, call_type="pass_through_endpoint"), 400)
+    refused(lambda: call(guard(), None, call_type="pass_through_endpoint"), 400)
 
 
 def test_a_cloud_fallback_on_a_local_request_is_refused():

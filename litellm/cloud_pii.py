@@ -82,7 +82,11 @@ def _blocks(content: Any, slots: list) -> None:
             elif isinstance(c, list):
                 _blocks(c, slots)
         elif b.get("type") in ("thinking", "redacted_thinking"):
-            pass  # signed model output from an already-masked prompt: altering it breaks the signature
+            # Signed: altering the text breaks the signature, so it is scanned and refused (the
+            # third element marks the slot strict), not masked. Real ones come from masked prompts.
+            for field in ("thinking", "data"):
+                if isinstance(b.get(field), str):
+                    slots.append((b, field, True))
         else:
             raise _refuse(f"'{b.get('type')}' content is not sent to a non-local model (it cannot be scanned)")
 
@@ -258,6 +262,10 @@ class CloudPIIGate(CustomLogger):
         return self._cache[key]
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        if call_type == "pass_through_endpoint":
+            # The body's `model` does not decide where a pass-through request goes, so it cannot
+            # make the request local.
+            raise _refuse("provider pass-through is not available (it is not masked)")
         model = data.get("model")
         # The team is the authenticated key's team_id, never anything the request body says; a
         # team alias can be duplicated or renamed, the id cannot. No team: the strictest set.
@@ -277,8 +285,12 @@ class CloudPIIGate(CustomLogger):
             raise _refuse(f"the '{call_type}' endpoint is not available toward a non-local model (it is not masked)")
         slots = check_sendable(data)  # refuse before touching anything
         try:
-            for container, key in slots:
-                container[key] = await self._mask(container[key], decision.groups, data)
+            for container, key, *strict in slots:
+                masked = await self._mask(container[key], decision.groups, data)
+                if strict and masked != container[key]:
+                    raise _refuse("a signed thinking block contains personal information and cannot be altered")
+                if not strict:
+                    container[key] = masked
         except HTTPException:
             raise
         except Exception:
