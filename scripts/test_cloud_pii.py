@@ -290,6 +290,26 @@ def test_wrong_types_in_allowed_fields_are_refused():
         refused(lambda: call(guard(), CLOUD, [copy.deepcopy(msg)]), 400)
 
 
+def test_dict_keys_with_personal_information_are_refused():
+    tool_use = lambda inp: [{"role": "assistant", "content": [{"type": "tool_use", "id": "t", "name": "n", "input": inp}]}]  # noqa: E731
+    refused(lambda: call(guard(), CLOUD, tool_use({"a@b.co": "x"})), 400)
+    refused(lambda: call(guard(), CLOUD, tool_use({"outer": {"a@b.co": 1}})), 400)
+    refused(lambda: call(guard(), CLOUD, extra={"prompt": {"id": "p", "variables": {"a@b.co": "x"}}}), 400)
+    cited = [{"role": "assistant", "content": [{"type": "text", "text": "x", "citations": [{"a@b.co": "y"}]}]}]
+    refused(lambda: call(guard(), CLOUD, cited), 400)
+    call(guard(), CLOUD, tool_use({"command": "ls", "args": {"path": "."}}))  # ordinary keys pass
+
+
+def test_is_error_and_index_must_have_their_type():
+    res = lambda v: [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t", "content": "x", "is_error": v}]}]  # noqa: E731
+    call(guard(), CLOUD, res(True))
+    refused(lambda: call(guard(), CLOUD, res("a@b.co")), 400)
+    tc = lambda i: [{"role": "assistant", "content": None, "tool_calls": [{"id": "1", "index": i, "function": {"name": "f", "arguments": "{}"}}]}]  # noqa: E731
+    call(guard(), CLOUD, tc(0))
+    refused(lambda: call(guard(), CLOUD, tc("a@b.co")), 400)
+    refused(lambda: call(guard(), CLOUD, tc(True)), 400)  # a bool is not an index
+
+
 def test_pass_through_is_refused_whatever_model_the_body_names():
     # The body's `model` does not decide where a pass-through request goes.
     refused(lambda: call(guard(), LOCAL, call_type="pass_through_endpoint"), 400)

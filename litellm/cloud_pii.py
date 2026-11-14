@@ -54,8 +54,14 @@ def _items(node: Any):
     return node.items() if isinstance(node, dict) else enumerate(node) if isinstance(node, list) else ()
 
 
+KEY = "key"  # slot marker: a dict key to check, not a value to mask
+
+
 def _string_leaves(node: Any, slots: list) -> None:
+    """Every string value of a JSON-like tree is masked; every dict key is checked."""
     for k, v in list(_items(node)):
+        if isinstance(node, dict) and isinstance(k, str):
+            slots.append((node, k, KEY))
         if isinstance(v, str):
             slots.append((node, k))
         else:
@@ -95,6 +101,7 @@ def _rest(node: dict, known: set, slots: list) -> None:
     for k, v in list(node.items()):
         if k in known:
             continue
+        slots.append((node, k, KEY))
         if isinstance(v, str):
             slots.append((node, k))
         else:
@@ -128,6 +135,8 @@ def _blocks(content: Any, slots: list) -> None:
                 _blocks(c, slots)
             elif c is not None:
                 raise _refuse("a tool_result whose content is not text or blocks cannot be scanned")
+            if "is_error" in b and not isinstance(b["is_error"], bool):
+                raise _refuse("is_error must be a boolean")
             _rest(b, {"type", "tool_use_id", "content", "cache_control", "is_error"}, slots)
         elif t in ("thinking", "redacted_thinking"):
             # Signed: altering a field breaks the signature, so each is scanned and the request
@@ -205,6 +214,8 @@ def _slots(data: dict) -> list:
                     or tc.get("type") not in (None, "function") or not isinstance(fn, dict) or set(fn) - {"name", "arguments"}):
                 raise _refuse("an unexpected tool call cannot be scanned")
             _check_cache_control(tc)
+            if "index" in tc and (not isinstance(tc["index"], int) or isinstance(tc["index"], bool)):
+                raise _refuse("a tool call index must be an integer")
             _str(tc, "id", slots)
             _str(fn, "name", slots)
             _str(fn, "arguments", slots)
@@ -358,11 +369,15 @@ class CloudPIIGate(CustomLogger):
             raise _refuse(f"the '{call_type}' endpoint is not available toward a non-local model (it is not masked)")
         slots = check_sendable(data)  # refuse before touching anything
         try:
-            for container, key, *strict in slots:
+            for container, key, *flag in slots:
+                if flag == [KEY]:  # a dict key cannot be masked without renaming it: refuse instead
+                    if await self._mask(key, decision.groups, data) != key:
+                        raise _refuse("a field name contains personal information and cannot be altered")
+                    continue
                 masked = await self._mask(container[key], decision.groups, data)
-                if strict and masked != container[key]:
+                if flag and masked != container[key]:
                     raise _refuse("a signed thinking block contains personal information and cannot be altered")
-                if not strict:
+                if not flag:
                     container[key] = masked
         except HTTPException:
             raise
