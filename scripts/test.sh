@@ -67,6 +67,13 @@ for t in prefect/flows/test_*.py; do
 	fi
 done
 
+echo "== litellm provisioning (teams.yaml vs config.yaml, validation)"
+if out="$(uv run -q --no-project --with pyyaml python scripts/test_litellm_provision.py 2>&1)"; then
+	pass "scripts/test_litellm_provision.py"
+else
+	fail "scripts/test_litellm_provision.py" "$out"
+fi
+
 if [ "${TEST_ONLY:-}" != "unit" ]; then
 	# Under $HOME, not $TMPDIR: the checks bind-mount this path and the daemon
 	# resolves it, and $HOME is shared with the VM by Docker Desktop and Colima
@@ -401,6 +408,10 @@ FAKE
 		expect_reject "amqp password not url-safe" "MORIA_AMQP_PASSWORD must be letters and digits" "set_env MORIA_AMQP_PASSWORD 'a@b/c'"
 		expect_reject "portail db password not url-safe" "PORTAIL_DB_PASSWORD must be letters and digits" "set_env PORTAIL_DB_PASSWORD 'a@b/c'"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
+		for k in ANTHROPIC_API_KEY GEMINI_API_KEY OPENAI_API_KEY; do
+			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
+			expect_reject "$k empty" "set but empty" "set_env $k ''"
+		done
 		# check-env passes LAN_IP by design where it cannot list addresses.
 		if command -v ifconfig >/dev/null 2>&1 || command -v ip >/dev/null 2>&1; then
 			expect_reject "LAN_IP not on this host" "not an address on this host" "set_env LAN_IP 203.0.113.7"

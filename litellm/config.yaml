@@ -33,6 +33,29 @@ model_list:
       model: ollama_chat/gemma4:26b-a4b-it-qat
       api_base: http://ollama-proxy:11434
 
+  # Cloud models, one per provider. Real money: the 200 CAD/month cap is
+  # litellm_settings.max_budget below, split per team in teams.yaml; a team
+  # reaches these only if it lists the alias in `models:`. No fallback to or
+  # from the local models. Prompts leave the house here: pii-identifiants
+  # (default_on, pre_call) masks the request, but NOT checked yet whether it
+  # also covers text LiteLLM adds from a vector store (`second-brain`).
+  # Until the policies chantier settles it, do not pass vector_store_ids on
+  # a cloud-* request, and keep opted_out_global_guardrails off cloud keys.
+  - model_name: cloud-anthropic
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: cloud-gemini
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: cloud-openai
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: os.environ/OPENAI_API_KEY
+
   # Embeddings for the MCP semantic tool filter (litellm_settings below):
   # the Ollama on .10 (192.168.2.10, the Windows homelab host the stack runs
   # on), through ollama-proxy-laptop (its metrics proxy, despite the name).
@@ -130,6 +153,11 @@ guardrails:
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true
+  # Global spend cap across all cloud providers: 200 CAD/month, in USD (LiteLLM
+  # counts in USD; local models cost 0). Source of truth is teams.yaml
+  # (global_budget_cad x cad_to_usd); `make test` fails if they disagree.
+  max_budget: 144.0
+  budget_duration: 30d
   # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
   # carries MCP tools, keep only the top_k whose name + description are
   # closest to the last user message. The index of the registry's tools is
