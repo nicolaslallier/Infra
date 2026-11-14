@@ -121,7 +121,7 @@ selftest() {
   [ "$(compose_services docker-compose.keycloak.yml)" = keycloak ] || die "selftest: compose_services docker-compose.keycloak.yml"
   ! grep -q INFRA_DIR docker-compose.keycloak.yml || die "selftest: docker-compose.keycloak.yml mounts from the checkout but deploys remotely"
   ! grep -q INFRA_DIR docker-compose.auth.yml || die "selftest: docker-compose.auth.yml mounts from the checkout but deploys remotely"
-  [ "$(compose_services docker-compose.auth.yml | tr '\n' ' ')" = "oauth2-proxy oauth2-proxy-infra oauth2-proxy-prefect " ] \
+  [ "$(compose_services docker-compose.auth.yml | tr '\n' ' ')" = "oauth2-proxy oauth2-proxy-infra oauth2-proxy-prefect oauth2-proxy-portail " ] \
     || die "selftest: compose_services docker-compose.auth.yml"
   [ "$(compose_services docker-compose.platform.yml | tr '\n' ' ')" = "ollama-proxy ollama-proxy-laptop prefect-server prefect-flows litellm presidio-analyzer presidio-anonymizer litellm-pgvector " ] \
     || die "selftest: compose_services docker-compose.platform.yml"

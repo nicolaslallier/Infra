@@ -65,6 +65,7 @@ set_key LAN_IP 127.0.0.1
 set_key JARVIS_OAUTH_COOKIE_SECRET "$cookie_a"
 set_key S3_ADMIN_OAUTH_COOKIE_SECRET "$cookie_c"
 set_key PREFECT_OAUTH_COOKIE_SECRET "$cookie_d"
+set_key PORTAIL_OAUTH_COOKIE_SECRET "$cookie_d"
 set_key PREFECT_AUTH_STRING "admin:$(rand_hex 16)"
 set_key PREFECT_DB_PASSWORD "$(rand_hex 16)"
 # Standard base64, padding kept: SeaweedFS's STS key is a Go []byte in JSON.
