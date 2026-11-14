@@ -127,6 +127,8 @@ selftest() {
     || die "selftest: compose_services docker-compose.platform.yml"
   [ "$(compose_services docker-compose.postgres.yml | tr '\n' ' ')" = "postgres pgadmin postgres-exporter " ] \
     || die "selftest: compose_services docker-compose.postgres.yml"
+  [ "$(compose_services docker-compose.run.yml)" = run-egress ] || die "selftest: compose_services docker-compose.run.yml"
+  ! grep -q INFRA_DIR docker-compose.run.yml || die "selftest: docker-compose.run.yml mounts from the checkout"
   echo "portainer-stack.sh: selftest ok"
 }
 

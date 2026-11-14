@@ -15,7 +15,7 @@ SHELL := bash
 	portainer-up portainer-down portainer-restart portainer-logs \
 	runners-up runners-down runners-restart runners-logs runners-status runners-pull \
 	runners-env \
-	dev-image dev-up dev-down dev-test
+	dev-image dev-up dev-down dev-test run-image run-up run-down
 
 # SeaweedFS actions of an app's S3 identity unless `make s3-provision actions=...` narrows them
 # (Read,List for a read-only identity, as the Obsidian MCP server's).
@@ -313,6 +313,19 @@ dev-test: ## Dev sessions: CLI unit tests, then image and state checks on the lo
 	DOCKER_HOST= ./scripts/dev-image-check.sh
 	DOCKER_HOST= ./scripts/dev-session-check.sh
 
+
+# The portail's command-container network box (docker-compose.run.yml): the
+# internal network run-net and its squid, Portainer stack `run` on the local
+# environment. The image is built from GitHub main: merge dev/run-egress first.
+run-image: ## Build the portail's run-egress image from main (FORCE=1 rebuilds)
+	@INFRA_HOST=$(INFRA_HOST) FORCE=$(FORCE) ./scripts/portainer-images.sh run
+
+run-up: check-env ## Rebuild the portail's run-egress image from main and (re)deploy the run stack
+	@INFRA_HOST=$(INFRA_HOST) FORCE=1 ./scripts/portainer-images.sh run
+	STACK=run ./scripts/portainer-stack.sh up
+
+run-down: ## Stop the run stack (portail commands lose their network)
+	STACK=run ./scripts/portainer-stack.sh down
 
 ##@ App provisioning
 provision-app: check-env ## Add an app DB/role (app=<name>)
