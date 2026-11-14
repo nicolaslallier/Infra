@@ -142,6 +142,16 @@ litellm_settings:
   # The PII gate (see the comment above). A list: the string form would replace
   # litellm.callbacks and drop the budget limiter.
   callbacks: [cloud_pii.gate]
+  # Response cache in litellm-redis, so it survives a redeploy. The namespace is set per team
+  # by the gate (cloud_pii._team_cache), after masking, so one team never gets another's
+  # cached answer.
+  cache: true
+  cache_params:
+    type: redis
+    host: litellm-redis
+    port: 6379
+    password: os.environ/LITELLM_REDIS_PASSWORD
+    ttl: 3600
   # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
   # carries MCP tools, keep only the top_k whose name + description are
   # closest to the last user message. The index of the registry's tools is

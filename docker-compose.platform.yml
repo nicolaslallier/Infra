@@ -148,6 +148,30 @@ services:
     depends_on:
       - prefect-server
 
+  litellm-redis:
+    # LiteLLM's response cache (cache_params in litellm/config.yaml), so cached
+    # answers survive a `make up`. Pinned by tag and digest; 7.4 is the last BSD
+    # Redis. Password required (every container on infra-net can reach it);
+    # allkeys-lru under maxmemory means a full cache evicts, never errors. No
+    # host port, no vhost.
+    image: redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    restart: unless-stopped
+    mem_limit: 384m
+    command: ["sh", "-c", 'exec redis-server --requirepass "$$LITELLM_REDIS_PASSWORD" --maxmemory 256mb --maxmemory-policy allkeys-lru --save "60 1" --appendonly no']
+    environment:
+      LITELLM_REDIS_PASSWORD: ${LITELLM_REDIS_PASSWORD:?Set LITELLM_REDIS_PASSWORD in .env (openssl rand -hex 24)}
+      # redis-cli reads the password from here, so the probe has none on its command line.
+      REDISCLI_AUTH: ${LITELLM_REDIS_PASSWORD}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - litellm-redis-data:/data
+    networks:
+      - infra-net
+
   litellm:
     # LLM gateway: OpenAI- and Anthropic-format API (Claude Code, opencode,
     # scripts) in front of Ollama on the Macs. The -database image
@@ -191,6 +215,8 @@ services:
       GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN:?Set GITHUB_MCP_TOKEN in .env (a fine-grained github_pat_ token, see .env.example)}
       OBSIDIAN_MCP_TOKEN: ${OBSIDIAN_MCP_TOKEN:?Set OBSIDIAN_MCP_TOKEN in .env (openssl rand -hex 32)}
       # PII guardrails (guardrails: in config.yaml).
+      # Response cache password (cache_params in config.yaml): litellm-redis.
+      LITELLM_REDIS_PASSWORD: ${LITELLM_REDIS_PASSWORD:?Set LITELLM_REDIS_PASSWORD in .env (openssl rand -hex 24)}
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000
     volumes:
@@ -306,3 +332,5 @@ volumes:
     external: true
   # presidio-analyzer's home: the French spaCy model (re-downloaded if lost).
   presidio-models:
+  # litellm-redis's cache (RDB snapshot); losing it only empties the cache.
+  litellm-redis-data:

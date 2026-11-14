@@ -100,7 +100,8 @@ def test_local_alias_passes_untouched_without_calling_presidio():
     msgs = [{"role": "user", "content": "a@b.co"}]
     tools = [{"name": "t", "cache_control": {"type": "ephemeral"}}]
     want = copy.deepcopy({"model": LOCAL, "messages": msgs, "tools": tools})
-    assert call(guard(), LOCAL, msgs, extra={"tools": tools}) == want  # byte-identical
+    want["cache"] = {"namespace": "apps"}  # the only addition: the per-team cache namespace
+    assert call(guard(), LOCAL, msgs, extra={"tools": tools}) == want  # otherwise byte-identical
     assert STUB.calls == before
 
 
@@ -111,6 +112,15 @@ def test_cloud_alias_masks_identifiers():
 def test_cloud_alias_masks_names_for_famille_not_dev_sessions():
     assert text(guard(), CLOUD, f"salut {NAME}", team="famille") == "salut <PERSON>"
     assert text(guard(), CLOUD, f"salut {NAME}", team="dev-sessions") == f"salut {NAME}"
+
+
+def test_cache_namespace_is_the_authenticated_team():
+    # A client cannot pick another team's namespace; its own ttl is kept.
+    for model in (CLOUD, LOCAL):
+        out = call(guard(), model, team="famille", extra={"cache": {"namespace": "admin", "ttl": 5}})
+        assert out["cache"] == {"namespace": "famille", "ttl": 5}, out
+    # teamless: never a shared namespace (the master key and unassigned keys must not share hits)
+    assert call(guard(), CLOUD, team=None)["cache"]["namespace"] == "key:anonymous"
 
 
 def test_unknown_alias_is_masked():
