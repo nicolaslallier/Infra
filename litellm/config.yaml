@@ -142,6 +142,15 @@ litellm_settings:
     top_k: 10
     similarity_threshold: 0.3
 
+router_settings:
+  # Without this, `order:` in model_list is ignored and the two qwen3.8
+  # deployments are shuffled. With it, the router uses the lowest order that
+  # is healthy (the .40 laptop) and moves to order 2 (Mac Studio) when it
+  # fails or sits in cooldown. The retry is what makes the first request after
+  # the laptop falls asleep land on the Studio instead of erroring.
+  enable_pre_call_checks: true
+  num_retries: 1
+
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
   database_url: os.environ/DATABASE_URL
