@@ -160,7 +160,9 @@ services:
     tmpfs:
       - /_work:exec
       - /tmp:exec
-      - /home/runner
+      # The runner user (uid 1001, gid 121) must own its home: a root-owned
+      # 750 tmpfs makes actions/checkout fail reading ~/.gitconfig.
+      - /home/runner:uid=1001,gid=121,mode=700
     volumes:
       # The Infra CA (public cert, no key); the AI repo's INFRA_CA_CERT_PATH
       # variable defaults to this path.
