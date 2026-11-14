@@ -4,7 +4,9 @@
 Budgets are written in CAD in the file; LiteLLM counts in USD, so everything
 sent to it goes through to_usd(). Run through `make litellm-provision`.
 """
+import argparse
 import json
+import os
 import ssl
 import sys
 import urllib.error
@@ -181,3 +183,41 @@ def apply(spec: dict, client, rotate: str | None = None, log=None) -> dict[str, 
             if n and n not in in_file[kind]:
                 log(f"drift: {kind} '{n}' exists in LiteLLM but not in teams.yaml (left alone)")
     return new
+
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_URL = "https://litellm.infra.famillelallier.net"
+
+
+def main(argv: list[str], env: dict, client=None) -> int:
+    ap = argparse.ArgumentParser(description="Apply litellm/teams.yaml to LiteLLM.")
+    ap.add_argument("--spec", default=os.path.join(ROOT, "litellm", "teams.yaml"))
+    ap.add_argument("--config", default=os.path.join(ROOT, "litellm", "config.yaml"))
+    ap.add_argument("--rotate", metavar="ALIAS", help="issue a new key for this alias")
+    a = ap.parse_args(argv)
+
+    master = env.get("LITELLM_MASTER_KEY", "")
+    if not master:
+        print("litellm_provision: LITELLM_MASTER_KEY is not set (source .env, or use make litellm-provision)", file=sys.stderr)
+        return 1
+    spec, config = load_spec(a.spec), load_spec(a.config)
+    errs = validate(spec, config)
+    if errs:
+        for e in errs:
+            print(f"litellm_provision: {e}", file=sys.stderr)
+        return 1
+    if client is None:
+        ca = os.path.join(ROOT, "certs", "infra-ca.crt")
+        client = Client(env.get("LITELLM_URL", DEFAULT_URL), master, ca if os.path.exists(ca) else None)
+    try:
+        new = apply(spec, client, rotate=a.rotate)
+    except (ApiError, ValueError) as e:
+        print(f"litellm_provision: {e}", file=sys.stderr)
+        return 1
+    for alias, key in new.items():  # the only stdout: shown once, store it
+        print(f"{alias}\t{key}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:], dict(os.environ)))

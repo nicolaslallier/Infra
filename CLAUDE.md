@@ -152,6 +152,18 @@ never orphans another app that's still attached to it):
   like any other app; without it the UI login fails with "Not connected to DB".
   Publishes no host port. Not behind oauth2-proxy: API clients use bearer
   keys. Never rotate `LITELLM_SALT_KEY` once models are stored in the DB.
+  Cloud models (`cloud-anthropic`, `cloud-gemini`, `cloud-openai`) are behind
+  teams, users, virtual keys and a **200 CAD/month cap** (`litellm/teams.yaml`,
+  in CAD, one `cad_to_usd` factor; local models cost 0). `make litellm-provision`
+  (`scripts/litellm_provision.py`) upserts them through the admin API: a re-run
+  pushes the file over the UI, only reports objects absent from it, and prints a
+  new key once (stdout) -- `rotate=<alias>` replaces one. The global cap is
+  `litellm_settings.max_budget` in USD (a `make test` case fails if it disagrees
+  with the file); the four team caps sum to it, `admin` being the 30 CAD
+  reserve. Provider keys are `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`OPENAI_API_KEY`
+  in `.env` (vault). Clients still use the master key until switched by hand.
+  Never pass `vector_store_ids` on a cloud request: unchecked whether the
+  PII guardrail also masks retrieved text.
 - **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio,
   LiteLLM's PII guardrails (Quebec's Loi 25; `guardrails:` in
   `litellm/config.yaml`). `pii-identifiants` is on for every key and masks

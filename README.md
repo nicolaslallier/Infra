@@ -420,6 +420,32 @@ caveat as `PGADMIN_EMAIL`/`PGADMIN_PASSWORD` above) — changing them later
 in `.env` does nothing to an already-provisioned admin user. Change the
 password from inside the admin console instead.
 
+## LiteLLM: teams and budgets
+
+`litellm/teams.yaml` declares four teams (`admin`, `famille`, `apps`,
+`dev-sessions`), their users, their virtual keys and a 200 CAD/month cap in all
+(`admin` is the 30 CAD reserve; the other caps are 30, 70 and 70). Cloud models
+are opt-in per team through its `models:` list. The file is in CAD; LiteLLM
+counts in USD, so it holds one `cad_to_usd` factor, and
+`litellm_settings.max_budget` in `litellm/config.yaml` is the same cap in USD
+(`make test` fails if the two disagree).
+
+First run, once:
+
+1. Put the three provider keys in the vault:
+   `make vault-cli args="kv patch -mount=infra env ANTHROPIC_API_KEY=... GEMINI_API_KEY=... OPENAI_API_KEY=..."`
+   (or read each from stdin as for `BACKUPS_SMB_PASSWORD`), then `make vault-env`.
+2. Merge, then `make up stack=platform`.
+3. Check `cad_to_usd` in `teams.yaml` against today's rate; add the family under
+   `users:` (and a key each if wanted).
+4. `make litellm-provision`. It prints `alias<TAB>key` once, one line per new
+   key: store them (vault `infra/apps/<name>`, or the app's Portainer env).
+   Re-running creates no key; `make litellm-provision rotate=<alias>` replaces
+   one. Objects in LiteLLM but not in the file (a key made by hand, such as
+   `portail`) are reported as `drift` and left alone.
+
+Clients keep working on the master key until you switch them to their own key.
+
 ## Secrets (OpenBao)
 
 `openbao` is the stack's vault — OpenBao, the MPL-licensed fork of

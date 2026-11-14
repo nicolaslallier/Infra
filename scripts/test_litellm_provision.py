@@ -231,6 +231,51 @@ def test_no_secret_in_error_messages():
         lp.urllib.request.urlopen = real
 
 
+def _run_main(argv, env, client):
+    import contextlib
+    import io
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = lp.main(argv, env, client)
+    return code, out.getvalue(), err.getvalue()
+
+
+def test_main_fails_naming_missing_master_key():
+    c = FakeClient()
+    code, out, err = _run_main([], {"LITELLM_MASTER_KEY": ""}, c)
+    assert code == 1 and "LITELLM_MASTER_KEY" in err and out == "" and c.calls == [], (code, out, err)
+
+
+def test_main_prints_keys_on_stdout_only():
+    c = FakeClient()
+    code, out, err = _run_main([], {"LITELLM_MASTER_KEY": "sk-master"}, c)
+    real = lp.load_spec(os.path.join(ROOT, "litellm", "teams.yaml"))
+    lines = out.splitlines()
+    assert code == 0 and len(lines) == len(real["keys"]), (code, out, err)
+    for line in lines:
+        alias, key = line.split("\t")
+        assert key.startswith("sk-") and alias in {k["alias"] for k in real["keys"]}, line
+    assert "created" in err and "sk-" not in err, err
+
+
+def test_main_refuses_invalid_spec_before_any_request():
+    import tempfile
+
+    import yaml
+
+    bad = lp.load_spec(os.path.join(ROOT, "litellm", "teams.yaml"))
+    bad["teams"]["apps"]["max_budget_cad"] += 10
+    with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+        yaml.safe_dump(bad, f)
+    try:
+        c = FakeClient()
+        code, out, err = _run_main(["--spec", f.name], {"LITELLM_MASTER_KEY": "sk-master"}, c)
+    finally:
+        os.unlink(f.name)
+    assert code == 1 and "sum" in err and out == "" and c.calls == [], (code, out, err)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
