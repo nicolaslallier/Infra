@@ -161,7 +161,11 @@ never orphans another app that's still attached to it):
   `litellm_settings.max_budget` in USD (a `make test` case fails if it disagrees
   with the file); the four team caps sum to it, `admin` being the 30 CAD
   reserve. Provider keys are `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`OPENAI_API_KEY`
-  in `.env` (vault). Clients still use the master key until switched by hand.
+  in `.env` (vault). Clients still use the master key until switched by hand: it is probably
+  exempt from the budgets (verify live), so that switch is not optional once
+  cloud keys are in the vault; also set hard limits in the provider consoles,
+  and check a cloud alias records spend > 0 (a model missing from the cost map
+  counts 0).
   Never pass `vector_store_ids` on a cloud request: unchecked whether the
   PII guardrail also masks retrieved text.
 - **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio,

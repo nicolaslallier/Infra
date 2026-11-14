@@ -444,7 +444,15 @@ First run, once:
    one. Objects in LiteLLM but not in the file (a key made by hand, such as
    `portail`) are reported as `drift` and left alone.
 
-Clients keep working on the master key until you switch them to their own key.
+5. Before handing out keys, make one call on each `cloud-*` alias and check in
+   the admin UI that its spend is above 0. A model id missing from LiteLLM's
+   cost map is recorded at 0 $ and no cap ever trips.
+6. Switch the clients (DarkAngel, Jarvis, devbox...) from the master key to
+   their own key **soon**. As far as known (to verify on the live proxy), the
+   master key is exempt from the budgets, so until then anything holding it can
+   spend on the cloud models uncapped, and that spend likely counts against the
+   global cap too. The hard limits set in each provider's console are the
+   safety net meanwhile.
 
 ## Secrets (OpenBao)
 

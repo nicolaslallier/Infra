@@ -113,8 +113,13 @@ class FakeClient:
     def __init__(self):
         self.teams, self.users, self.keys, self.calls = {}, {}, {}, []
         self.n = 0
+        self.fail_when = None  # callable(method, path) -> bool: raise ApiError
+        self.ignore_filter = False  # a server that ignores ?key_alias=
+        self.hash_only = False  # a server that never returns full key objects
 
     def request(self, method, path, body=None):
+        if self.fail_when and self.fail_when(method, path):
+            raise lp.ApiError(f"{method} {path} -> HTTP 500: boom")
         self.calls.append((method, path, body))
         route = path.split("?")[0]
         if (method, route) == ("GET", "/team/list"):
@@ -135,8 +140,12 @@ class FakeClient:
             self.users[body["user_id"]].update(body)
             return {}
         if (method, route) == ("GET", "/key/list"):
-            want = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query).get("key_alias")
-            return {"keys": [dict(v) for v in self.keys.values() if not want or v["key_alias"] == want[0]]}
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+            want = None if self.ignore_filter else q.get("key_alias")
+            rows = [v for v in self.keys.values() if not want or v["key_alias"] == want[0]]
+            if q.get("return_full_object") == ["true"] and not self.hash_only:
+                return {"keys": [dict(v) for v in rows]}
+            return {"keys": [v["token"] for v in rows]}  # hashed tokens only, like the real default
         if (method, route) == ("POST", "/key/generate"):
             self.n += 1
             key = f"sk-fake-{self.n}"
@@ -229,6 +238,55 @@ def test_no_secret_in_error_messages():
         assert "sk-master-secret" not in str(e) and "401" in str(e), str(e)
     finally:
         lp.urllib.request.urlopen = real
+
+
+def test_inverted_rate_is_rejected():
+    assert has(errors(spec(cad_to_usd=1.38)), "cad_to_usd")
+    assert has(errors(spec(cad_to_usd=0.3)), "cad_to_usd")
+
+
+def test_keys_created_before_a_late_failure_are_still_emitted():
+    c = FakeClient()
+    c.fail_when = lambda m, p: m == "GET" and p.startswith("/key/list") and "key_alias" not in p
+    emitted, logs = [], []
+    new = lp.apply(SPEC, c, log=logs.append, emit=lambda a, k: emitted.append(a))
+    assert sorted(emitted) == ["a-perso", "jarvis"] and sorted(new) == sorted(emitted), emitted
+    assert any("drift" in m and "boom" in m for m in logs), logs  # best effort, not fatal
+
+
+def test_main_prints_keys_created_before_a_failure():
+    c = FakeClient()
+    c.fail_when = lambda m, p: m == "POST" and p == "/key/generate" and len(c.keys) >= 1
+    code, out, err = _run_main([], {"LITELLM_MASTER_KEY": "sk-master"}, c)
+    real = lp.load_spec(os.path.join(ROOT, "litellm", "teams.yaml"))
+    assert code == 1 and len(out.splitlines()) == 1 and out.startswith(real["keys"][0]["alias"] + "\t"), (code, out, err)
+
+
+def test_hashed_key_listing_fails_loudly():
+    c = FakeClient()
+    lp.apply(SPEC, c, log=lambda m: None)  # empty server: nothing to hash yet
+    c.hash_only = True
+    try:
+        lp.apply(SPEC, c, log=lambda m: None)
+        raise AssertionError("hashed key listing accepted")
+    except lp.ApiError as e:
+        assert "full" in str(e), str(e)
+
+
+def test_key_presence_does_not_trust_the_server_filter():
+    c = FakeClient()
+    c.ignore_filter = True
+    new = lp.apply(SPEC, c, log=lambda m: None)
+    assert sorted(new) == ["a-perso", "jarvis"], new
+
+
+def test_existing_key_on_another_team_is_reported_not_replaced():
+    c = FakeClient()
+    c.keys["sk-pre"] = {"key_alias": "jarvis", "team_id": "id-other", "token": "sk-pre"}
+    logs = []
+    new = lp.apply(SPEC, c, log=logs.append)
+    assert "jarvis" not in new and c.posted("/key/delete") == [], new
+    assert any("jarvis" in m and "team" in m and "id-other" in m for m in logs), logs
 
 
 def _run_main(argv, env, client):

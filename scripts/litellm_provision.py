@@ -38,6 +38,9 @@ def validate(spec: dict, config: dict) -> list[str]:
     rate, total = spec.get("cad_to_usd"), spec.get("global_budget_cad")
     if not _number(rate) or rate <= 0:
         errs.append(f"cad_to_usd must be a positive number, got {rate!r}")
+    elif not 0.5 <= rate <= 1.0:
+        # CAD -> USD is about 0.7; 1.38 is the inverse and would raise the real cap by ~90%.
+        errs.append(f"cad_to_usd {rate} is outside 0.5-1.0 (is it USD->CAD, inverted?)")
     if not _number(total) or total <= 0:
         errs.append(f"global_budget_cad must be a positive number, got {total!r}")
 
@@ -118,8 +121,30 @@ def _items(resp, field: str) -> list:
     return resp or []
 
 
-def apply(spec: dict, client, rotate: str | None = None, log=None) -> dict[str, str]:
-    """Reconcile LiteLLM with the spec; returns {key_alias: new_key} for keys created or rotated."""
+def _list_keys(client, alias: str | None = None) -> list[dict]:
+    """Full key objects (the default listing is hashed tokens), every page."""
+    out, page = [], 1
+    while True:
+        q = f"return_full_object=true&size=100&page={page}"
+        if alias is not None:
+            q += f"&key_alias={urllib.parse.quote(alias)}"
+        resp = client.request("GET", f"/key/list?{q}")
+        rows = _items(resp, "keys")
+        if any(not isinstance(r, dict) for r in rows):
+            raise ApiError("GET /key/list did not return full key objects; cannot tell which keys exist")
+        out += rows
+        pages = resp.get("total_pages", 1) if isinstance(resp, dict) else 1
+        if page >= (pages or 1):
+            return out
+        page += 1
+
+
+def apply(spec: dict, client, rotate: str | None = None, log=None, emit=None) -> dict[str, str]:
+    """Reconcile LiteLLM with the spec; returns {key_alias: new_key} for keys created or rotated.
+
+    emit(alias, key) is called the moment a key is created: a key is shown once, so a
+    later failure must not swallow the ones already made.
+    """
     log = log or (lambda m: print(m, file=sys.stderr))
     keys = spec.get("keys") or []
     if rotate is not None and rotate not in {k["alias"] for k in keys}:
@@ -154,34 +179,45 @@ def apply(spec: dict, client, rotate: str | None = None, log=None) -> dict[str, 
 
     new: dict[str, str] = {}
     for k in keys:
-        q = urllib.parse.quote(k["alias"])
-        present = bool(_items(client.request("GET", f"/key/list?key_alias={q}"), "keys"))
+        # Do not trust the server to have filtered: match the alias ourselves.
+        found_keys = [x for x in _list_keys(client, k["alias"]) if x.get("key_alias") == k["alias"]]
+        present = bool(found_keys)
         if present and rotate == k["alias"]:
             client.request("POST", "/key/delete", {"key_aliases": [k["alias"]]})
             present = False
         if present:
-            log(f"key '{k['alias']}': exists, kept")
+            want_team = team_ids[k["team"]]
+            if found_keys[0].get("team_id") != want_team:
+                log(f"key '{k['alias']}': exists on team '{found_keys[0].get('team_id')}', "
+                    f"the file says team '{k['team']}' ({want_team}); kept as is, fix it in the UI or rotate")
+            else:
+                log(f"key '{k['alias']}': exists, kept")
             continue
         body = {"key_alias": k["alias"], "team_id": team_ids[k["team"]]}
         if k.get("user"):
             body["user_id"] = k["user"]
         new[k["alias"]] = client.request("POST", "/key/generate", body)["key"]
+        if emit:
+            emit(k["alias"], new[k["alias"]])
         log(f"key '{k['alias']}': created")
 
-    # Drift: reported, never deleted.
-    in_file = {
-        "team": set(spec["teams"]), "user": {u["email"] for u in spec.get("users") or []},
-        "key": {k["alias"] for k in keys},
-    }
-    found = {
-        "team": [t["team_alias"] for t in _items(client.request("GET", "/team/list"), "teams")],
-        "user": [u["user_id"] for u in _items(client.request("GET", "/user/list"), "users")],
-        "key": [x.get("key_alias") for x in _items(client.request("GET", "/key/list"), "keys") if isinstance(x, dict)],
-    }
-    for kind, names in found.items():
-        for n in names:
-            if n and n not in in_file[kind]:
-                log(f"drift: {kind} '{n}' exists in LiteLLM but not in teams.yaml (left alone)")
+    # Drift: reported, never deleted, and best effort (the keys are already made).
+    try:
+        in_file = {
+            "team": set(spec["teams"]), "user": {u["email"] for u in spec.get("users") or []},
+            "key": {k["alias"] for k in keys},
+        }
+        found = {
+            "team": [t["team_alias"] for t in _items(client.request("GET", "/team/list"), "teams")],
+            "user": [u["user_id"] for u in _items(client.request("GET", "/user/list"), "users")],
+            "key": [x.get("key_alias") for x in _list_keys(client)],
+        }
+        for kind, names in found.items():
+            for n in names:
+                if n and n not in in_file[kind]:
+                    log(f"drift: {kind} '{n}' exists in LiteLLM but not in teams.yaml (left alone)")
+    except ApiError as e:
+        log(f"drift check skipped: {e}")
     return new
 
 
@@ -210,12 +246,11 @@ def main(argv: list[str], env: dict, client=None) -> int:
         ca = os.path.join(ROOT, "certs", "infra-ca.crt")
         client = Client(env.get("LITELLM_URL", DEFAULT_URL), master, ca if os.path.exists(ca) else None)
     try:
-        new = apply(spec, client, rotate=a.rotate)
+        # Each key is printed as it is made (stdout only; shown once, store it).
+        apply(spec, client, rotate=a.rotate, emit=lambda alias, key: print(f"{alias}\t{key}", flush=True))
     except (ApiError, ValueError) as e:
         print(f"litellm_provision: {e}", file=sys.stderr)
         return 1
-    for alias, key in new.items():  # the only stdout: shown once, store it
-        print(f"{alias}\t{key}")
     return 0
 
 
