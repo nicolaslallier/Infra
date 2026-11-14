@@ -82,6 +82,19 @@ anyone who can resolve its hostname. The gate is the standard
   deployed frontend was actually built with, and whether that backend
   port is reachable unauthenticated from outside the LAN.
 
+## Portail: reuses the Jarvis gate
+
+`nginx/conf.d/portail.conf` (the AI repo's portal) auth_requests the same
+`oauth2-proxy` as Jarvis (`192.168.2.68:4180`, realm `jarvis`, client
+`jarvis`). No new client and no redirect URI: oauth2-proxy always sends the
+browser to its one `REDIRECT_URL` (Jarvis's callback), sets the session
+cookie on `.famillelallier.net`, and its `WHITELIST_DOMAINS` lets the `rd`
+go back to `portail.infra.famillelallier.net`. The portal reads
+`X-Auth-Request-Email` (`SET_XAUTHREQUEST`), so the user needs a verified
+email. The ceiling: anyone in realm `jarvis` gets the portal too. When that
+stops being true, give it its own client and group in realm `infra` and an
+`oauth2-proxy-portail` on :4183, the `oauth2-proxy-prefect` recipe.
+
 ## EA: token verification, no gateway
 
 `keycloak/realm-import/ea-realm.json` seeds a dedicated realm (`ea`),

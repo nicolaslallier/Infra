@@ -219,6 +219,47 @@ service name:
 (The `127.0.0.1:5432` address above is for connecting from your host
 machine via `psql` — it's a different path than pgAdmin uses.)
 
+### Portail (AI repo)
+
+`https://portail.infra.famillelallier.net` is the AI repo's web portal
+(image `ghcr.io/nicolaslallier/ai-portail`), its own Portainer stack from
+`deploy/portainer-stack.yml` in github.com/nicolaslallier/AI — not a row of
+`stacks.conf`, which only deploys this repo's compose files (like Heaven or
+Moria). The vhost is `nginx/conf.d/portail.conf`, a copy of the AI repo's
+`deploy/nginx/portail.conf`. DNS and certificate ride the
+`*.infra.famillelallier.net` wildcard: nothing to add.
+
+Login reuses the Jarvis oauth2-proxy (`192.168.2.68:4180`, realm `jarvis`):
+whoever can log into Jarvis gets the portal, and one login covers both
+(cookie on `.famillelallier.net`). Sign-in round-trips through
+`https://jarvis.famillelallier.net/oauth2/callback`, then back to the portal.
+The portal trusts `X-Auth-Request-Email`, which nginx always overwrites from
+oauth2-proxy: the Keycloak user needs a verified email, or every API call is
+a 401.
+
+**Order matters: `make up`, `pull` and `config` fail until
+`PORTAIL_DB_PASSWORD` is in the vault.**
+
+1. Database: `openssl rand -hex 24` (letters and digits only, it goes into a
+   URL; `check-env` rejects anything else), then
+   `make vault-cli args="kv patch -mount=infra env PORTAIL_DB_PASSWORD=... APP_DATABASES=<current list>,portail"`,
+   `make vault-env`, `make provision-app app=portail`.
+2. LiteLLM key: in `https://litellm.infra.famillelallier.net/ui` → Virtual
+   Keys → Create, alias `portail`, models limited to those in the AI repo's
+   `agents.yaml` (today `qwen3.8:27b-mlx`). Or with the master key:
+
+   ```bash
+   curl -sS https://litellm.infra.famillelallier.net/key/generate \
+     -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' \
+     -d '{"key_alias":"portail","models":["qwen3.8:27b-mlx"]}'
+   ```
+
+   The key goes only into the portail stack's `PORTAIL_LITELLM_CLE`, never
+   into this repo or `.env`. Add a model to the key when `agents.yaml` gains one.
+3. Portainer: create the stack from Git (repo `nicolaslallier/AI`, compose
+   path `deploy/portainer-stack.yml`) with `PORTAIL_DB_PASSWORD` (same value
+   as step 1), `PORTAIL_LITELLM_CLE` and optionally `IMAGE_TAG`.
+
 ### Jarvis login (Keycloak + oauth2-proxy)
 
 `https://jarvis.famillelallier.net` requires a Keycloak login (every other app listed
