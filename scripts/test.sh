@@ -130,6 +130,13 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		else
 			fail "docker socket only on darkangel, heaven, infra" "got: $socks"
 		fi
+		for n in ai ea; do
+			if jq -e --arg n "$n" '.services["runner-"+$n] | any(.volumes[]?; .target == "/etc/\($n)/infra-ca.crt" and .read_only) and any(.extra_hosts[]?; startswith("vault.infra.famillelallier.net"))' <<<"$cfg" >/dev/null; then
+				pass "runner-$n: Infra CA at /etc/$n/infra-ca.crt, vault/portainer pinned"
+			else
+				fail "runner-$n: Infra CA at /etc/$n/infra-ca.crt, vault/portainer pinned"
+			fi
+		done
 	else
 		fail "runners compose config" "$cfg"
 	fi
