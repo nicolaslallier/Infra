@@ -538,6 +538,34 @@ in `--tools` that does not exist makes it refuse to start (the names are those o
 `pkg/github/__toolsnaps__` at the tag; recheck them on every bump). Only LiteLLM's `/mcp` route and
 the REST route `/mcp-rest/tools/call` run the team check.
 
+## LiteLLM: memory, skills, agents
+
+- **Memory** is LiteLLM's own `/v1/memory` (rows in the `litellm` database). A key reads the rows of
+  its `user_id` and of its team, and writes only its own. The keys in `litellm/teams.yaml` have no
+  user (`users: []`), so today memory is per team; add the family under `users:` and re-run
+  `make litellm-provision` to get it per person. Key convention: `<agent>/<subject>`, short values,
+  never a secret. LiteLLM does not read memory back into prompts; text an agent re-sends to a cloud
+  model is masked by the gate like any other.
+- **Skills** (`/v1/skills`) and **A2A agents** (`/a2a/...`, `/v1/a2a/...`) answer 403 at
+  `litellm.infra.famillelallier.net`. A container calling `litellm:4000` directly is not covered.
+  No agent is registered: Jarvis does not speak A2A and calls LM Studio, not LiteLLM. To open one
+  later, re-open `/v1/a2a/` for that agent only, check whether LiteLLM runs the pre-call hook for
+  A2A, and add the team check to `cloud_pii.gate` first.
+
+Checks, with the virtual keys of two teams (`$J` = `jarvis`, `$E` = `ea`, `$F` = `famille`, `$N` = a
+key with no team) against `https://litellm.infra.famillelallier.net`:
+
+```bash
+curl -s -X PUT -H "Authorization: Bearer $J" -H 'Content-Type: application/json' \
+  -d '{"value":"test"}' $URL/v1/memory/jarvis/test       # written
+curl -s -H "Authorization: Bearer $E" $URL/v1/memory/jarvis/test   # same team: visible
+curl -s -H "Authorization: Bearer $F" $URL/v1/memory/jarvis/test   # other team: not found
+curl -s -H "Authorization: Bearer $N" $URL/v1/memory               # no team: nothing
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/skills   # 403
+```
+
+Delete the test row afterwards (`DELETE /v1/memory/jarvis/test` with `$J`).
+
 ## Secrets (OpenBao)
 
 `openbao` is the stack's vault — OpenBao, the MPL-licensed fork of
