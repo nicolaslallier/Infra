@@ -454,6 +454,38 @@ First run, once:
    global cap too. The hard limits set in each provider's console are the
    safety net meanwhile.
 
+## LiteLLM: personal information toward the cloud
+
+The `cloud_pii.gate` callback masks personal information only on requests that leave
+for Anthropic, Google or OpenAI; the local Ollama models see the real data. A team is
+recognised by its id (the alias, as set by `make litellm-provision`), never by what a
+request says. The aliases that
+count as local, and what is masked per team, are in `litellm/pii_policy.yaml`;
+anything not listed local is masked, including a model added in the admin UI.
+Toward a cloud model, images, files, audio and `second-brain` (`vector_store_ids`)
+are refused with a 400, because Presidio only reads text, as is every endpoint the gate cannot read (moderations, files, batches...). A local request that
+names a cloud alias among its own `fallbacks` is refused too, and no fallback saved
+in the admin UI or on a key should ever lead from a local model to a cloud one: the
+guardrail cannot see those.
+
+Live checks after a deploy (`make up stack=platform`), with a key of the `famille`
+team and one cloud alias (the stub-free equivalent of `scripts/test_cloud_pii.py`):
+
+1. A local model with an email in the prompt: the model answers about the real
+   address (nothing masked).
+2. A cloud alias with an email and a name: the provider's request log or the
+   LiteLLM spend log shows `<EMAIL_ADDRESS>` and `<PERSON>`.
+3. An image to a cloud alias: HTTP 400 from `cloud-pii`.
+4. `docker stop presidio-analyzer`, then a cloud request: HTTP 503; a local one
+   still answers. Start it again.
+5. To lift the `second-brain` refusal one day: send a cloud request with
+   `vector_store_ids` after removing the check, and confirm an email inside a
+   stored note arrives masked. Only then change `check_sendable` in
+   `litellm/cloud_pii.py`.
+6. `curl -X POST .../v1/messages/count_tokens` with a cloud alias answers from the
+   local tokenizer; Gemini-native (`/v1beta/...`) and `/anthropic/...`-style routes
+   answer 403 through nginx.
+
 ## Secrets (OpenBao)
 
 `openbao` is the stack's vault — OpenBao, the MPL-licensed fork of

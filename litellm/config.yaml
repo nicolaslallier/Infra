@@ -36,11 +36,8 @@ model_list:
   # Cloud models, one per provider. Real money: the 200 CAD/month cap is
   # litellm_settings.max_budget below, split per team in teams.yaml; a team
   # reaches these only if it lists the alias in `models:`. No fallback to or
-  # from the local models. Prompts leave the house here: pii-identifiants
-  # (default_on, pre_call) masks the request, but NOT checked yet whether it
-  # also covers text LiteLLM adds from a vector store (`second-brain`).
-  # Until the policies chantier settles it, do not pass vector_store_ids on
-  # a cloud-* request, and keep opted_out_global_guardrails off cloud keys.
+  # from the local models. Prompts leave the house here, so the cloud_pii.gate
+  # callback below masks them (and refuses what it cannot read).
   - model_name: cloud-anthropic
     litellm_params:
       model: anthropic/claude-sonnet-5-5
@@ -83,72 +80,31 @@ vector_store_registry:
       api_base: http://litellm-pgvector:8000
       vector_store_description: "Second cerveau : notes et documents indexés (qwen3-embedding, pgvector)"
 
-# PII guardrails (Quebec's Loi 25), through Microsoft Presidio:
-# presidio-analyzer finds them, presidio-anonymizer replaces each with
-# <ENTITY_TYPE> before the prompt reaches a model. Recognizers, languages and
-# the regexes are in presidio/recognizers.yaml. Pre-call only: the model's
-# answer is not rewritten.
+# PII masking (Quebec's Loi 25): `cloud_pii.gate`, litellm/cloud_pii.py, a pre-call
+# callback registered under litellm_settings.callbacks below, with the policy in
+# litellm/pii_policy.yaml (both mounted next to this file; `make test` checks the
+# policy against teams.yaml and this file). It is a callback and not a `guardrails:`
+# entry because LiteLLM hands a guardrail only the text its endpoint handler finds
+# (nothing for a request without text, no `system` or `tool_use` on /v1/messages)
+# and rewrites `tools` on the way back; a callback always runs and sees it all.
 #
-# pii-identifiants: on for every key. Identifiers found by format or checksum
-# (NAS, RAMQ, permis SAAQ, passeport, carte de crédit, compte bancaire,
-# courriel, téléphone, adresse civique, code postal), French and English
-# alike: the regexes are registered for both languages, so one pass (fr)
-# catches both. Costs ~30 ms per 1,000 characters of prompt (spaCy still
-# tokenizes for the context words): ~3 s on a 100k-character agent prompt.
-# A key that must skip it (a coding agent whose prompts are slow and
-# PII-free): key metadata {"opted_out_global_guardrails": ["pii-identifiants"]}.
+# Personal information is masked ONLY on requests that leave for a non-local model;
+# the Ollama aliases listed as local_models see the real data, which never leaves
+# the house. The rule is inverted: everything not listed local is masked, so a model
+# added in the admin UI under a free name is masked, not leaked. Which entities, and
+# which teams (by team id) also get people's names, is pii_policy.yaml. It asks
+# presidio-analyzer for spans and replaces them with <ENTITY_TYPE>; pre-call only,
+# the answer is not rewritten.
 #
-# pii-noms-fr / pii-noms-en: people's names (spaCy NER), off by default.
-# NER mistakes code identifiers and product names for names ("Portainer",
-# "INFRA_DIR"), which would mangle every coding prompt, so it is turned on
-# where prompts are prose: per key or team (Guardrails, in the admin UI) or
-# per request ("guardrails": ["pii-noms-fr"]). Cities alone (LOCATION) are
-# not masked: too noisy in French and not identifying on their own.
-#
-# All three fail closed: while Presidio is down, the requests they cover are
-# rejected rather than sent unmasked.
-guardrails:
-  - guardrail_name: pii-identifiants
-    litellm_params:
-      guardrail: presidio
-      mode: pre_call
-      default_on: true
-      presidio_language: fr
-      pii_entities_config:
-        CA_SIN: MASK
-        CA_RAMQ: MASK
-        CA_QC_DRIVER_LICENSE: MASK
-        CA_PASSPORT: MASK
-        CA_BANK_ACCOUNT: MASK
-        CREDIT_CARD: MASK
-        IBAN_CODE: MASK
-        EMAIL_ADDRESS: MASK
-        PHONE_NUMBER: MASK
-        STREET_ADDRESS: MASK
-        CA_POSTAL_CODE: MASK
-      # Weak patterns (bare 9-digit NAS, passport) only count next to a
-      # context word ("NAS", "passeport", ...), which adds 0.35.
-      presidio_score_thresholds:
-        ALL: 0.5
-        CA_BANK_ACCOUNT: 0.4
-
-  - guardrail_name: pii-noms-fr
-    litellm_params:
-      guardrail: presidio
-      mode: pre_call
-      default_on: false
-      presidio_language: fr
-      pii_entities_config:
-        PERSON: MASK
-
-  - guardrail_name: pii-noms-en
-    litellm_params:
-      guardrail: presidio
-      mode: pre_call
-      default_on: false
-      presidio_language: en
-      pii_entities_config:
-        PERSON: MASK
+# Fails closed: analyzer down or slow, a cloud request is refused (503); a local one
+# is unaffected. Refused (400) toward a cloud model: what Presidio cannot read
+# (images, files, audio, unknown block types), `vector_store_ids`/`file_search`
+# (second-brain, until a live check shows retrieved text is masked), every endpoint
+# the gate does not know how to read (moderations, files, batches, pass-through...),
+# and, on a local request, a `fallbacks` that names a cloud alias. No `fallbacks:`
+# here either: the decision is taken on the alias asked for, before routing. It also
+# makes provider token counting local, because /v1/messages/count_tokens would post
+# the whole conversation to Anthropic without any hook.
 
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
@@ -158,6 +114,9 @@ litellm_settings:
   # (global_budget_cad x cad_to_usd); `make test` fails if they disagree.
   max_budget: 144.0
   budget_duration: 30d
+  # The PII gate (see the comment above). A list: the string form would replace
+  # litellm.callbacks and drop the budget limiter.
+  callbacks: [cloud_pii.gate]
   # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
   # carries MCP tools, keep only the top_k whose name + description are
   # closest to the last user message. The index of the registry's tools is

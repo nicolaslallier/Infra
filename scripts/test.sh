@@ -73,6 +73,22 @@ if out="$(uv run -q --no-project --with pyyaml python scripts/test_litellm_provi
 else
 	fail "scripts/test_litellm_provision.py" "$out"
 fi
+echo "== litellm PII policy (pii_policy.yaml vs teams.yaml and config.yaml)"
+if out="$(uv run -q --no-project --with pyyaml python scripts/test_pii_policy.py 2>&1)"; then
+	pass "scripts/test_pii_policy.py"
+else
+	fail "scripts/test_pii_policy.py" "$out"
+fi
+echo "== cloud-pii guardrail (against the pinned LiteLLM)"
+# The version Renovate bumps in docker-compose.platform.yml, as for prefect above.
+LITELLM_VERSION="$(grep -m1 -oE 'litellm-database:v[0-9]+\.[0-9]+\.[0-9]+' docker-compose.platform.yml | sed 's/.*:v//')"
+if [ -z "$LITELLM_VERSION" ]; then
+	fail "scripts/test_cloud_pii.py" "could not read the litellm version from docker-compose.platform.yml"
+elif out="$(uv run -q --no-project --with pyyaml --with "litellm[proxy]==$LITELLM_VERSION" python scripts/test_cloud_pii.py 2>&1)"; then
+	pass "scripts/test_cloud_pii.py (litellm $LITELLM_VERSION)"
+else
+	fail "scripts/test_cloud_pii.py" "$out"
+fi
 
 if [ "${TEST_ONLY:-}" != "unit" ]; then
 	# Under $HOME, not $TMPDIR: the checks bind-mount this path and the daemon

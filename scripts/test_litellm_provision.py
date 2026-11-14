@@ -125,7 +125,7 @@ class FakeClient:
         if (method, route) == ("GET", "/team/list"):
             return list(self.teams.values())
         if (method, route) == ("POST", "/team/new"):
-            tid = f"id-{body['team_alias']}"
+            tid = body.get("team_id") or f"uuid-{body['team_alias']}"  # a server id unless one is asked for
             self.teams[tid] = {**body, "team_id": tid}
             return {"team_id": tid}
         if (method, route) == ("POST", "/team/update"):
@@ -174,8 +174,23 @@ def test_first_run_creates_teams_users_and_keys():
     assert u["auto_create_key"] is False and u["send_invite_email"] is False
     assert set(new) == {"jarvis", "a-perso"} and all(v.startswith("sk-") for v in new.values())
     perso = next(v for v in c.keys.values() if v["key_alias"] == "a-perso")
-    assert perso["user_id"] == "a@example.test" and perso["team_id"] == "id-famille"
+    assert perso["user_id"] == "a@example.test" and perso["team_id"] == "famille"
     assert "max_budget" not in perso  # a key has no cap of its own
+
+
+def test_teams_are_created_with_their_alias_as_id():
+    # The PII policy is keyed on the team id; an alias can be duplicated or renamed, an id cannot.
+    c = FakeClient()
+    lp.apply(SPEC, c, log=lambda m: None)
+    assert [b["team_id"] for b in c.posted("/team/new")] == [b["team_alias"] for b in c.posted("/team/new")]
+
+
+def test_an_existing_team_with_another_id_is_warned_about():
+    c = FakeClient()
+    c.teams["uuid-1"] = {"team_alias": "apps", "team_id": "uuid-1"}
+    logs = []
+    lp.apply(SPEC, c, log=logs.append)
+    assert any("apps" in m and "uuid-1" in m and "strictest" in m for m in logs), logs
 
 
 def test_second_run_creates_no_key_and_returns_empty():
@@ -192,7 +207,7 @@ def test_changed_cap_is_pushed_to_existing_team():
     s = copy.deepcopy(SPEC)
     s["teams"]["apps"]["max_budget_cad"] = 60
     lp.apply(s, c, log=lambda m: None)
-    assert c.teams["id-apps"]["max_budget"] == lp.to_usd(60, 0.72)
+    assert c.teams["apps"]["max_budget"] == lp.to_usd(60, 0.72)
     assert len(c.posted("/team/new")) == 4  # updated, not recreated
 
 
