@@ -389,6 +389,9 @@ class CloudPIIGate(CustomLogger):
             # An MCP tool call has no model and runs on a server we host: it is a matter of who
             # may call what, decided by the authenticated key's team (the PII masking of what
             # comes back to a cloud model is done on the next chat request, as a tool_result).
+            for new, old in (("mcp_tool_name", "name"), ("mcp_arguments", "arguments")):
+                if new in data and old in data and data[new] != data[old]:
+                    raise HTTPException(status_code=403, detail="mcp-policy: ambiguous tool call")
             reason = mcp_policy.refusal(
                 self.mcp_policy, getattr(user_api_key_dict, "team_id", None) or None,
                 data.get("mcp_tool_name") or data.get("name"),  # /mcp route / REST route bodies

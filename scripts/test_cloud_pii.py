@@ -432,6 +432,11 @@ def test_the_rest_call_shape_is_decided_like_the_mcp_route():
     refused(lambda: rest({"name": "read_note", "arguments": {}}, team="famille"), 403)
     refused(lambda: rest({"name": "merge_pull_request", "arguments": {}}), 403)
     refused(lambda: rest({"name": "push_files", "arguments": {"branch": "main"}}), 403)
+    # both shapes at once, disagreeing: ambiguous, refused whichever one is the harmless one
+    refused(lambda: rest({"mcp_tool_name": "read_note", "name": "push_files", "arguments": {}}, team="apps"), 403)
+    refused(lambda: rest({"name": "push_files", "mcp_tool_name": "read_note", "mcp_arguments": {}}, team="admin"), 403)
+    refused(lambda: rest({"mcp_tool_name": "create_or_update_file", "mcp_arguments": {"branch": "f"},
+                          "arguments": {"branch": "main"}}), 403)
 
 
 def test_provider_native_mcp_connectors_are_refused():
