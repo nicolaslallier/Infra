@@ -106,6 +106,31 @@ vector_store_registry:
 # makes provider token counting local, because /v1/messages/count_tokens would post
 # the whole conversation to Anthropic without any hook.
 
+# MCP servers (the `mcp` stack, docker-compose.mcp.yml), reached by service name on infra-net.
+# `allow_all_keys: true` because LiteLLM otherwise denies every key without an explicit grant,
+# and WHO may call WHAT is decided by the cloud_pii gate (litellm/cloud_pii.py) from the key's
+# team, per litellm/mcp_policy.yaml: this file only says where the servers are and which tools
+# exist. `allowed_tools` is the same allowlist as the policy and the GitHub server's own --tools
+# (`make test` checks they are equal); merge_pull_request is in none of them. Tokens are
+# per-server secrets from .env: the Obsidian server refuses a request without its token, the
+# GitHub server takes the GitHub token itself. MCP arguments are not masked (they are the
+# owner's own action); what comes back to a cloud model is, as a tool_result.
+mcp_servers:
+  obsidian:
+    url: http://mcp-obsidian:8000/mcp
+    transport: http
+    auth_type: bearer_token
+    auth_value: os.environ/OBSIDIAN_MCP_TOKEN
+    allow_all_keys: true
+    allowed_tools: [list_notes, read_note, search_notes]
+  github:
+    url: http://mcp-github:8082/
+    transport: http
+    auth_type: bearer_token
+    auth_value: os.environ/GITHUB_MCP_TOKEN
+    allow_all_keys: true
+    allowed_tools: [search_repositories, get_file_contents, list_commits, search_code, get_commit, list_branches, list_tags, get_repository_tree, issue_read, search_issues, list_issues, list_pull_requests, pull_request_read, search_pull_requests, list_label, get_label, actions_list, actions_get, get_job_logs, issue_write, add_issue_comment, update_issue_comment, create_branch, create_or_update_file, push_files, create_pull_request, update_pull_request, add_reply_to_pull_request_comment]
+
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true
