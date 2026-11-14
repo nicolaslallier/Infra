@@ -246,6 +246,50 @@ def test_malformed_blocks_are_refused_not_skipped():
         refused(lambda: call(guard(), CLOUD, [{"role": "assistant", "content": [copy.deepcopy(bad)]}]), 400)
 
 
+def test_every_string_of_an_allowed_field_is_scanned():
+    msgs = [
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "a@b.co", "type": "function", "function": {"name": "a@b.co", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "a@b.co", "name": "a@b.co", "content": "x"},
+        {"role": "assistant", "content": [
+            {"type": "tool_use", "id": "a@b.co", "name": "a@b.co", "input": {}},
+            {"type": "text", "text": "x", "citations": [{"cited_text": "a@b.co"}]},
+        ]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a@b.co", "content": "x"}]},
+    ]
+    flat = json.dumps(call(guard(), CLOUD, msgs))
+    assert "a@b.co" not in flat and flat.count("<EMAIL_ADDRESS>") == 8, flat
+
+
+def test_role_must_be_a_known_role():
+    refused(lambda: call(guard(), CLOUD, [{"role": "a@b.co", "content": "x"}]), 400)
+    call(guard(), CLOUD, [{"role": "developer", "content": "x"}])
+
+
+def test_cache_control_must_have_the_known_shape():
+    ok = {"type": "ephemeral", "ttl": "1h"}
+    assert call(guard(), CLOUD, [{"role": "user", "content": [{"type": "text", "text": "x", "cache_control": dict(ok)}]}]) \
+        ["messages"][0]["content"][0]["cache_control"] == ok
+    for bad in ({"type": "ephemeral", "note": "a@b.co"}, {"type": "a@b.co"}, {"type": "ephemeral", "ttl": "a@b.co"}, "a@b.co"):
+        refused(lambda: call(guard(), CLOUD, [{"role": "user", "content": [{"type": "text", "text": "x", "cache_control": copy.deepcopy(bad)}]}]), 400)
+        refused(lambda: call(guard(), CLOUD, [{"role": "user", "content": "x", "cache_control": copy.deepcopy(bad)}]), 400)
+
+
+def test_a_signature_is_scanned_strictly():
+    blk = lambda sig: [{"role": "assistant", "content": [{"type": "thinking", "thinking": "ok", "signature": sig}]}]  # noqa: E731
+    assert call(guard(), CLOUD, blk("EqQBCkYIARgC"))["messages"][0]["content"][0]["signature"] == "EqQBCkYIARgC"
+    refused(lambda: call(guard(), CLOUD, blk("a@b.co")), 400)
+    refused(lambda: call(guard(), CLOUD, blk({"x": "a@b.co"})), 400)
+
+
+def test_wrong_types_in_allowed_fields_are_refused():
+    for msg in ({"role": "assistant", "content": "x", "reasoning_content": ["a@b.co"]},
+                {"role": "assistant", "content": {"text": "a@b.co"}},
+                {"role": "assistant", "content": "x", "refusal": {"a": "a@b.co"}},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "1", "function": {"name": "f", "arguments": {"e": "a@b.co"}}}]},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "1", "function": {"name": "f", "arguments": "{}"}, "note": "a@b.co"}]}):
+        refused(lambda: call(guard(), CLOUD, [copy.deepcopy(msg)]), 400)
+
+
 def test_pass_through_is_refused_whatever_model_the_body_names():
     # The body's `model` does not decide where a pass-through request goes.
     refused(lambda: call(guard(), LOCAL, call_type="pass_through_endpoint"), 400)

@@ -36,6 +36,8 @@ MESSAGE_KEYS = {
     "role", "content", "name", "tool_calls", "tool_call_id", "function_call",
     "thinking_blocks", "reasoning_content", "refusal", "cache_control",
 }
+ROLES = {"system", "user", "assistant", "tool", "function", "developer"}
+CACHE_TTLS = {"5m", "1h"}
 FALLBACK_KEYS = ("fallbacks", "context_window_fallbacks", "content_policy_fallbacks")
 
 
@@ -69,38 +71,73 @@ def _descriptions(node: Any, slots: list) -> None:
             _descriptions(v, slots)
 
 
+def _check_cache_control(node: dict) -> None:
+    """cache_control is a control field, not free text: only its known shape may pass."""
+    v = node.get("cache_control")
+    if v is not None and not (
+        isinstance(v, dict) and set(v) <= {"type", "ttl"} and v.get("type") == "ephemeral" and v.get("ttl", "5m") in CACHE_TTLS
+    ):
+        raise _refuse("an unexpected cache_control cannot be scanned")
+
+
+def _str(node: dict, key: str, slots: list, strict: bool = False) -> None:
+    """A string field: scanned (masked, or strictly checked if signed); any other type is refused."""
+    v = node.get(key)
+    if v is None:
+        return
+    if not isinstance(v, str):
+        raise _refuse(f"'{key}' is not a string and cannot be scanned")
+    slots.append((node, key, True) if strict else (node, key))
+
+
+def _rest(node: dict, known: set, slots: list) -> None:
+    """Whatever a block carries beyond the fields we know (citations, ...): scan every string."""
+    for k, v in list(node.items()):
+        if k in known:
+            continue
+        if isinstance(v, str):
+            slots.append((node, k))
+        else:
+            _string_leaves(v, slots)
+
+
 def _blocks(content: Any, slots: list) -> None:
     """Text-bearing spots of a content list; a block Presidio cannot read is refused."""
     for i, b in enumerate(content):
         if isinstance(b, str):
             slots.append((content, i))
-        elif not isinstance(b, dict):
+            continue
+        if not isinstance(b, dict):
             raise _refuse("unreadable content block")
-        elif b.get("type") in TEXT_TYPES:
-            if "text" in b:
-                if not isinstance(b["text"], str):
-                    raise _refuse("a text block whose text is not a string cannot be scanned")
-                slots.append((b, "text"))
-        elif b.get("type") == "tool_use":
+        _check_cache_control(b)
+        t = b.get("type")
+        if t in TEXT_TYPES:
+            _str(b, "text", slots)
+            _rest(b, {"type", "text", "cache_control"}, slots)
+        elif t == "tool_use":
+            _str(b, "id", slots)
+            _str(b, "name", slots)
             _string_leaves(b.get("input"), slots)
-        elif b.get("type") == "tool_result":
+            _rest(b, {"type", "id", "name", "input", "cache_control"}, slots)
+        elif t == "tool_result":
+            _str(b, "tool_use_id", slots)
             c = b.get("content")
             if isinstance(c, str):
                 slots.append((b, "content"))
             elif isinstance(c, list):
                 _blocks(c, slots)
-        elif b.get("type") in ("thinking", "redacted_thinking"):
-            # Signed: altering the text breaks the signature, so it is scanned and refused (the
-            # third element marks the slot strict), not masked. Real ones come from masked prompts.
+            elif c is not None:
+                raise _refuse("a tool_result whose content is not text or blocks cannot be scanned")
+            _rest(b, {"type", "tool_use_id", "content", "cache_control", "is_error"}, slots)
+        elif t in ("thinking", "redacted_thinking"):
+            # Signed: altering a field breaks the signature, so each is scanned and the request
+            # refused if it carries personal information (strict slots), never masked.
             if set(b) - {"type", "thinking", "signature", "data", "cache_control"}:
                 raise _refuse("a thinking block with unexpected fields cannot be scanned")
-            for field in ("thinking", "data"):
-                if field in b:
-                    if not isinstance(b[field], str):
-                        raise _refuse("a thinking block whose text is not a string cannot be scanned")
-                    slots.append((b, field, True))
+            for field in ("thinking", "data", "signature"):
+                _str(b, field, slots, strict=True)
         else:
-            raise _refuse(f"'{b.get('type')}' content is not sent to a non-local model (it cannot be scanned)")
+            raise _refuse(f"'{t}' content is not sent to a non-local model (it cannot be scanned)")
 
 
 def _slots(data: dict) -> list:
@@ -136,28 +173,41 @@ def _slots(data: dict) -> list:
         unknown = set(m) - MESSAGE_KEYS
         if unknown:
             raise _refuse(f"message field '{sorted(unknown)[0]}' is not sent to a non-local model (it cannot be scanned)")
+        if m.get("role") not in ROLES:
+            raise _refuse("an unknown message role cannot be scanned")
+        _check_cache_control(m)
         tb = m.get("thinking_blocks")
         if isinstance(tb, list):
             _blocks(tb, slots)
         elif tb is not None:
             raise _refuse("thinking_blocks must be a list")
-        for field in ("reasoning_content", "refusal"):
-            if isinstance(m.get(field), str):
-                slots.append((m, field))
-        if isinstance(m.get("name"), str):
-            slots.append((m, "name"))
+        for field in ("reasoning_content", "refusal", "name", "tool_call_id"):
+            _str(m, field, slots)
         fc = m.get("function_call")
-        if isinstance(fc, dict) and isinstance(fc.get("arguments"), str):
-            slots.append((fc, "arguments"))
+        if fc is not None:
+            if not isinstance(fc, dict) or set(fc) - {"name", "arguments"}:
+                raise _refuse("an unexpected function_call cannot be scanned")
+            _str(fc, "name", slots)
+            _str(fc, "arguments", slots)
         c = m.get("content")
         if isinstance(c, str):
             slots.append((m, "content"))
         elif isinstance(c, list):
             _blocks(c, slots)
-        for tc in m.get("tool_calls") or []:
+        elif c is not None:
+            raise _refuse("message content that is not text or blocks cannot be scanned")
+        tcs = m.get("tool_calls")
+        if tcs is not None and not isinstance(tcs, list):
+            raise _refuse("tool_calls must be a list")
+        for tc in tcs or []:
             fn = tc.get("function") if isinstance(tc, dict) else None
-            if isinstance(fn, dict) and "arguments" in fn:
-                _add(slots, fn, "arguments")
+            if (not isinstance(tc, dict) or set(tc) - {"id", "type", "function", "index", "cache_control"}
+                    or tc.get("type") not in (None, "function") or not isinstance(fn, dict) or set(fn) - {"name", "arguments"}):
+                raise _refuse("an unexpected tool call cannot be scanned")
+            _check_cache_control(tc)
+            _str(tc, "id", slots)
+            _str(fn, "name", slots)
+            _str(fn, "arguments", slots)
     return slots
 
 

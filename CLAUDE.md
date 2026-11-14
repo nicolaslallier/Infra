@@ -202,7 +202,10 @@ never orphans another app that's still attached to it):
   and a malformed block is refused, not skipped); `reasoning_content` is masked; a
   message field outside a closed list (role, content, name, tool_calls,
   tool_call_id, function_call, thinking_blocks, reasoning_content, refusal,
-  cache_control) is refused toward a non-local model; provider pass-through is refused
+  cache_control) is refused toward a non-local model, and inside the allowed
+  ones every string is masked (ids and names too, consistently) or strictly
+  checked (thinking, data, signature), `role` must be a known role and
+  `cache_control` must have its known shape, a wrong type is refused; provider pass-through is refused
   whatever `model` its body names. Only presidio-analyzer is called, for spans, and the
   `<ENTITY>` replacement is done in the gate (`presidio-anonymizer` is deployed but
   unused, though Presidio's helper still wants its URL). Fail closed: analyzer down
