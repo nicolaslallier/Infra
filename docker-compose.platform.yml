@@ -183,6 +183,10 @@ services:
       # config.yaml) reads these: litellm-pgvector below.
       PG_VECTOR_API_BASE: http://litellm-pgvector:8000
       PG_VECTOR_API_KEY: ${LITELLM_PGVECTOR_API_KEY:?Set LITELLM_PGVECTOR_API_KEY in .env (echo "sk-$(openssl rand -hex 32)")}
+      # Cloud models (cloud-* in config.yaml).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?Set ANTHROPIC_API_KEY in .env}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
       # PII guardrails (guardrails: in config.yaml).
       PRESIDIO_ANALYZER_API_BASE: http://presidio-analyzer:3000
       PRESIDIO_ANONYMIZER_API_BASE: http://presidio-anonymizer:3000

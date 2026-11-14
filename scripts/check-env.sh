@@ -76,6 +76,9 @@ REQUIRED=(
 	LITELLM_UI_PASSWORD
 	LITELLM_PGVECTOR_API_KEY
 	LITELLM_RAG_DB_PASSWORD
+	ANTHROPIC_API_KEY
+	GEMINI_API_KEY
+	OPENAI_API_KEY
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start

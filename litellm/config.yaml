@@ -33,6 +33,26 @@ model_list:
       model: ollama_chat/gemma4:26b-a4b-it-qat
       api_base: http://ollama-proxy:11434
 
+  # Cloud models, one per provider. Real money: the 200 CAD/month cap is
+  # litellm_settings.max_budget below, split per team in teams.yaml; a team
+  # reaches these only if it lists the alias in `models:`. No fallback to or
+  # from the local models. Prompts leave the house here, after
+  # pii-identifiants (default_on) has masked them.
+  - model_name: cloud-anthropic
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: cloud-gemini
+    litellm_params:
+      model: gemini/gemini-2.5-flash
+      api_key: os.environ/GEMINI_API_KEY
+
+  - model_name: cloud-openai
+    litellm_params:
+      model: openai/gpt-5-mini
+      api_key: os.environ/OPENAI_API_KEY
+
   # Embeddings for the MCP semantic tool filter (litellm_settings below):
   # the Ollama on .10 (192.168.2.10, the Windows homelab host the stack runs
   # on), through ollama-proxy-laptop (its metrics proxy, despite the name).
