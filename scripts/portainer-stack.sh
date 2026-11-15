@@ -117,10 +117,11 @@ selftest() {
     || die "selftest: compose_services docker-compose.monitoring.yml"
   [ "$(compose_services docker-compose.grafana.yml | tr '\n' ' ')" = "grafana-provisioning grafana " ] \
     || die "selftest: compose_services docker-compose.grafana.yml"
-  ! grep -q INFRA_DIR docker-compose.grafana.yml || die "selftest: docker-compose.grafana.yml mounts from the checkout but deploys remotely"
   [ "$(compose_services docker-compose.keycloak.yml)" = keycloak ] || die "selftest: compose_services docker-compose.keycloak.yml"
-  ! grep -q INFRA_DIR docker-compose.keycloak.yml || die "selftest: docker-compose.keycloak.yml mounts from the checkout but deploys remotely"
-  ! grep -q INFRA_DIR docker-compose.auth.yml || die "selftest: docker-compose.auth.yml mounts from the checkout but deploys remotely"
+  # A stack on another Portainer environment has no host checkout to mount.
+  while read -r s f e _; do
+    [ "$e" = - ] || ! grep -q INFRA_DIR "$f" || die "selftest: $f mounts from the checkout but deploys remotely ($s, environment $e)"
+  done < <(grep -vE '^[[:space:]]*(#|$)' stacks.conf)
   [ "$(compose_services docker-compose.auth.yml | tr '\n' ' ')" = "oauth2-proxy oauth2-proxy-infra oauth2-proxy-prefect oauth2-proxy-portail " ] \
     || die "selftest: compose_services docker-compose.auth.yml"
   [ "$(compose_services docker-compose.platform.yml | tr '\n' ' ')" = "ollama-proxy ollama-proxy-laptop prefect-server prefect-flows litellm-redis litellm presidio-analyzer presidio-anonymizer litellm-pgvector " ] \
