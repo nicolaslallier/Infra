@@ -474,7 +474,7 @@ network). **The sections below still describe the mini in places: the layout
 above wins.** Not done by this change, owner steps: copy `infra_pgdata`,
 `infra_pgadmin-data`, `infra_s3-data`, `infra_rabbitmq-data`, `infra_ntfy-data`,
 `infra_dns-*` and the grafana volumes from the mini to the laptop's Docker
-before `make up`; the laptop must carry `DNS_IP` (192.168.2.253); the laptop's
+before `make up`; `DNS_IP` is now the laptop itself (192.168.2.10): point the router's DNS at it; the laptop's
 Docker VM (~7.7 GiB) must hold postgres, SeaweedFS, RabbitMQ, Keycloak and
 Grafana on top of what it runs; DarkAngel/dev on the Mac Studio that reach
 `data.famillelallier.net` or `192.168.2.68` must be repointed (the Technitium
@@ -1120,7 +1120,7 @@ postgres dump holds every app's data, so nothing is world-readable.
   encrypted with the seal key, so back up `openbao/seal.key` separately.
 - **DNS** (Technitium, on another host) is fetched over HTTP: `GET
   /api/settings/backup` at `BACKUP_DNS_ADDR` (default
-  `http://192.168.2.253:5380`, the `DNS_IP` alias) into `dns/dns-<stamp>.zip`
+  `http://192.168.2.10:5380`, `DNS_IP`) into `dns/dns-<stamp>.zip`
   (zones, settings, accounts; no stats or query logs). Technitium answers
   errors with HTTP 200 and JSON, so anything that is not a zip fails the
   target. The token is the Secret block `dns-backup-token`. It travels in
