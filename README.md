@@ -724,6 +724,38 @@ LAN by default (password-protected via `DNS_ADMIN_PASSWORD`). Set
 `DNS_SERVER_WEB_SERVICE_ENABLE_HTTPS=true` in the `dns` service's
 environment if you want to encrypt that session too.
 
+### Rotating the CA
+
+`scripts/gen-certs.sh` (openssl path) mints a CA with
+`basicConstraints=critical,CA:TRUE`, `keyUsage=critical,keyCertSign,cRLSign`
+and a `subjectKeyIdentifier`, and a leaf with `serverAuth` and an
+`authorityKeyIdentifier`. A CA minted before that has no `keyUsage`, and
+Python 3.13+ (strict X.509 verification by default) refuses it with
+`CA cert does not include key usage extension`: `make litellm-provision` and
+any Python 3.13 client of `*.infra.famillelallier.net` fail TLS. Until the CA
+is rotated, run them under Python 3.12 (`uv run --python 3.12 ...`).
+`openssl verify -x509_strict -CAfile certs/infra-ca.crt certs/infra.crt`
+says which CA a checkout holds.
+
+`--force` keeps an existing CA, so rotating is deliberate. Owner steps, in
+order (every device that trusts the old CA stops trusting the site until
+step 4 is done on it):
+
+1. On the deploy host's checkout (laptop WSL, `/mnt/c/Users/nicol/OpenCode/Infra`):
+   `rm certs/infra-ca.*`, then `./scripts/gen-certs.sh --force`.
+2. Redeploy nginx: `make up stack=infra`.
+3. `make runners-up` (the `ai` and `ea` runners bind-mount
+   `certs/infra-ca.crt` as `/etc/<label>/infra-ca.crt`; a single-file mount
+   only sees the new file when the container is recreated), and
+   `make vault-oidc` (OpenBao keeps a copy of the CA in its OIDC config).
+4. On each Mac: copy the new `certs/infra-ca.crt` over, remove the old
+   "Infra Local Dev CA" from the System keychain, then run the
+   `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain infra-ca.crt`
+   step the script prints. On each phone: install and trust the new profile.
+5. Replace the other copies of `infra-ca.crt`: devbox `ca_cert` (and
+   `[llm]`'s) in each machine's CLI `config.toml`, and any app or client
+   configured with a CA file.
+
 ## Common commands
 
 Run `make` / `make help` for the full list. Notable targets:

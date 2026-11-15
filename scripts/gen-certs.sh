@@ -106,12 +106,31 @@ SAN_CONF="$CERT_DIR/.san.cnf"
 # 1. Local CA (10 year validity — this is dev-only tooling). Kept when it
 #    already exists: a new CA has to be trusted again on every device, while
 #    adding a SAN only needs a new leaf. Delete infra-ca.* to mint a new one.
+#    keyUsage on the CA is load-bearing: Python 3.13+ verifies with
+#    VERIFY_X509_STRICT and rejects a CA without it ("CA cert does not
+#    include key usage extension"). A CA minted before this change lacks it,
+#    and reusing it keeps that failure: rotate it (README, "Rotating the CA").
+CA_CONF="$CERT_DIR/.ca.cnf"
 if [ -f "$CA_KEY" ] && [ -f "$CA_CRT" ]; then
   echo "gen-certs.sh: reusing the existing CA $CA_CRT"
 else
+  cat > "$CA_CONF" <<EOF
+[req]
+distinguished_name = dn
+x509_extensions = v3_ca
+prompt = no
+
+[dn]
+CN = Infra Local Dev CA
+
+[v3_ca]
+basicConstraints = critical, CA:TRUE
+keyUsage = critical, keyCertSign, cRLSign
+subjectKeyIdentifier = hash
+EOF
   openssl req -x509 -new -nodes -newkey rsa:4096 -sha256 -days 3650 \
-    -subj "/CN=Infra Local Dev CA" \
-    -keyout "$CA_KEY" -out "$CA_CRT"
+    -config "$CA_CONF" -keyout "$CA_KEY" -out "$CA_CRT"
+  rm -f "$CA_CONF"
 fi
 
 # 2. Leaf key + CSR with SANs for the wildcard domain, localhost, and
@@ -140,6 +159,15 @@ keyUsage = keyEncipherment, digitalSignature
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
+# Applied when signing, not in the CSR: the issuer's key id only exists then.
+[v3_leaf]
+basicConstraints = CA:FALSE
+keyUsage = keyEncipherment, digitalSignature
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid, issuer
+
 [alt_names]
 $ALT_NAMES
 IP.1 = 127.0.0.1
@@ -151,7 +179,7 @@ openssl req -new -nodes -newkey rsa:2048 \
 # 3. Sign the leaf with the local CA, carrying the SANs over.
 openssl x509 -req -in "$LEAF_CSR" -CA "$CA_CRT" -CAkey "$CA_KEY" \
   -CAcreateserial -days 825 -sha256 \
-  -extfile "$SAN_CONF" -extensions v3_req \
+  -extfile "$SAN_CONF" -extensions v3_leaf \
   -out "$LEAF_CRT"
 
 rm -f "$LEAF_CSR" "$SAN_CONF" "$CERT_DIR/infra-ca.srl"

@@ -108,6 +108,35 @@ else
 	fail "scripts/test_cloud_pii.py" "$out"
 fi
 
+echo "== gen-certs.sh (openssl path): strict-verifiable CA, CA reused on --force"
+# openssl verify -x509_strict is the check Python 3.13+ applies by default
+# (VERIFY_X509_STRICT): a CA without keyUsage fails it with the same error.
+# PATH holds only what the openssl path needs, so mkcert and docker (the
+# oauth2-proxy bundle) are skipped wherever this runs.
+gc="$(mktemp -d "$cache/gc.XXXXXX")"
+mkdir "$gc/scripts" "$gc/bin"
+cp scripts/gen-certs.sh "$gc/scripts/"
+for t in bash dirname mkdir openssl rm cat; do ln -s "$(command -v "$t")" "$gc/bin/$t"; done
+if ! out="$(PATH="$gc/bin" "$gc/scripts/gen-certs.sh" 2>&1)"; then
+	fail "gen-certs.sh" "$out"
+else
+	ca="$gc/certs/infra-ca.crt" leaf="$gc/certs/infra.crt"
+	ca_before="$(openssl x509 -in "$ca" -noout -fingerprint -sha256)"
+	leaf_ext="$(openssl x509 -in "$leaf" -noout -text)"
+	if ! out="$(openssl verify -x509_strict -purpose sslserver -CAfile "$ca" "$leaf" 2>&1)"; then
+		fail "gen-certs.sh: leaf does not verify strictly against the CA" "$out"
+	elif ! grep -q 'Authority Key Identifier' <<<"$leaf_ext"; then
+		fail "gen-certs.sh: leaf has no authorityKeyIdentifier"
+	elif ! out="$(PATH="$gc/bin" "$gc/scripts/gen-certs.sh" --force 2>&1)"; then
+		fail "gen-certs.sh --force" "$out"
+	elif [ "$(openssl x509 -in "$ca" -noout -fingerprint -sha256)" != "$ca_before" ]; then
+		fail "gen-certs.sh --force replaced the existing CA"
+	else
+		pass "gen-certs.sh"
+	fi
+fi
+rm -rf "${gc:?}"
+
 if [ "${TEST_ONLY:-}" != "unit" ]; then
 	# Under $HOME, not $TMPDIR: the checks bind-mount this path and the daemon
 	# resolves it, and $HOME is shared with the VM by Docker Desktop and Colima
