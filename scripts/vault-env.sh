@@ -97,15 +97,17 @@ awk -F'\t' '
 
 [ -s "$tmp/env" ] || die "rendered an empty .env; refusing to install it."
 
+umask 077
 if [ -f .env ]; then
   if cmp -s "$tmp/env" .env; then
     echo "vault-env.sh: .env already matches $MOUNT/$SECRET; left untouched."
     exit 0
   fi
-  cp -p .env .env.bak
+  # No -p: on WSL's /mnt/c a .env.bak without owner metadata reads as root,
+  # and preserving its times fails. umask 077 keeps the copy private.
+  cp .env .env.bak
 fi
 
-umask 077
 cp "$tmp/env" .env
 # Only when we own it: on WSL's /mnt/c (DrvFs) a file without owner metadata
 # reads as root, and 600 would lock out the user deploying. Windows ACLs
