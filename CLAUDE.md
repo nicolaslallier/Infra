@@ -1629,6 +1629,13 @@ add-trusted-cert` step it prints for every browser/keychain that had the
 old one trusted, since the old CA's trust doesn't carry over. (The mkcert
 path always signs with mkcert's own CA.)
 
+The openssl CA carries `keyUsage=critical,keyCertSign,cRLSign` (and
+`basicConstraints`, a subject key id; the leaf `serverAuth` and an authority
+key id): Python 3.13+ verifies strictly and rejects a CA without `keyUsage`.
+A CA minted before that lacks it; rotating it is an owner step across
+devices (README, "Rotating the CA"). `make test` asserts the extensions with
+`openssl verify -x509_strict`, the same check.
+
 ### DNS (LAN resolver)
 
 `dns` runs Technitium's official `technitium/dns-server` image. Its
