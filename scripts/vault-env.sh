@@ -107,7 +107,10 @@ fi
 
 umask 077
 cp "$tmp/env" .env
-chmod 600 .env
+# Only when we own it: on WSL's /mnt/c (DrvFs) a file without owner metadata
+# reads as root, and 600 would lock out the user deploying. Windows ACLs
+# guard it there.
+[ ! -O .env ] || chmod 600 .env
 
 written="$(jq -r 'length' <<<"$secret_json")"
 echo "vault-env.sh: wrote .env from $MOUNT/$SECRET ($written settings)"
