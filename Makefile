@@ -164,7 +164,7 @@ migrate-volumes: ## Copy the stack's volumes from Colima to Docker Desktop (DRY=
 	@./scripts/migrate-volumes.sh $(if $(filter 1,$(DRY)),--dry-run,) $(if $(filter 1,$(OVERWRITE)),--force,)
 
 # The stacks a deploy walks, in stacks.conf order; `stack=<name>` picks one.
-STACKS = $(or $(stack),$(shell awk '!/^\#/ && NF { print $$1 }' stacks.conf))
+STACKS = $(or $(stack),$(shell awk '!/^\043/ && NF { print $$1 }' stacks.conf))
 
 # Deploy + health gate, one stack after the other, so a stack only starts once
 # the ones above it in stacks.conf are healthy. Portainer's API returns before
@@ -179,8 +179,8 @@ for s in $(STACKS); do \
   before=$$(echo $$before); \
   rc=0; STACK=$$s ./scripts/portainer-stack.sh $(1) || rc=$$?; \
   [ $$rc != 3 ] || continue; [ $$rc = 0 ] || exit $$rc; \
-  if [ "$$(awk -v s=$$s '!/^\#/ && $$1 == s { print $$3 }' stacks.conf)" != - ]; then echo "$$s: remote environment, health gate skipped (check it in Portainer)"; continue; fi; \
-  [ "$(WAIT_HEALTHY)" = 0 ] || BEFORE_IDS="$$before" WAIT_PROJECT=$$s WAIT_COMPOSE_FILE="$$(awk -v s=$$s '!/^\#/ && $$1 == s { print $$2 }' stacks.conf)" ./scripts/wait-healthy.sh $(or $(WAIT_HEALTHY_TIMEOUT),600); \
+  if [ "$$(awk -v s=$$s '!/^\043/ && $$1 == s { print $$3 }' stacks.conf)" != - ]; then echo "$$s: remote environment, health gate skipped (check it in Portainer)"; continue; fi; \
+  [ "$(WAIT_HEALTHY)" = 0 ] || BEFORE_IDS="$$before" WAIT_PROJECT=$$s WAIT_COMPOSE_FILE="$$(awk -v s=$$s '!/^\043/ && $$1 == s { print $$2 }' stacks.conf)" ./scripts/wait-healthy.sh $(or $(WAIT_HEALTHY_TIMEOUT),600); \
 done
 endef
 
