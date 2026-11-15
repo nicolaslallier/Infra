@@ -1,8 +1,6 @@
-# The "auth" stack: the oauth2-proxies that gate the internal UIs, on the
-# Mac mini (Portainer environment 7, see stacks.conf, and CLAUDE.md
-# "Portainer-managed stack"), next to the keycloak stack. nginx (homelab)
-# calls them on :4180-4182 for every gated request. Nothing here
-# bind-mounts the host checkout: a remote environment has none.
+# The "auth" stack: the oauth2-proxies that gate the internal UIs. nginx
+# calls them by name on infra-net (:4180) for every gated request; nothing
+# is published.
 name: auth
 
 services:
@@ -11,7 +9,7 @@ services:
   # The tag is for humans; the digest is what is pulled. Bump both together.
   # Nginx auth_request backend for the Jarvis vhost's Keycloak login gate
   # (see nginx/conf.d/jarvis.conf). Not fronted by NGINX itself: nginx calls
-  # it from the homelab at 192.168.2.68:4180. Its own upstream is a dummy
+  # it on infra-net at oauth2-proxy:4180. Its own upstream is a dummy
   # ("static://202") because it's never used as a reverse proxy here,
   # only as the thing nginx's auth_request/oauth2/ locations call into.
   oauth2-proxy:
@@ -20,10 +18,10 @@ services:
     environment:
       OAUTH2_PROXY_PROVIDER: keycloak-oidc
       # No OIDC discovery: the discovery document points every endpoint at
-      # https://keycloak.famillelallier.net, which is nginx on the homelab
+      # https://keycloak.famillelallier.net, which is nginx
       # with a self-signed cert this image does not trust. So the browser
       # goes to the public login URL, while token and key calls go straight
-      # to the keycloak stack on this host (:8080). The issuer is the public
+      # to keycloak:8080 on infra-net. The issuer is the public
       # URL: it is what Keycloak (KC_HOSTNAME) writes in every token, so it
       # is verified, without the old skip-issuer escape hatch.
       OAUTH2_PROXY_OIDC_ISSUER_URL: https://keycloak.famillelallier.net/realms/jarvis
@@ -65,11 +63,9 @@ services:
       # Single provider configured — skip the "choose a provider" screen and
       # go straight to Keycloak.
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    # nginx (homelab) calls this on every gated request. LAN only, plain
-    # HTTP like Keycloak's :8080.
-    ports:
-      - "4180:4180"
-    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    networks:
+      - infra-net
+    # No depends_on keycloak: another stack. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
 
   # Third oauth2-proxy, for the SeaweedFS admin UI, against the `infra` realm
@@ -112,11 +108,9 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    # nginx (homelab) calls this on every gated request. LAN only, plain
-    # HTTP like Keycloak's :8080.
-    ports:
-      - "4181:4180"
-    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    networks:
+      - infra-net
+    # No depends_on keycloak: another stack. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
 
   # Fourth oauth2-proxy, for the Prefect UI (nginx/conf.d/prefect.conf),
@@ -155,11 +149,9 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    # nginx (homelab) calls this on every gated request. LAN only, plain
-    # HTTP like Keycloak's :8080.
-    ports:
-      - "4182:4180"
-    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    networks:
+      - infra-net
+    # No depends_on keycloak: another stack. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
 
   # oauth2-proxy-portail, for the AI repo's portail (nginx/conf.d/portail.conf),
@@ -197,9 +189,11 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-    # nginx (homelab) calls this on every gated request. LAN only, plain
-    # HTTP like Keycloak's :8080.
-    ports:
-      - "4183:4180"
-    # No depends_on keycloak: another host. Its one-shot OIDC discovery fails
+    networks:
+      - infra-net
+    # No depends_on keycloak: another stack. Its one-shot OIDC discovery fails
     # while Keycloak is down; restart: unless-stopped retries until it is up.
+
+networks:
+  infra-net:
+    external: true
