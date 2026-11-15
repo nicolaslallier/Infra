@@ -1,10 +1,6 @@
-# The "keycloak" stack: Keycloak alone, on the Mac mini (Portainer
-# environment 7, see stacks.conf), split out of the auth stack to free the
-# homelab's memory. Its state is all in the `keycloak` database of the
-# postgres stack (homelab), so the container holds nothing to back up.
-# Nothing here bind-mounts the host checkout: a remote environment has none.
-# The oauth2-proxies stay in the auth stack, next to nginx, which calls them
-# on every gated request.
+# The "keycloak" stack: Keycloak alone, on the deploy host, on infra-net.
+# Its state is all in the `keycloak` database of the postgres stack, so the
+# container holds nothing to back up. The oauth2-proxies are the auth stack.
 name: keycloak
 
 services:
@@ -16,17 +12,16 @@ services:
     # 14d peak 1722 MiB x1.5; the JVM sizes its heap from this limit.
     mem_limit: 2816m
     restart: unless-stopped
-    # No --import-realm: it needs keycloak/realm-import bind-mounted, and a
-    # remote Portainer environment has no host checkout to mount it from.
-    # It was a no-op anyway once the realms exist (they live in Postgres).
-    # Against an empty database, import once by hand:
-    #   docker cp keycloak/realm-import keycloak-keycloak-1:/tmp/import
-    #   docker exec keycloak-keycloak-1 /opt/keycloak/bin/kc.sh import --dir /tmp/import
-    command: ["start"]
+    # --import-realm loads keycloak/realm-import/*.json, skipping any realm
+    # that already exists (they live in Postgres), so only an empty database
+    # gets them.
+    command: ["start", "--import-realm"]
+    volumes:
+      - ${INFRA_DIR:-.}/keycloak/realm-import:/opt/keycloak/data/import:ro
+    networks:
+      - infra-net
     environment:
       KC_DB: postgres
-      # Postgres stays on the homelab: reached through its nginx on LAN_IP
-      # (nginx/stream.d/postgres.conf), the way DarkAngel does.
       KC_DB_URL_HOST: postgres
       KC_DB_URL_PORT: "5432"
       KC_DB_URL_DATABASE: keycloak
@@ -48,29 +43,21 @@ services:
       # database (the old homelab one during a move) registers in its
       # JDBC_PING table, cannot be reached, and /health/ready goes DOWN.
       KC_CACHE: local
-      # :8080 is published on the LAN, so only trust X-Forwarded-* from the
-      # homelab (nginx's traffic leaves Docker Desktop from the host's IP);
-      # anyone else hitting :8080 directly cannot spoof scheme or client IP.
       # Docker private range: nginx has no fixed address on infra-net (created
-      # outside Compose). Only containers on infra-net can reach :8080 now.
+      # outside Compose). Nothing publishes :8080, so only containers on
+      # infra-net can reach it and send X-Forwarded-*.
       KC_PROXY_TRUSTED_ADDRESSES: 172.16.0.0/12
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HEALTH_ENABLED: "true"
       KC_METRICS_ENABLED: "true"
-      # ponytail: no tracing -- alloy (OTLP :4317) is on the homelab's
-      # infra-net, which this host does not share. Publish alloy's OTLP port
-      # on LAN_IP and set KC_TRACING_ENABLED/ENDPOINT again to get it back.
-    # nginx (keycloak.famillelallier.net, homelab) proxies to :8080 and
-    # Prometheus scrapes :9000 (health + metrics only, no admin console).
-    # Plain HTTP on the LAN, like Postgres; the router forwards neither.
-    ports:
-      # Loopback only: nginx and the oauth2-proxies reach keycloak:8080 on
-      # infra-net, so nothing on the LAN can hit :8080 and spoof X-Forwarded-*.
-      - "127.0.0.1:8080:8080"
-      - "127.0.0.1:9000:9000"
-    # No depends_on postgres: it is another stack on another host, deployed
-    # and gated healthy before this one (stacks.conf order).
+      # Continues nginx's trace (W3C traceparent) into Tempo via alloy.
+      KC_TRACING_ENABLED: "true"
+      KC_TRACING_ENDPOINT: http://alloy:4317
+    # No ports: nginx (keycloak.famillelallier.net) proxies to keycloak:8080
+    # and Prometheus scrapes keycloak:9000, both on infra-net.
+    # No depends_on postgres: it is another stack, deployed and gated healthy
+    # before this one (stacks.conf order).
     # KC_HEALTH_ENABLED above exposes /health/ready on the management
     # interface (:9000). The image ships no curl/wget (RHEL-based, stripped
     # down since Keycloak 23), but /bin/sh is bash under the hood, so a raw
@@ -90,3 +77,7 @@ services:
       timeout: 5s
       retries: 30
       start_period: 120s
+
+networks:
+  infra-net:
+    external: true
