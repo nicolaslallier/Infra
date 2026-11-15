@@ -81,6 +81,15 @@ services:
     # The datasources' hosts, on the homelab (nginx/conf.d/monitoring-lan.conf).
     # nginx (grafana.infra.famillelallier.net, homelab) proxies to :3000.
     # Plain HTTP on the LAN, like Keycloak; the router forwards nothing here.
+    # Names resolve to this host so queries go through nginx
+    # (conf.d/monitoring-lan.conf), which relays only the read APIs: going
+    # straight to prometheus/loki/tempo would reach their admin/push APIs.
+    extra_hosts:
+      - "prometheus:${LAN_IP:?Set LAN_IP in .env}"
+      - "loki:${LAN_IP:?Set LAN_IP in .env}"
+      - "tempo:${LAN_IP:?Set LAN_IP in .env}"
+    # nginx (grafana.infra.famillelallier.net, homelab) proxies to :3000.
+    # Plain HTTP on the LAN, like Keycloak; the router forwards nothing here.
     ports:
       - "3000:3000"
     volumes:
