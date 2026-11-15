@@ -111,7 +111,6 @@ services:
       - source: rabbitmq-plugins
         target: /etc/rabbitmq/enabled_plugins
     ports:
-      - "5672:5672"   # AMQP (per-app users, make rabbitmq-provision)
       - "15672:15672" # management UI, behind the homelab NGINX
       - "15692:15692" # metrics, for Prometheus on the homelab
     networks:
@@ -142,7 +141,6 @@ services:
         target: /etc/ntfy/server.yml
     ports:
       - "8090:80"   # API, behind the homelab NGINX (deny-all auth)
-      - "9090:9090" # metrics, for Prometheus on the homelab
     networks:
       infra-net:
         aliases:
@@ -180,7 +178,7 @@ configs:
             "config": {
               "issuer": "https://keycloak.famillelallier.net/realms/infra",
               "clientId": "s3-sts",
-              "jwksUri": "http://192.168.2.68:8080/realms/infra/protocol/openid-connect/certs",
+              "jwksUri": "http://keycloak:8080/realms/infra/protocol/openid-connect/certs",
               "roleMapping": {
                 "rules": [
                   { "claim": "groups", "value": "s3-admin", "role": "arn:aws:iam::role/S3AdminRole" },
