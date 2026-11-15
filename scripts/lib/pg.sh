@@ -30,12 +30,23 @@ pg_run() {
   [ $# -gt 0 ] || { echo "pg.sh: pg_run needs a command after --" >&2; return 1; }
   # -t only at a terminal: provisioning pipes SQL on stdin.
   [ -t 0 ] && [ -t 1 ] && opts+=(-t)
-  PGPASSWORD="$POSTGRES_PASSWORD" docker run --rm -i \
+  # Secrets go in through one anonymous --env-file, never a bare `-e NAME`:
+  # the docker CLI on the WSL laptop silently drops a value-less -e (the
+  # container saw it empty and psql prompted), and `-e NAME=value` would
+  # show in `ps`. So the password, and every caller's bare `-e NAME`, are
+  # written into the file; the CLI reads it itself, so any daemon works.
+  local envs="PGPASSWORD=$POSTGRES_PASSWORD" args=() i=0 n
+  while [ $i -lt ${#opts[@]} ]; do
+    if [ "${opts[$i]}" = -e ] && [[ "${opts[$((i+1))]:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      n="${opts[$((i+1))]}"; envs+=$'\n'"$n=${!n-}"; i=$((i+2))
+    else args+=("${opts[$i]}"); i=$((i+1)); fi
+  done
+  docker run --rm -i \
     --network infra-net \
+    --env-file <(printf '%s\n' "$envs") \
     -e PGHOST="${PG_HOST:-postgres}" -e PGPORT=5432 \
     -e PGUSER="${POSTGRES_USER:-postgres}" -e POSTGRES_USER="${POSTGRES_USER:-postgres}" \
-    -e PGPASSWORD \
-    ${opts[@]+"${opts[@]}"} "$image" "$@"
+    ${args[@]+"${args[@]}"} "$image" "$@"
 }
 
 # pg_run_script <file> [docker-run options...] -- [args...]
