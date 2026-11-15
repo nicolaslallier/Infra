@@ -250,7 +250,7 @@ def dump_dns() -> Path:
     # because the dns stack runs on another host (the Mac mini, DNS_IP). The
     # API token is the Secret block `dns-backup-token`; Technitium takes it as
     # a query parameter, so the URL is never logged.
-    addr = os.environ.get("BACKUP_DNS_ADDR", "http://192.168.2.253:5380")
+    addr = os.environ.get("BACKUP_DNS_ADDR", "http://192.168.2.10:5380")
     token = Secret.load("dns-backup-token").get()
     query = urllib.parse.urlencode(
         {"token": token, "zones": "true", "dnsSettings": "true", "authConfig": "true",
