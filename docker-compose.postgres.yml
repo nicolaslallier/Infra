@@ -34,7 +34,9 @@ services:
     restart: unless-stopped
     # Audit trail of who connected and when (lands in Loki via Alloy). PG18
     # still accepts `on` for log_connections (= receipt,authentication,authorization).
-    command: ["postgres", "-c", "log_connections=on", "-c", "log_disconnections=on"]
+    # max_connections: the default 100 ran out ("remaining connection slots are
+    # reserved for SUPERUSER") with ~15 apps' pools on one cluster; portail got 500s.
+    command: ["postgres", "-c", "log_connections=on", "-c", "log_disconnections=on", "-c", "max_connections=200"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
