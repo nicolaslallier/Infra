@@ -351,7 +351,7 @@ def test_dns_writes_zip():
         backup.BACKUP_DIR = d
         out = backup.dump_dns.fn()
         assert out.suffix == ".zip" and out.read_bytes() == b"PK\x03\x04zipbytes"
-    assert seen[0].startswith("http://192.168.2.253:5380/api/settings/backup?token=tok&zones=true"), seen
+    assert seen[0].startswith("http://192.168.2.10:5380/api/settings/backup?token=tok&zones=true"), seen
 
 
 def test_dns_error_json_leaves_no_file():
