@@ -54,11 +54,8 @@ services:
         required: false
     volumes:
       - pgdata:/var/lib/postgresql
-    ports:
-      # For the homelab NGINX relay (apps there), Keycloak and DarkAngel.
-      # LAN only: the router forwards no 5432. Every role logs in with a
-      # password (scram-sha-256), as before through the homelab NGINX.
-      - "5432:5432"
+    # No host port: apps use postgres:5432 on infra-net; LAN clients (DarkAngel)
+    # go through nginx (stream.d/postgres.conf), which owns host :5432.
     networks:
       - infra-net
     healthcheck:

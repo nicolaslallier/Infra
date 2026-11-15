@@ -457,6 +457,29 @@ import. Full rationale per check in `scripts/CLAUDE.md`.
 
 Docker Desktop on the deploy host, the Windows laptop (12 CPU / ~7.7 GiB VM; the old Mac setup was 6 CPU / 12 GB / 100 GB, disk image on `/Volumes/Docker`). `keycloak`, `litellm`, `prometheus` and `loki` carry `mem_limit:` ceilings sized ~1.5× each service's measured 14-day peak, deliberately not budgeted to sum under the VM; the Grafana rule `Container OOM-killed` fires if one is hit. Details — `check-docker.sh` exit codes, `LAN_IP` semantics, Colima migration — live in `scripts/CLAUDE.md`.
 
+### Single-host layout (everything on the laptop)
+
+Every row of `stacks.conf` now has environment `-`: `dns`, `postgres`, `data`,
+`keycloak`, `auth` and `grafana` run on the deploy host like the rest, and the
+Mac mini runs none of it (`colima-mini` is gone). On one `infra-net` the
+containers answer to their own names, so nginx no longer carries the aliases
+`s3`/`rabbitmq`/`ntfy`/`postgres`, `stream.d/s3.conf` and the `server_name ntfy`
+vhost are deleted, and every vhost, Prometheus job, oauth2-proxy and Keycloak
+URL points at a service name (`postgres:5432`, `keycloak:8080`,
+`oauth2-proxy-infra:4180`...). Host-port collisions were removed: postgres
+(5432) and rabbitmq (5672) no longer publish, nginx owns those; ntfy's 9090
+metrics port no longer publishes (nginx owns `${LAN_IP}:9090`). Keycloak trusts
+`X-Forwarded-*` from `172.16.0.0/12` (nginx now arrives from the Docker
+network). **The sections below still describe the mini in places: the layout
+above wins.** Not done by this change, owner steps: copy `infra_pgdata`,
+`infra_pgadmin-data`, `infra_s3-data`, `infra_rabbitmq-data`, `infra_ntfy-data`,
+`infra_dns-*` and the grafana volumes from the mini to the laptop's Docker
+before `make up`; the laptop must carry `DNS_IP` (192.168.2.253); the laptop's
+Docker VM (~7.7 GiB) must hold postgres, SeaweedFS, RabbitMQ, Keycloak and
+Grafana on top of what it runs; DarkAngel/dev on the Mac Studio that reach
+`data.famillelallier.net` or `192.168.2.68` must be repointed (the Technitium
+record to the laptop).
+
 ### Portainer-managed stack
 
 The `infra` stack is a **Portainer CE Git stack**: Portainer clones

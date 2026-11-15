@@ -27,7 +27,7 @@ services:
       KC_DB: postgres
       # Postgres stays on the homelab: reached through its nginx on LAN_IP
       # (nginx/stream.d/postgres.conf), the way DarkAngel does.
-      KC_DB_URL_HOST: ${LAN_IP:?Set LAN_IP in .env}
+      KC_DB_URL_HOST: postgres
       KC_DB_URL_PORT: "5432"
       KC_DB_URL_DATABASE: keycloak
       KC_DB_USERNAME: keycloak
@@ -51,7 +51,9 @@ services:
       # :8080 is published on the LAN, so only trust X-Forwarded-* from the
       # homelab (nginx's traffic leaves Docker Desktop from the host's IP);
       # anyone else hitting :8080 directly cannot spoof scheme or client IP.
-      KC_PROXY_TRUSTED_ADDRESSES: ${LAN_IP:?Set LAN_IP in .env}
+      # Docker private range: nginx has no fixed address on infra-net (created
+      # outside Compose). Only containers on infra-net can reach :8080 now.
+      KC_PROXY_TRUSTED_ADDRESSES: 172.16.0.0/12
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
       KC_HEALTH_ENABLED: "true"
@@ -63,8 +65,10 @@ services:
     # Prometheus scrapes :9000 (health + metrics only, no admin console).
     # Plain HTTP on the LAN, like Postgres; the router forwards neither.
     ports:
-      - "8080:8080"
-      - "9000:9000"
+      # Loopback only: nginx and the oauth2-proxies reach keycloak:8080 on
+      # infra-net, so nothing on the LAN can hit :8080 and spoof X-Forwarded-*.
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:9000:9000"
     # No depends_on postgres: it is another stack on another host, deployed
     # and gated healthy before this one (stacks.conf order).
     # KC_HEALTH_ENABLED above exposes /health/ready on the management

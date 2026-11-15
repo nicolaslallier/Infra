@@ -79,10 +79,6 @@ services:
       # infra-net); see monitoring/grafana/provisioning/alerting.
       GRAFANA_NTFY_TOKEN: ${GRAFANA_NTFY_TOKEN:-}
     # The datasources' hosts, on the homelab (nginx/conf.d/monitoring-lan.conf).
-    extra_hosts:
-      - "prometheus:${LAN_IP:?Set LAN_IP in .env}"
-      - "loki:${LAN_IP:?Set LAN_IP in .env}"
-      - "tempo:${LAN_IP:?Set LAN_IP in .env}"
     # nginx (grafana.infra.famillelallier.net, homelab) proxies to :3000.
     # Plain HTTP on the LAN, like Keycloak; the router forwards nothing here.
     ports:
