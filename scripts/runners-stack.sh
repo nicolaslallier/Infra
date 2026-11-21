@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Drive the "runners" stack (docker-compose.runners.yml, six GitHub runners)
+# Drive the "runners" stack (docker-compose.runners.yml, seven GitHub runners)
 # through Portainer's API. Portainer clones docker-compose.yml's sibling from
 # GitHub main; the one file the compose bind-mounts from a checkout
 # (certs/infra-ca.crt, for EA) comes from INFRA_DIR.
@@ -14,7 +14,7 @@
 # Unlike portainer-stack.sh there is no drift guard and no host-checkout
 # sync: the runners' compose mounts nothing tracked by git, so a checkout that
 # lags main cannot deploy stale config. Only the gitignored CA is read, and
-# `up` checks it exists. The env sent to Portainer is .runner.env's six PATs
+# `up` checks it exists. The env sent to Portainer is .runner.env's seven PATs
 # plus INFRA_DIR, never .env: that file holds the whole stack's secrets.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -35,7 +35,7 @@ env_json() { # <env-file> <infra-dir>
     + [{name: "INFRA_DIR", value: $dir}]' <"$1"
 }
 
-# Request bodies. The env (six PATs) arrives on stdin: jq --argjson would put
+# Request bodies. The env (seven PATs) arrives on stdin: jq --argjson would put
 # it on jq's command line, readable by anyone via ps.
 create_body() { # stdin: env json
   jq --arg name "$STACK" --arg url "$REPO_URL" --arg ref "$REF" \
@@ -49,7 +49,7 @@ redeploy_body() { # <true|false: re-pull images>; stdin: env json
 }
 
 # Recreating or stopping the runners mid-job kills the job. One busy runner
-# out of the six is enough, they are handled together.
+# out of the seven is enough, they are handled together.
 check_idle() {
   local rc=0
   bash scripts/runner-status.sh --busy || rc=$?

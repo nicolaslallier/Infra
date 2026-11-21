@@ -4,7 +4,7 @@
 # reads piped tokens in this order.
 # <name> is the compose service suffix
 # (runner-<name>), the runner's label, and the lowercase part of its PAT variable.
-RUNNERS=(darkangel:DarkAngel ea:EA heaven:Heaven infra:Infra moria:Moria ai:AI)
+RUNNERS=(darkangel:DarkAngel ea:EA heaven:Heaven infra:Infra moria:Moria ai:AI rag:RAG)
 
 # runner_repo <name> -> nicolaslallier/<Repo>
 runner_repo() {
