@@ -157,8 +157,21 @@ litellm_settings:
   # closest to the last user message. The index of the registry's tools is
   # built at startup; on most failures the request keeps all its tools, but
   # if the embedding model overflows its context window LiteLLM answers 400.
-  # embedding_model is a model_name from model_list above. A value saved in
-  # the UI is stored in the DB and wins over this one.
+  # embedding_model is a model_name from model_list above.
+  # The litellm_settings row of "LiteLLM_Config" (database litellm) must NOT
+  # hold a mcp_semantic_tool_filter key. LiteLLM polls that row every 30 s
+  # (init_semantic_filter_settings_in_db, proxy_server.py), and when the key
+  # is there it drops the hook built from this file and rebuilds it from the
+  # row -- even though 1.108 logs that the file "owns" the key. A stale row
+  # saved from the UI carried the UI default text-embedding-3-small, which
+  # model_list does not have: the rebuild failed every 30 s and the filter
+  # was off, silently (requests kept all their tools). Healthy logs show
+  # "MCP Semantic Tool Filter enabled" once and never "Failed to initialize
+  # MCP semantic tool filter". To check:
+  #   select jsonb_typeof(param_value) from "LiteLLM_Config"
+  #   where param_name = 'litellm_settings';   -- must be object
+  #   select param_value ? 'mcp_semantic_tool_filter' from "LiteLLM_Config"
+  #   where param_name = 'litellm_settings';   -- must be f
   mcp_semantic_tool_filter:
     enabled: true
     embedding_model: qwen3-embedding:0.6b
