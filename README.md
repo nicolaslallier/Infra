@@ -947,8 +947,9 @@ same shape as the Windows list (`hostname` optional, cosmetic, becomes the
 Every Mac — including one that hosts a Docker stack — is listed by its LAN
 address, with a DHCP reservation, never as `host.docker.internal` (that name is
 the Docker host, which is the Windows laptop; see the rule in `CLAUDE.md`).
-Where a Mac does run Docker, the `node` job there describes Docker's Linux VM,
-not the hardware — this dashboard is the one that describes the Mac itself.
+The container-side jobs (`node` for this stack, `colima-*` for a Mac's Colima
+VM) describe a Linux VM, not the hardware — this dashboard is the one that
+describes the Mac itself.
 
 Three things about the queries, all of which bite anyone adapting a
 Linux-shaped dashboard:
@@ -1250,6 +1251,10 @@ back through `--base-url` → `PORTAINER_BASE_URL` (in `.portainer.env`) →
 `api()` helper in `portainer-stack.sh` (the API sits behind Portainer's 9443
 self-signed cert). A failed poll keeps the last good reading and bumps
 `portainer_exporter_scrape_errors_total` instead of dropping the target.
+The `127.0.0.1` fallback only works on the machine that hosts Portainer: on a
+Mac, set `PORTAINER_BASE_URL=https://192.168.2.10:9443` (the laptop's
+`LAN_IP`) in `.portainer.env`, or pass `--base-url`, or
+`portainer_controlplane_up` stays at 0.
 
 To feed it to Prometheus, point a job at the Mac's LAN address (give it a
 DHCP reservation, as for the `macos` targets — `host.docker.internal` is the
