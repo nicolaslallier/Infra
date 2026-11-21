@@ -12,8 +12,8 @@ constraints make that awkward:
       handed to containers via postgres's env_file. So this exporter runs on the
       HOST, never inside a container: it reads .portainer.env from disk (like
       scripts/portainer-stack.sh does) and Prometheus reaches it via the
-      host.docker.internal bridge. The token therefore never appears in any
-      container's filesystem, env, or process list.
+      Mac's LAN address (DHCP reservation). The token therefore never appears
+      in any container's filesystem, env, or process list.
     * The API sits behind the box's 9443 self-signed TLS, so verification is off,
       exactly as the existing api() helper in portainer-stack.sh uses -k.
 

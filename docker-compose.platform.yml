@@ -31,8 +31,9 @@ services:
     networks:
       - infra-net
 
-  # The Windows laptop this stack runs on. By LAN address, which it answers
-  # on; host.docker.internal would also work but only while that stays true.
+  # The Windows laptop this stack runs on, by LAN address: host.docker.internal
+  # does not resolve in this host's containers (see
+  # monitoring/prometheus/targets/windows.yml).
   ollama-proxy-laptop:
     <<: *ollama-proxy
     environment:
