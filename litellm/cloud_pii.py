@@ -441,7 +441,7 @@ class CloudPIIGate(CustomLogger):
             # above: closed for everyone, agents go through /a2a/.
             raise HTTPException(status_code=403, detail="agent-policy: call agents on /a2a/, not as a model")
         for key in FALLBACK_KEYS:  # the router would retry on a fallback: same rule, local or cloud
-            if any(_names_an_agent(n, None, self.mcp_policy) for n in _strings(data.get(key))):
+            if any(_names_an_agent(n, n, self.mcp_policy) for n in _strings(data.get(key))):
                 raise HTTPException(status_code=403, detail="agent-policy: an agent cannot be a fallback")
         if call_type == "pass_through_endpoint":
             # The body's `model` does not decide where a pass-through request goes, so it cannot
