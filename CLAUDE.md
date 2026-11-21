@@ -178,8 +178,9 @@ never orphans another app that's still attached to it):
   `users:` (README). LiteLLM never reads it back into a prompt; if an agent re-sends it to a cloud model
   the gate masks it like any message. `/v1/skills`
   (a relay to Anthropic's Skills API, so a skill would leave unmasked) is 403 at the vhost, and so
-  are the A2A routes (`/a2a/`, `/v1/a2a/`) except `POST /v1/a2a/agent-test/message/send`: the one
-  agent registered (`agents:` in `config.yaml`, below under `agent-test`), which the gate lets only
+  are the A2A routes (`/a2a/`, `/v1/a2a/`) except `POST /v1/a2a/agent-test/message/send` and
+  `POST /v1/a2a/agent-musique/message/send`: the agents
+  registered (`agents:` in `config.yaml`, below under `agent-test`), which the gate lets only
   team `admin` call (`asend_message`, `agents:` in `mcp_policy.yaml`, matched on the agent id
   sha256(name)); model `a2a/<name>` on the chat routes is 403 for everyone. A container calling
   `litellm:4000` directly bypasses nginx, not the gate.
@@ -299,6 +300,20 @@ never orphans another app that's still attached to it):
   path through LiteLLM: any container on `infra-net` can post to `agent-test:8000` directly (local
   inference only, accepted), and the card under `/a2a/agent-test/` stays readable by any valid key
   from `infra-net` (closed on the LAN, harmless content). Setup: README ("LiteLLM: memory, skills, agents").
+- **`agent-musique`** — second A2A agent, same pattern as `agent-test` (`agents/agent-musique/`,
+  image `infra-agent-musique:1`, `mcp` stack, team `admin` only via
+  `/v1/a2a/agent-musique/message/send`): the record collection, from and into the Obsidian vault in
+  S3 (`02 - Domaines/Loisirs/Musique/`), with boto3 directly (the `mcp-obsidian` server stays
+  read-only). Keys: `AGENT_MUSIQUE_LITELLM_KEY` (team `agents`), `AGENT_MUSIQUE_TOKEN` (LiteLLM
+  sends it as `X-Agent-Token` via `static_headers` in `config.yaml`; every route but `/health` is
+  401 without it, because this agent writes) and `AGENT_MUSIQUE_S3_SECRET_KEY` (identity
+  `agent-musique`, `Read,Write,List` on the whole bucket: `provision-s3.sh` cannot scope a prefix,
+  so the folder limit is `cle_ecriture()` in `disques.py`, the only path to `put_object`; no delete
+  or copy anywhere, a test greps). The model never picks a path; `Discographie.md` is regenerated
+  from the notes' frontmatter on each write; an update changes only the agent's frontmatter lines
+  and is refused within `AGENT_MUSIQUE_QUIET_MINUTES` (10) of the last change (Remotely Save).
+  Fidelity is in the code: the index is in every prompt, 6 tool rounds max, temperature 0, and
+  `Sources :` is appended from what was actually read. Host setup before merge: README.
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2

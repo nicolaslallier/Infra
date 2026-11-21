@@ -566,6 +566,19 @@ the REST route `/mcp-rest/tools/call` run the team check.
   (closed on the LAN); its content is harmless.
   To add an agent: `agents:` in `config.yaml` and in `mcp_policy.yaml`, and its own exact
   `location` in `nginx/conf.d/litellm.conf`.
+- **`agent-musique`** (`agents/agent-musique/`, `mcp` stack), opened the same way at
+  `POST /v1/a2a/agent-musique/message/send`, team `admin` only. It helps with the record collection
+  from the Obsidian vault in S3 (bucket `obsidian`, under `02 - Domaines/Loisirs/Musique/`):
+  each message loads `Discographie.md` into the prompt, then at most 6 tool rounds (temperature 0)
+  of `lire_disque`, `chercher`, `enregistrer_disque`; the answer separates "Dans ta collection"
+  from "Connaissance générale (non vérifiée)", and the code itself appends `Sources : <paths>` from
+  the notes actually read or written. It writes notes `Artiste - Titre (format).md` (name chosen by
+  the code, frontmatter `type: disque`, `source: claude`), regenerates `Discographie.md` (generated,
+  do not edit), never deletes, and refuses to update a note modified in the last
+  `AGENT_MUSIQUE_QUIET_MINUTES` (10, Remotely Save). Its S3 identity `agent-musique` is
+  `Read,Write,List` on the **whole** bucket (`provision-s3.sh` cannot scope a prefix): the folder
+  limit is in the code (`cle_ecriture`), not in SeaweedFS. LiteLLM sends it `AGENT_MUSIQUE_TOKEN`
+  as `X-Agent-Token` (`static_headers`); without it every route but `/health` is 401.
 
 Setup of `agent-test` (once, on the host, in this order):
 
@@ -604,6 +617,30 @@ curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $A" \
   $URL/a2a/agent-test/.well-known/agent-card.json                        # 403 from nginx
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $A" -H 'Content-Type: application/json' \
   -d '{"model":"a2a/agent-test","messages":[{"role":"user","content":"x"}]}' $URL/v1/chat/completions  # 403
+```
+
+Setup of `agent-musique` (once, on the host, before merging, in this order):
+
+1. `make vault-cli args="kv patch -mount=infra env AGENT_MUSIQUE_S3_SECRET_KEY=$(openssl rand -hex 24) AGENT_MUSIQUE_TOKEN=$(openssl rand -hex 32)"`,
+   then `make vault-env`.
+2. `./scripts/provision-s3.sh agent-musique obsidian 0 Read,Write,List` (identity `agent-musique`,
+   whole bucket; directly, since `make s3-provision` runs `check-env`, which still lacks the key below).
+3. `set -a; . ./.env; set +a; uv run -q --no-project --with pyyaml python scripts/litellm_provision.py`
+   (prints the `agent-musique` key once).
+4. `make vault-cli args="kv patch -mount=infra env AGENT_MUSIQUE_LITELLM_KEY=<key>"`, then
+   `make vault-env`. All three keys must be in the vault before the merge, or `check-env` fails the Deploy.
+5. Merge. The Deploy builds `infra-agent-musique:1` and redeploys `mcp`, `platform` and `infra`.
+
+Check, with `$A`, `$J`, `$URL` as above:
+
+```bash
+MSG='{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[{"text":"Quels disques de Miles Davis ai-je ?"}]}}}'
+curl -s -H "Authorization: Bearer $A" -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
+  -d "$MSG" $URL/v1/a2a/agent-musique/message/send                       # answer + "Sources : ..."
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" -H 'Content-Type: application/json' \
+  -H 'A2A-Version: 1.0' -d "$MSG" $URL/v1/a2a/agent-musique/message/send   # 403 (agent-policy): apps
+docker exec mcp-agent-musique-1 python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/')" \
+  2>&1 | grep -o 'HTTP Error 401'                                         # no token: 401
 ```
 
 ## Secrets (OpenBao)

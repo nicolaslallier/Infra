@@ -1,4 +1,4 @@
-# MCP servers behind LiteLLM (chantier 3), and the A2A agents LiteLLM fronts (agent-test): Obsidian, read-only; GitHub, at the "propose" level
+# MCP servers behind LiteLLM (chantier 3), and the A2A agents LiteLLM fronts (agent-test, agent-musique): Obsidian, read-only; GitHub, at the "propose" level
 # (the agent opens issues, branches and PRs, the owner merges). Their own stack so a `platform`
 # redeploy does not cut the tools. Nothing here publishes a port or has an NGINX vhost: LiteLLM
 # reaches both by service name on infra-net, and decides who may call what (litellm/cloud_pii.py,
@@ -56,6 +56,35 @@ services:
     environment:
       LITELLM_URL: http://litellm:4000
       AGENT_TEST_LITELLM_KEY: ${AGENT_TEST_LITELLM_KEY:?Set AGENT_TEST_LITELLM_KEY in .env (make litellm-provision prints the agent-test key)}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - infra-net
+
+  agent-musique:
+    # A2A agent for the record collection (agents/agent-musique/): answers from the Obsidian vault
+    # in S3 and records discs there, with qwen3.8 through LiteLLM (its own key, team `agents`). Its
+    # S3 identity `agent-musique` is Read,Write,List on the whole `obsidian` bucket (provision-s3.sh
+    # cannot scope a prefix): the code holds reads and writes to `02 - Domaines/Loisirs/Musique/`.
+    # It refuses every request but /health without AGENT_MUSIQUE_TOKEN, which LiteLLM sends
+    # (static_headers). Only team admin may call it (litellm/mcp_policy.yaml). Built by
+    # `make app-images` like agent-test: bump the tag here and in portainer-images.sh together.
+    image: infra-agent-musique:1
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      LITELLM_URL: http://litellm:4000
+      S3_ENDPOINT: http://s3:8333
+      OBSIDIAN_BUCKET: obsidian
+      OBSIDIAN_VAULT_PREFIX: ${ORGANIZER_VAULT_PREFIX:-}
+      AGENT_MUSIQUE_S3_ACCESS_KEY: agent-musique
+      AGENT_MUSIQUE_S3_SECRET_KEY: ${AGENT_MUSIQUE_S3_SECRET_KEY:?Set AGENT_MUSIQUE_S3_SECRET_KEY in .env (openssl rand -hex 24)}
+      AGENT_MUSIQUE_TOKEN: ${AGENT_MUSIQUE_TOKEN:?Set AGENT_MUSIQUE_TOKEN in .env (openssl rand -hex 32)}
+      AGENT_MUSIQUE_LITELLM_KEY: ${AGENT_MUSIQUE_LITELLM_KEY:?Set AGENT_MUSIQUE_LITELLM_KEY in .env (make litellm-provision prints the agent-musique key)}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
       interval: 15s

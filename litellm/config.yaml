@@ -148,6 +148,21 @@ agents:
         streaming: false
       defaultInputModes: [text]
       defaultOutputModes: [text]
+  # agent-musique (agents/agent-musique/): the record collection, from and into the Obsidian vault.
+  # It refuses any request without X-Agent-Token; the whole value must be the env reference.
+  - agent_name: agent-musique
+    static_headers:
+      X-Agent-Token: os.environ/AGENT_MUSIQUE_TOKEN
+    agent_card_params:
+      protocolVersion: "1.0"
+      name: agent-musique
+      description: "Ta collection de disques, depuis ton coffre Obsidian : répond et enregistre (qwen3.8, local)."
+      url: http://agent-musique:8000
+      version: "1"
+      capabilities:
+        streaming: false
+      defaultInputModes: [text]
+      defaultOutputModes: [text]
       skills: []
 
 litellm_settings:

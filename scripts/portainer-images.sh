@@ -54,3 +54,5 @@ build "infra-litellm-pgvector:${LITELLM_PGVECTOR_REF:0:7}" "https://github.com/B
 build "infra-mcp-obsidian:1" "https://github.com/nicolaslallier/Infra.git#main:mcp/obsidian"
 # The A2A test agent (agents/agent-test/), same rule as the Obsidian MCP server above.
 build "infra-agent-test:1" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-test"
+# The record-collection A2A agent (agents/agent-musique/), same rule.
+build "infra-agent-musique:1" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-musique"
