@@ -300,23 +300,23 @@ else
 fi
 FAKE
 	chmod +x "$sb/bin/curl"
-	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\ntok-f\n'
+	good=$'tok-a\ntok-b\ntok-c\ntok-d\ntok-e\ntok-f\ntok-g\n'
 	if out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$good" 2>&1)" \
-		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 6 ] \
+		&& [ "$(grep -c '^GH_RUNNER_TOKEN_[A-Z]*=' "$sb/.runner.env")" = 7 ] \
 		&& [ "$(stat -c %a "$sb/.runner.env" 2>/dev/null || stat -f %Lp "$sb/.runner.env")" = 600 ]; then
-		pass "gen-runner-env writes six tokens, mode 600"
+		pass "gen-runner-env writes seven tokens, mode 600"
 	else
-		fail "gen-runner-env writes six tokens, mode 600" "$out"
+		fail "gen-runner-env writes seven tokens, mode 600" "$out"
 	fi
 	rm -f "$sb/.runner.env"
-	bad=$'tok-a\ntok-404\ntok-c\ntok-d\ntok-e\ntok-f\n'
+	bad=$'tok-a\ntok-404\ntok-c\ntok-d\ntok-e\ntok-f\ntok-g\n'
 	out="$(cd "$sb" && PATH="$sb/bin:$PATH" bash scripts/gen-runner-env.sh <<<"$bad" 2>&1)"; code=$?
 	if [ "$code" -ne 0 ] && grep -qF nicolaslallier/EA <<<"$out" && [ ! -e "$sb/.runner.env" ]; then
 		pass "gen-runner-env rejects EA's 404 token, names the repo, writes nothing"
 	else
 		fail "gen-runner-env rejects EA's 404 token, names the repo, writes nothing" "exit $code: $out"
 	fi
-	printf 'GH_RUNNER_TOKEN_%s=t\n' DARKANGEL EA HEAVEN INFRA MORIA AI >"$sb/.runner.env"
+	printf 'GH_RUNNER_TOKEN_%s=t\n' DARKANGEL EA HEAVEN INFRA MORIA AI RAG >"$sb/.runner.env"
 	out="$(cd "$sb" && FAKE_BUSY=heaven PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
 	if [ "$code" = 3 ] && grep -qF heaven-host <<<"$out"; then
 		pass "runner-status --busy: busy heaven runner -> exit 3, named"
