@@ -830,19 +830,19 @@ Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
 **Application logs**, **Jarvis** (`uid: jarvis-overview`) covering
 API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs and
 Tempo traces, **Windows machines** (`uid: windows-hosts`), **macOS
-machines** (`uid: macos-hosts`), and **Agents** (`uid: agents-overview`):
-one screen over DarkAngel, Jarvis, EA, LibreChat, LiteLLM, Prefect and
-Ollama (containers up, restarts and OOM kills, log errors, HTTP traffic,
-Prefect flow-run outcomes, Ollama tokens), linking to each app's own
-dashboard. Its container selectors are cAdvisor name regexes without a
-`job=` matcher on purpose, so an agent counts on the homelab and on the
-Colima VMs alike; its log panels only see the homelab (Alloy reads that
-Docker socket alone). **LiteLLM** (`uid: litellm-overview`) charts requests,
+machines** (`uid: macos-hosts`), and **LiteLLM** (`uid: litellm-overview`) charts requests,
 failures, latency, tokens, cost, cache hits and MCP tool calls per model and
 team from LiteLLM's spend log (LiteLLM exposes no `/metrics`), through the
 Postgres datasource `litellm-db`: role `grafana_litellm` may `SELECT` an
 allowlist of `"LiteLLM_SpendLogs"` columns only, never prompts, responses,
 metadata, keys or client addresses (`make provision-grafana-litellm`).
+It also carries two collapsed rows, **Agents** (DarkAngel, Jarvis, EA,
+LibreChat containers up, restarts and OOM kills, log errors, HTTP traffic)
+and **Flows Prefect** (flow-run outcomes), which the model/team variables do
+not filter. Their container selectors are cAdvisor name regexes without a
+`job=` matcher on purpose, so an agent counts on the homelab and on the
+Colima VM alike; their log panels only see the homelab (Alloy reads that
+Docker socket alone).
 
 ### Windows machines
 

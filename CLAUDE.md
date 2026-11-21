@@ -396,7 +396,8 @@ never orphans another app that's still attached to it):
   empty). Provisioned rules are read-only in the UI.
   Dashboard `litellm.json` (`uid: litellm-overview`) reads LiteLLM's
   spend log through the Postgres datasource `litellm-db` (LiteLLM has no
-  `/metrics`). Role `grafana_litellm` (`GRAFANA_LITELLM_DB_PASSWORD`,
+  `/metrics`); it also carries the collapsed rows Agents and Flows
+  Prefect (Prometheus and Loki). Role `grafana_litellm` (`GRAFANA_LITELLM_DB_PASSWORD`,
   `postgres/initdb/30-grafana-litellm-role.sh` via `make
   provision-grafana-litellm`) can SELECT an allowlist of
   `"LiteLLM_SpendLogs"` columns, never `messages`, `response`, `metadata`
