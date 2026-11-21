@@ -13,13 +13,13 @@ model_list:
   # the connection), the Mac Studio's through the stack's ollama-proxy next
   # (order 2). LAN address: .10's containers use the router's DNS. Used by
   # the dev sessions' Claude Code (the devbox CLI's [llm] model) and Jarvis.
-  # The Portail also calls it with a 300 s read budget (PORTAIL_LLM_DELAI_S).
+  # The Portail also calls it with an 840 s read budget (PORTAIL_LLM_DELAI_S).
   # num_retries: 0 per deployment: one attempt per order level, the router's
   # order fallback does the failover (a retry would restart at order 1). So
-  # the worst case is the sum of the timeouts: 120 + 170 = 290 < 300 (make
+  # the worst case is the sum of the timeouts: 120 + 700 = 820 < 840 (make
   # test checks it); a deployment without timeout waits ~6000 s. Non-streamed,
-  # the timeout is also the longest generation allowed: agent-musique and
-  # agent-test (600 s client delay) are now capped at ~290 s too.
+  # the timeout is also the longest generation allowed: 170 s cut long-context
+  # Portail prefills (408). Clients with a shorter delay give up first.
   - model_name: qwen3.8:27b-mlx
     litellm_params:
       model: ollama_chat/qwen3.8:27b-mlx
@@ -32,7 +32,7 @@ model_list:
     litellm_params:
       model: ollama_chat/qwen3.8:27b-mlx
       api_base: http://ollama-proxy:11434
-      timeout: 170
+      timeout: 700
       num_retries: 0
       order: 2
 

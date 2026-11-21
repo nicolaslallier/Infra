@@ -112,7 +112,7 @@ PORTAIL_MODELS = ("qwen3.8:27b-mlx",)
 
 
 def test_portail_models_fit_portail_budget():
-    # The Portail reads for 300 s (PORTAIL_LLM_DELAI_S). One attempt per order
+    # The Portail reads for 840 s (PORTAIL_LLM_DELAI_S in OpenBao infra/portail). One attempt per order
     # level, so the worst case is the sum of the deployments' timeouts.
     c = lp.load_spec(os.path.join(ROOT, "litellm", "config.yaml"))
     for name in PORTAIL_MODELS:
@@ -120,7 +120,7 @@ def test_portail_models_fit_portail_budget():
         assert ps, name
         assert all(p.get("num_retries") == 0 for p in ps), (name, ps)
         timeouts = [p.get("timeout") for p in ps]
-        assert None not in timeouts and sum(timeouts) < 300, (name, timeouts)
+        assert None not in timeouts and sum(timeouts) < 840, (name, timeouts)
 
 
 class FakeClient:
