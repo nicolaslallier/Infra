@@ -167,7 +167,7 @@ never orphans another app that's still attached to it):
   and check a cloud alias records spend > 0 (a model missing from the cost map
   counts 0).
   Memory is LiteLLM's native `/v1/memory` (rows in the `litellm` database, keys globally unique across
-  teams). From reading the 1.83.14 source (not run live): it is **admin-only** today, because a team key
+  teams). From reading the 1.108.14 source (not run live): it is **admin-only** today, because a team key
   has no `allowed_routes` for it, and even if granted, a key without a user can create a team row but
   never change or delete it (only a team admin or the master key can); the master key sees and rewrites
   every row. Real per-team or per-person memory needs `allowed_routes` on the keys and users under

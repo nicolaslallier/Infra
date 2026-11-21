@@ -182,7 +182,7 @@ services:
     # app (APP_DATABASES / make provision-app app=litellm).
     # Pinned by tag *and* digest: this container holds the master key and the
     # DB salt, and main-stable moves under every redeploy. Upgrade on purpose.
-    image: ghcr.io/berriai/litellm-database:v1.83.14-stable@sha256:da4ab06d9d57da205263877425544d6df8e78147737b0dd8dc1e9e93a6d8ac2e
+    image: ghcr.io/berriai/litellm-database:v1.108.14-lts@sha256:2758a0fe3d8844410a42b1cf22d69ed21a08628feb0a61e7c3490e02ee1eb6d1
     # liveliness needs no key.
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=4)"]

@@ -541,7 +541,7 @@ the REST route `/mcp-rest/tools/call` run the team check.
 
 ## LiteLLM: memory, skills, agents
 
-- **Memory** is LiteLLM's own `/v1/memory` (rows in the `litellm` database). Read from the 1.83.14
+- **Memory** is LiteLLM's own `/v1/memory` (rows in the `litellm` database). Read from the 1.108.14
   source, not run live: a team key cannot reach it (it has no `allowed_routes` for `/v1/memory`,
   so it answers "Only proxy admin..."), and a key without a user, even once granted the route, can
   create a team row but not update or delete it. Today it is **admin-only**: the master key sees and
