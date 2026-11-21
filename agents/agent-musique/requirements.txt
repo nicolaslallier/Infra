@@ -113,6 +113,8 @@ typing-extensions==4.16.0
     #   typing-inspection
 typing-inspection==0.4.5
     # via pydantic
+tzdata==2025.2
+    # via -r requirements.in
 urllib3==2.8.0
     # via
     #   botocore

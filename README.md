@@ -625,7 +625,8 @@ Setup of `agent-musique` (once, on the host, before merging, in this order):
    then `make vault-env`.
 2. `./scripts/provision-s3.sh agent-musique obsidian 0 Read,Write,List` (identity `agent-musique`,
    whole bucket; directly, since `make s3-provision` runs `check-env`, which still lacks the key below).
-3. `set -a; . ./.env; set +a; uv run -q --no-project --with pyyaml python scripts/litellm_provision.py`
+3. From the branch (its `teams.yaml` has the new key; `main` does not yet):
+   `set -a; . ./.env; set +a; uv run -q --no-project --with pyyaml python scripts/litellm_provision.py`
    (prints the `agent-musique` key once).
 4. `make vault-cli args="kv patch -mount=infra env AGENT_MUSIQUE_LITELLM_KEY=<key>"`, then
    `make vault-env`. All three keys must be in the vault before the merge, or `check-env` fails the Deploy.
