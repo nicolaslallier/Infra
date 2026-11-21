@@ -46,6 +46,14 @@ def test_docs_say_memory_is_per_team_skills_are_closed_and_there_is_no_agent():
         assert needle in readme, f"README.md does not mention {needle}"
 
 
+def test_cache_ping_is_get_only_and_the_rest_of_cache_stays_closed():
+    ping = re.search(r"location\s+=\s+/cache/ping\s*\{(.*?)\n    \}", CONF, re.S)
+    assert ping, "no exact location for /cache/ping"
+    assert "limit_except GET { deny all; }" in ping.group(1)
+    assert "proxy_pass $upstream;" in ping.group(1)
+    assert re.search(r"location\s+~\*\s+\^/cache\(/\|\$\)\s*\{\s*return 403;", CONF)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
