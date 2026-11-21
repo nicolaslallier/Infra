@@ -55,4 +55,4 @@ build "infra-mcp-obsidian:1" "https://github.com/nicolaslallier/Infra.git#main:m
 # The A2A test agent (agents/agent-test/), same rule as the Obsidian MCP server above.
 build "infra-agent-test:1" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-test"
 # The record-collection A2A agent (agents/agent-musique/), same rule.
-build "infra-agent-musique:1" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-musique"
+build "infra-agent-musique:2" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-musique"
