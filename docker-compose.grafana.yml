@@ -78,6 +78,9 @@ services:
       # Alert delivery token for ntfy (the data stack, on this host's
       # infra-net); see monitoring/grafana/provisioning/alerting.
       GRAFANA_NTFY_TOKEN: ${GRAFANA_NTFY_TOKEN:-}
+      # Password of the read-only role behind the "LiteLLM DB" datasource
+      # (provisioning/datasources); make provision-grafana-litellm creates it.
+      GRAFANA_LITELLM_DB_PASSWORD: ${GRAFANA_LITELLM_DB_PASSWORD:?Set GRAFANA_LITELLM_DB_PASSWORD in .env (openssl rand -hex 24)}
     # The datasources' hosts, on the homelab (nginx/conf.d/monitoring-lan.conf).
     # nginx (grafana.infra.famillelallier.net, homelab) proxies to :3000.
     # Plain HTTP on the LAN, like Keycloak; the router forwards nothing here.

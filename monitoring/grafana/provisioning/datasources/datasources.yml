@@ -53,3 +53,24 @@ datasources:
         enabled: true
       lokiSearch:
         datasourceUid: loki
+
+  # LiteLLM's spend log, read from its database: LiteLLM exposes no /metrics
+  # (the prometheus callback is enterprise-only). Role grafana_litellm can
+  # SELECT an allowlist of "LiteLLM_SpendLogs" columns and nothing else
+  # (make provision-grafana-litellm).
+  - name: LiteLLM DB
+    type: grafana-postgresql-datasource
+    uid: litellm-db
+    access: proxy
+    url: postgres:5432
+    user: grafana_litellm
+    editable: false
+    jsonData:
+      database: litellm
+      sslmode: disable
+      postgresVersion: 1800
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    secureJsonData:
+      password: ${GRAFANA_LITELLM_DB_PASSWORD}

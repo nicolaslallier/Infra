@@ -394,6 +394,13 @@ never orphans another app that's still attached to it):
   contact point `ntfy` posts to topic `alerts-infra` using `GRAFANA_NTFY_TOKEN`
   (`make ntfy-provision app=grafana topic=alerts`; `check-env` only warns when
   empty). Provisioned rules are read-only in the UI.
+  Dashboard `litellm.json` (`uid: litellm-overview`) reads LiteLLM's
+  spend log through the Postgres datasource `litellm-db` (LiteLLM has no
+  `/metrics`). Role `grafana_litellm` (`GRAFANA_LITELLM_DB_PASSWORD`,
+  `postgres/initdb/30-grafana-litellm-role.sh` via `make
+  provision-grafana-litellm`) can SELECT an allowlist of
+  `"LiteLLM_SpendLogs"` columns, never `messages`, `response`, `metadata`
+  or keys. Re-run the target after a LiteLLM upgrade recreates the table.
 - **Windows machines** — no service of this stack at all: `windows_exporter`
   runs *on* each Windows host and Prometheus scrapes it over the LAN as job
   `windows`. See "Windows machines (`windows_exporter`)" below.
@@ -1421,7 +1428,8 @@ mini, Portainer environment 7, next to the `data` stack, on the volumes
   checkout, and `postgres/initdb` only runs on an empty volume anyway. On a
   brand-new empty cluster (disaster recovery), restore the latest
   `pg_dumpall` from infra-backups instead, or run `make provision-app` for
-  each app and `make provision-monitoring-role`.
+  each app, `make provision-monitoring-role` and `make
+  provision-grafana-litellm` (after LiteLLM has created its tables).
 - **`docker compose exec postgres` does not work from the homelab.** Use
   `make psql`, `make provision-app`, etc.: they go through `scripts/lib/pg.sh`.
 - **Health is not gated by the deploy** (remote environment): check the
