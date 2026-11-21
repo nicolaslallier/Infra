@@ -91,6 +91,12 @@ if out="$(python3 scripts/test_litellm_routes.py 2>&1)"; then
 else
 	fail "scripts/test_litellm_routes.py" "$out"
 fi
+echo "== portail vhost: security headers, /metrics and /interne closed, streams"
+if out="$(python3 scripts/test_portail_vhost.py 2>&1)"; then
+	pass "scripts/test_portail_vhost.py"
+else
+	fail "scripts/test_portail_vhost.py" "$out"
+fi
 echo "== vault indexer (chunking, diff, exclusions, COPY escaping)"
 if out="$(python3 scripts/test_index_vault.py 2>&1)"; then
 	pass "scripts/test_index_vault.py"
