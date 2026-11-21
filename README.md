@@ -337,8 +337,11 @@ later, once `http://rag:8000/mcp` answers.
 The authoritative copy is the RAG repo's
 `docs/superpowers/plans/2026-11-21-rag-maitre-infra.md`.
 
-**Order matters: `make up`, `pull` and `config` fail until
-`RAG_DB_PASSWORD` and `RAG_S3_SECRET_KEY` are in the vault.**
+**Order matters: do steps 1 and 2 BEFORE merging this repo's RAG change,
+or the Deploy on `main` goes red: `make up`, `pull` and `config` fail
+(`check-env`) until `RAG_DB_PASSWORD` and `RAG_S3_SECRET_KEY` are in the vault
+and rendered. Run `make vault-env` in the checkout the Deploy uses
+(`INFRA_CHECKOUT`).**
 
 1. Database: `openssl rand -hex 24`, then
    `make vault-cli args="kv patch -mount=infra env RAG_DB_PASSWORD=... APP_DATABASES=<current list>,rag"`,
@@ -361,9 +364,12 @@ The authoritative copy is the RAG repo's
    The token goes into the `BAO_TOKEN` secret of the RAG repo's `production`
    environment. Check its reach as for the Portail
    (`.../v1/infra/data/env` must answer 403).
-6. Runner: a PAT for `nicolaslallier/RAG` as `GH_RUNNER_TOKEN_RAG` in
-   `.runner.env` (`scripts/gen-runner-env.sh`), then `make runners-up`,
-   `make runners-status`. `runner-rag` mounts `certs/infra-ca.crt` at
+6. Runner: the repo github.com/nicolaslallier/RAG exists (private). Add a
+   PAT for it to `.runner.env` by hand (`GH_RUNNER_TOKEN_RAG=...`), or run
+   `make runners-env FORCE=1`, which asks for all seven PATs again. Then
+   `make runners-up`, `make runners-status`. Until that token is there,
+   `make runners-up` and `runners-pull` fail by name; the six runners already
+   up are not touched. `runner-rag` mounts `certs/infra-ca.crt` at
    `/etc/rag/infra-ca.crt`.
 
 **Values kept twice, both copies must match**: `RAG_DB_PASSWORD` and
@@ -921,10 +927,10 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make psql` | Open a psql shell as the superuser |
 | `make portainer-up` / `make portainer-down` | Start / stop Portainer (its own compose project, `docker-compose.portainer.yml`) |
 | `make portainer-restart` / `make portainer-logs` | Restart Portainer / tail its logs |
-| `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (six self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
-| `make runners-logs` | Tail the six runners' logs (on the Docker host) |
+| `make runners-up` / `-pull` / `-restart` / `-down` | Redeploy / re-pull and redeploy / redeploy / stop the `runners` Portainer stack (seven self-hosted runners, `docker-compose.runners.yml`). All recreate every runner and refuse while a job runs (`FORCE=1` overrides) |
+| `make runners-logs` | Tail the seven runners' logs (on the Docker host) |
 | `make runners-status` | Per repo: running here, and registered at GitHub with its label? |
-| `make runners-env` | Write `.runner.env` from six per-repo PATs, checking each first (`FORCE=1` replaces it) |
+| `make runners-env` | Write `.runner.env` from seven per-repo PATs, checking each first (`FORCE=1` replaces it) |
 | `make pull` | Redeploy via Portainer, re-pulling images (same preflight as `make up`) |
 | `make config` | Validate `docker-compose.yml` + `.env` |
 | `make check-env` | Check `.env` on its own: settings missing since `.env.example` grew, placeholders, unusable oauth2-proxy cookie keys, a `LAN_IP` the Docker host doesn't own, a missing `openbao/seal.key` |
@@ -1270,20 +1276,20 @@ container, `dns` included, so it costs a brief LAN DNS outage.
 
 It runs on a **self-hosted runner**, and has to: Portainer's API is on
 `${LAN_IP}:9443` and otherwise only on `infra-net`, with no public ingress,
-so a GitHub-hosted runner cannot reach it. There are six runners
-(`ai`, `darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo), together a
+so a GitHub-hosted runner cannot reach it. There are seven runners
+(`ai`, `darkangel`, `ea`, `heaven`, `infra`, `moria`, `rag`, one per repo), together a
 Portainer stack `runners` of their own — outside `infra`, so a `make up` never
 recreates a runner mid-job. Portainer reads `docker-compose.runners.yml` from
 GitHub main: merge before `make runners-up`.
 
-Setup is six tokens, a `make`, and one settings change:
+Setup is seven tokens, a `make`, and one settings change:
 
 ```bash
 # 1. one fine-grained PAT per repo, Administration: read and write on that
 #    repo only (GitHub -> Settings -> Developer settings; minted in the web UI).
 #    Caveat: a compromised job on darkangel, heaven or infra (they hold the
-#    Docker socket) can read all six tokens off the other runners.
-make runners-env        # paste the six; writes .runner.env, mode 600
+#    Docker socket) can read all seven tokens off the other runners.
+make runners-env        # paste the seven; writes .runner.env, mode 600
 
 # 2. .portainer.env needs PORTAINER_API_KEY and PORTAINER_PINNEDPUBKEY
 #    (INFRA_HOST comes from the Makefile; PORTAINER_URL optionally overrides);
@@ -1299,7 +1305,7 @@ nothing about whether GitHub still has a runner for the next one. A job whose
 labels match nothing queues silently rather than failing.
 
 `runners-up`, `-down`, `-pull` and `-restart` are stack redeploys that recreate
-all six runners, so they refuse while any job is running;
+all seven runners, so they refuse while any job is running;
 `FORCE=1 make runners-down` overrides. If GitHub cannot be reached to ask they
 warn and continue. `make runners-pull` is the fix for a runner GitHub has
 stopped accepting (the image tag moves on purpose).

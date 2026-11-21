@@ -722,16 +722,17 @@ Several things here are load-bearing.
   A missing one fails `runners-up` by name rather than starting six of seven.
 - **Privileges differ per runner.** The Docker socket (root on the daemon) is
   mounted only on `darkangel`, `heaven` and `infra`, whose deploys need it;
-  `ai`, `ea` and `moria` get none. `ai` and `ea` hold deploy secrets instead
+  `ai`, `ea`, `moria` and `rag` get none. `ai`, `ea` and `rag` hold deploy secrets instead
   (repo secrets `PORTAINER_API_KEY` and `BAO_TOKEN`) and call Portainer and
   OpenBao by URL: each has the Infra CA at `/etc/<label>/infra-ca.crt` and
   `extra_hosts` pinning both vhosts to the LAN address. `moria` holds none.
   `ai` also runs its jobs as `runner` with `no-new-privileges` and tmpfs on
-  `/_work`, `/tmp`, `/home/runner`; `/actions-runner` still survives a
-  restart, so it is not a fresh container per job (README, Portail).
+  `/_work`, `/tmp`, `/home/runner`, and so does `rag` (CA at
+  `/etc/rag/infra-ca.crt`); `/actions-runner` still survives a
+  restart, so it is not a fresh container per job (README, Portail, RAG).
   A runner is scoped to one repo, so a workflow elsewhere cannot use it.
 - **Self-hosted labels are never for PRs.** No workflow running on one of the
-  six labels may trigger on `pull_request`/`pull_request_target`; PR checks
+  seven labels may trigger on `pull_request`/`pull_request_target`; PR checks
   (`test.yml`) run GitHub-hosted. `main` in each repo is meant to be guarded
   by a PR-required ruleset (`main-protection`, no bypass actors), applied
   repo by repo with the owner's go-ahead, Infra last: apply infra only after
@@ -782,9 +783,9 @@ the next deploy, and a job matching no labels queues silently instead of
 failing. It separates a PAT GitHub refuses (named, per repo: the 401 loop in
 `make runners-logs`) from a GitHub it cannot reach (a warning). The fix for a
 bad PAT is `make runners-env FORCE=1 && make runners-up`; `gen-runner-env.sh`
-validates all six when it writes them, but PATs expire afterwards.
+validates all seven when it writes them, but PATs expire afterwards.
 **`runners-up`, `-down`, `-pull` and `-restart` are stack redeploys** that
-recreate all six runners, and refuse while *any* runner has a job (exit 3;
+recreate all seven runners, and refuse while *any* runner has a job (exit 3;
 `FORCE=1` overrides): recreating mid-job kills it and the run never reports.
 `runners-restart` is `runners-up`. `runners-pull` re-pulls the image, whose
 tag moves on purpose (GitHub retires old runner versions server-side). Only
@@ -794,7 +795,7 @@ daemon), as is the container half of `runners-status`.
 
 `INFRA_CHECKOUT` and `INFRA_HOST` come from repository variables
 (Settings → Secrets and variables → Actions → Variables) and fall back to the
-two values the Makefile already hard-codes for the Mac. The six PATs live in
+two values the Makefile already hard-codes for the Mac. The seven PATs live in
 `.runner.env`, gitignored, for the reason `PORTAINER_API_KEY` lives in
 `.portainer.env`. `make runners-env` (`scripts/gen-runner-env.sh`) writes that
 file after asking GitHub for each repo's `/actions/runners` with its token,
