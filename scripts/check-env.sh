@@ -84,6 +84,7 @@ REQUIRED=(
 	GITHUB_MCP_TOKEN
 	OBSIDIAN_MCP_TOKEN
 	OBSIDIAN_MCP_S3_SECRET_KEY
+	RAG_S3_SECRET_KEY
 	AGENT_TEST_LITELLM_KEY
 	AGENT_MUSIQUE_LITELLM_KEY
 	AGENT_MUSIQUE_TOKEN
@@ -295,6 +296,10 @@ fi
 if [ -n "${PORTAIL_DB_PASSWORD:-}" ] && [ "$PORTAIL_DB_PASSWORD" != "$PLACEHOLDER" ] \
 	&& ! [[ "$PORTAIL_DB_PASSWORD" =~ ^[A-Za-z0-9]+$ ]]; then
 	errors+=("PORTAIL_DB_PASSWORD must be letters and digits only (it goes into a postgresql:// URL); generate one with \"openssl rand -hex 24\"")
+fi
+if [ -n "${RAG_DB_PASSWORD:-}" ] && [ "$RAG_DB_PASSWORD" != "$PLACEHOLDER" ] \
+	&& ! [[ "$RAG_DB_PASSWORD" =~ ^[A-Za-z0-9]+$ ]]; then
+	errors+=("RAG_DB_PASSWORD must be letters and digits only (it goes into a postgresql:// URL); generate one with \"openssl rand -hex 24\"")
 fi
 
 # Prefect's basic auth splits the string on its first ':'. Without one, every
