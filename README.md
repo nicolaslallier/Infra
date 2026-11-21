@@ -570,7 +570,8 @@ the REST route `/mcp-rest/tools/call` run the team check.
   To add an agent: `agents:` in `config.yaml` and in `mcp_policy.yaml`, and its own exact
   `location` in `nginx/conf.d/litellm.conf`.
 - **`agent-musique`** (`agents/agent-musique/`, `mcp` stack), opened the same way at
-  `POST /v1/a2a/agent-musique/message/send`, team `admin` only. It helps with the record collection
+  `POST /v1/a2a/agent-musique/message/send`, teams `admin` and `apps` (the Portail backend calls
+  `http://litellm:4000` with its key `ai`). It helps with the record collection
   from the Obsidian vault in S3 (bucket `obsidian`, under `02 - Domaines/Loisirs/Musique/`):
   each message loads `Discographie.md` into the prompt, then at most 6 tool rounds (temperature 0)
   of `lire_disque`, `chercher`, `enregistrer_disque`; the answer separates "Dans ta collection"
@@ -642,7 +643,7 @@ MSG='{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messag
 curl -s -H "Authorization: Bearer $A" -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
   -d "$MSG" $URL/v1/a2a/agent-musique/message/send                       # answer + "Sources : ..."
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" -H 'Content-Type: application/json' \
-  -H 'A2A-Version: 1.0' -d "$MSG" $URL/v1/a2a/agent-musique/message/send   # 403 (agent-policy): apps
+  -H 'A2A-Version: 1.0' -d "$MSG" $URL/v1/a2a/agent-musique/message/send   # 200: apps (the Portail) is allowed too
 docker exec mcp-agent-musique-1 python3 -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/')" \
   2>&1 | grep -o 'HTTP Error 401'                                         # no token: 401
 ```

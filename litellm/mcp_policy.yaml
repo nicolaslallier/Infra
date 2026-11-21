@@ -52,7 +52,7 @@ agents:
   agent-test:
     teams: [admin]
   agent-musique:
-    teams: [admin]
+    teams: [admin, apps]  # apps: the Portail backend (key `ai`), over infra-net
 
 # A file write must name a branch, and not a default one: an unprotected repo with a runner
 # would run it. (A default branch with an unusual name is the repo ruleset's job.)
