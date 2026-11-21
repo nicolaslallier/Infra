@@ -310,6 +310,72 @@ something outside Compose to recreate it (e.g. actions-runner-controller);
 until then the gate is the fork-PR approval above plus the `production`
 environment.
 
+### RAG (RAG repo)
+
+The RAG service (github.com/nicolaslallier/RAG): search and answers over the
+Obsidian vault and the code. Two containers, `rag` (API, port 8000) and
+`rag-indexeur`, on `infra-net`, in the RAG repo's own Portainer stack
+(`deploy/portainer-stack.yml`) — not a row of `stacks.conf`, no vhost, no
+published port, no Prometheus target. This repo provides its database, a
+read-only S3 identity on the vault, a LiteLLM key limited to local models,
+its vault secret's policy and its runner. The MCP entry in LiteLLM comes
+later, once `http://rag:8000/mcp` answers.
+
+| Item | Value | Provided by |
+|---|---|---|
+| Network | `infra-net` (external); no published port, no NGINX vhost | Infra |
+| Stack | Portainer `rag`, services `rag` (API, port 8000) and `rag-indexeur` | RAG |
+| Image | `ghcr.io/nicolaslallier/rag:sha-<7 chars>` (private package) | RAG |
+| Database | database `rag`, role `rag`, host `postgres:5432`, `RAG_DB_PASSWORD` (letters and digits only); `vector` created by `make provision-app`, `unaccent`/`pg_trgm` by the RAG migration | Infra provisions, RAG migrates |
+| OpenBao | KV v2 secret `infra/rag` (API path `infra/data/rag`), policy `rag-deploy`; keys `RAG_DB_PASSWORD`, `RAG_LITELLM_CLE`, `RAG_JETON`, `RAG_JETON_PRIVE` (optional), `RAG_JETON_REINDEXER`, `RAG_GITHUB_JETON`, `RAG_S3_SECRET_KEY`, `RAG_COFFRE_PREFIXE` (optional) | Infra (policy), Nicolas (values) |
+| LiteLLM | `http://litellm:4000`, key alias `rag`, team `agents` (local models only) | Infra |
+| S3 | `http://s3:8333`, bucket `obsidian`, identity `rag` **`Read,List`**, `RAG_S3_SECRET_KEY`; `RAG_COFFRE_PREFIXE` = `ORGANIZER_VAULT_PREFIX` | Infra |
+| GitHub | `RAG_GITHUB_JETON`: fine-grained, `Contents: Read` on `nicolaslallier/*` | Nicolas |
+| MCP | LiteLLM `mcp_servers.rag` → `http://rag:8000/mcp`, bearer `RAG_MCP_TOKEN` (= `RAG_JETON`), teams `[admin]` (later PR) | Infra (config), RAG (server) |
+| Runner | `runner-rag`, label `rag`, repo `nicolaslallier/RAG`, `GH_RUNNER_TOKEN_RAG`, no Docker socket | Infra |
+
+The authoritative copy is the RAG repo's
+`docs/superpowers/plans/2026-11-21-rag-maitre-infra.md`.
+
+**Order matters: `make up`, `pull` and `config` fail until
+`RAG_DB_PASSWORD` and `RAG_S3_SECRET_KEY` are in the vault.**
+
+1. Database: `openssl rand -hex 24`, then
+   `make vault-cli args="kv patch -mount=infra env RAG_DB_PASSWORD=... APP_DATABASES=<current list>,rag"`,
+   `make vault-env`, `make provision-app app=rag`.
+2. S3: `openssl rand -hex 24`, then
+   `make vault-cli args="kv patch -mount=infra env RAG_S3_SECRET_KEY=..."`,
+   `make vault-env`, `make s3-provision app=rag bucket=obsidian actions=Read,List`.
+   Check that a write with this identity is refused.
+3. LiteLLM key: `make litellm-provision` prints the `rag` key once.
+4. The RAG's GitHub token: fine-grained, `Contents: Read` on the repos to index.
+5. The deploy's secret, policy and token
+   (`openbao/policies/rag-deploy.hcl`: `read` on `infra/data/rag` only):
+
+   ```bash
+   make vault-cli args="kv put -mount=infra rag RAG_DB_PASSWORD=<step 1> RAG_S3_SECRET_KEY=<step 2> RAG_LITELLM_CLE=sk-... RAG_GITHUB_JETON=github_pat_... RAG_JETON=$(openssl rand -hex 32) RAG_JETON_REINDEXER=$(openssl rand -hex 32) RAG_COFFRE_PREFIXE=<value of ORGANIZER_VAULT_PREFIX>"
+   make vault-cli args="policy write rag-deploy -" < openbao/policies/rag-deploy.hcl
+   make vault-cli args="token create -policy=rag-deploy -period=768h -orphan -display-name=rag-deploy -field=token"
+   ```
+
+   The token goes into the `BAO_TOKEN` secret of the RAG repo's `production`
+   environment. Check its reach as for the Portail
+   (`.../v1/infra/data/env` must answer 403).
+6. Runner: a PAT for `nicolaslallier/RAG` as `GH_RUNNER_TOKEN_RAG` in
+   `.runner.env` (`scripts/gen-runner-env.sh`), then `make runners-up`,
+   `make runners-status`. `runner-rag` mounts `certs/infra-ca.crt` at
+   `/etc/rag/infra-ca.crt`.
+
+**Values kept twice, both copies must match**: `RAG_DB_PASSWORD` and
+`RAG_S3_SECRET_KEY` in `infra/env` (read by `make provision-app` and
+`make s3-provision`) and in `infra/rag` (the RAG deploy); later
+`RAG_MCP_TOKEN` (`infra/env`, read by LiteLLM) = `RAG_JETON` (`infra/rag`).
+Rotate `RAG_DB_PASSWORD`: patch both, `make vault-env`,
+`make provision-app app=rag`, redeploy the RAG. Rotate `RAG_S3_SECRET_KEY`:
+`make s3-provision app=rag bucket=obsidian actions=Read,List` (it rotates),
+copy the new value into `infra/rag`, redeploy the RAG. Rotate `RAG_JETON`:
+new value in `infra/rag` (and `RAG_MCP_TOKEN` once it exists), redeploy both.
+
 ### Jarvis login (Keycloak + oauth2-proxy)
 
 `https://jarvis.famillelallier.net` requires a Keycloak login (every other app listed
