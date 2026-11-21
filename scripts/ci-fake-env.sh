@@ -79,7 +79,7 @@ mkdir -p openbao
 head -c 32 /dev/urandom > openbao/seal.key
 chmod 600 openbao/seal.key
 
-# The runners' compose (docker-compose.runners.yml) guards six PATs in .runner.env.
+# The runners' compose (docker-compose.runners.yml) guards seven PATs in .runner.env.
 # Same guard as .env: the real one holds real PATs.
 if [ -f .runner.env ] && [ "${CI_FAKE_ENV_FORCE:-0}" != "1" ]; then
 	echo "ci-fake-env: refusing to overwrite an existing .runner.env in $PWD (CI_FAKE_ENV_FORCE=1 to force)." >&2

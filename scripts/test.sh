@@ -211,7 +211,7 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		else
 			fail "seven runner-<name> services" "got: $names"
 		fi
-		for n in ai darkangel ea heaven infra moria; do
+		for n in ai darkangel ea heaven infra moria rag; do
 			if jq -e --arg n "$n" '.services["runner-"+$n].environment | .LABELS == $n and .EPHEMERAL == "true" and .DISABLE_AUTO_UPDATE == "true"' <<<"$cfg" >/dev/null; then
 				pass "runner-$n label, EPHEMERAL, no self-update"
 			else
@@ -224,12 +224,14 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 		else
 			fail "docker socket only on darkangel, heaven, infra" "got: $socks"
 		fi
-		if jq -e '.services["runner-ai"] | .environment.RUN_AS_ROOT == "false" and .environment.UNSET_CONFIG_VARS == "true" and (.security_opt | index("no-new-privileges:true")) and (.volumes | all(.source != "/var/run/docker.sock" and .type != "volume"))' <<<"$cfg" >/dev/null; then
-			pass "runner-ai: non-root, config vars unset, no-new-privileges, no socket or named volume"
-		else
-			fail "runner-ai: non-root, config vars unset, no-new-privileges, no socket or named volume"
-		fi
-		for n in ai ea; do
+		for n in ai rag; do
+			if jq -e --arg n "$n" '.services["runner-"+$n] | .environment.RUN_AS_ROOT == "false" and .environment.UNSET_CONFIG_VARS == "true" and (.security_opt | index("no-new-privileges:true")) and (.volumes | all(.source != "/var/run/docker.sock" and .type != "volume"))' <<<"$cfg" >/dev/null; then
+				pass "runner-$n: non-root, config vars unset, no-new-privileges, no socket or named volume"
+			else
+				fail "runner-$n: non-root, config vars unset, no-new-privileges, no socket or named volume"
+			fi
+		done
+		for n in ai ea rag; do
 			if jq -e --arg n "$n" '.services["runner-"+$n] | any(.volumes[]?; .target == "/etc/\($n)/infra-ca.crt" and .read_only) and any(.extra_hosts[]?; startswith("vault.infra.famillelallier.net"))' <<<"$cfg" >/dev/null; then
 				pass "runner-$n: Infra CA at /etc/$n/infra-ca.crt, vault/portainer pinned"
 			else
@@ -510,8 +512,9 @@ FAKE
 		expect_reject "STS key not base64" "is not padded standard base64" "set_env S3_STS_SIGNING_KEY not-base64"
 		expect_reject "amqp password not url-safe" "MORIA_AMQP_PASSWORD must be letters and digits" "set_env MORIA_AMQP_PASSWORD 'a@b/c'"
 		expect_reject "portail db password not url-safe" "PORTAIL_DB_PASSWORD must be letters and digits" "set_env PORTAIL_DB_PASSWORD 'a@b/c'"
+		expect_reject "rag db password not url-safe" "RAG_DB_PASSWORD must be letters and digits" "set_env RAG_DB_PASSWORD 'a@b/c'"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
-		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY AGENT_MUSIQUE_LITELLM_KEY AGENT_MUSIQUE_TOKEN AGENT_MUSIQUE_S3_SECRET_KEY; do
+		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY RAG_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY AGENT_MUSIQUE_LITELLM_KEY AGENT_MUSIQUE_TOKEN AGENT_MUSIQUE_S3_SECRET_KEY; do
 			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
 			expect_reject "$k empty" "set but empty" "set_env $k ''"
 		done
