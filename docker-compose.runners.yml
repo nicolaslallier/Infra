@@ -1,5 +1,5 @@
 # The self-hosted GitHub Actions runners, one per repo (DarkAngel, EA, Heaven,
-# Infra, Moria, AI), deployed as their own Portainer stack. Their own compose
+# Infra, Moria, AI, RAG), deployed as their own Portainer stack. Their own compose
 # project, outside the "infra" stack: every `make up` force-recreates every
 # container in that stack (see CLAUDE.md "Portainer-managed stack"), and a
 # runner recreated mid-job is a job that never reports its result.
@@ -167,6 +167,32 @@ services:
       # The Infra CA (public cert, no key); the AI repo's INFRA_CA_CERT_PATH
       # variable defaults to this path.
       - ${INFRA_DIR:-.}/certs/infra-ca.crt:/etc/ai/infra-ca.crt:ro
+
+  runner-rag:
+    <<: *runner
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/nicolaslallier/RAG
+      RUNNER_NAME: rag-host
+      LABELS: rag
+      ACCESS_TOKEN: ${GH_RUNNER_TOKEN_RAG:?Set GH_RUNNER_TOKEN_RAG in .runner.env}
+      RUN_AS_ROOT: "false"
+      UNSET_CONFIG_VARS: "true"
+    # Same hardening as runner-ai: no Docker socket, no infra-net. The RAG
+    # repo's deploy holds PORTAINER_API_KEY and BAO_TOKEN (read infra/rag only,
+    # README) and calls Portainer's and OpenBao's APIs by URL.
+    extra_hosts:
+      - "portainer.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+      - "vault.infra.famillelallier.net:${PORTAINER_HOST_IP:-192.168.2.10}"
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /_work:exec
+      - /tmp:exec
+      - /home/runner:uid=1001,gid=121,mode=700
+    volumes:
+      # The Infra CA (public cert, no key), where the RAG repo's workflow reads it.
+      - ${INFRA_DIR:-.}/certs/infra-ca.crt:/etc/rag/infra-ca.crt:ro
 
 volumes:
   runner-darkangel-work:

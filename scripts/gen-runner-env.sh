@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Writes .runner.env -- what `make runners-up` needs: one GitHub PAT per repo
-# (GH_RUNNER_TOKEN_DARKANGEL|EA|HEAVEN|INFRA|MORIA|AI), each allowed to register
+# (GH_RUNNER_TOKEN_DARKANGEL|EA|HEAVEN|INFRA|MORIA|AI|RAG), each allowed to register
 # self-hosted runners on its own repo. The repos are listed in scripts/lib/runners.sh.
 #
 # The tokens themselves cannot be generated here, or by any script: GitHub
@@ -17,9 +17,9 @@
 # 403 from a container that then restarts forever -- `make runners-up` itself
 # reports success. The endpoint asked here is the one
 # scripts/runner-status.sh already uses, so a token that passes this check is
-# also a token that makes `make runners-status` work. All six are checked
-# before anything is written: a file with five good tokens and one bad one
-# would leave five runners up and the sixth silently absent.
+# also a token that makes `make runners-status` work. All seven are checked
+# before anything is written: a file with six good tokens and one bad one
+# would leave six runners up and the seventh silently absent.
 #
 # The file belongs to *this* checkout, not to the Docker host, even when the
 # daemon is remote (DOCKER_HOST=ssh://...): compose reads --env-file locally
