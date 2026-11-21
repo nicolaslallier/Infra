@@ -34,7 +34,7 @@ services:
     pid: host
     ports:
       # 9100 on the VM's address: the Mac's own node_exporter is on the
-      # Mac's address (.35 / .65), so the two never collide.
+      # Mac's address (.35 / .68), so the two never collide.
       - "9100:9100"
     mem_limit: 128m
 
