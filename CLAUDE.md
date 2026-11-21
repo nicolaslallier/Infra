@@ -240,6 +240,13 @@ never orphans another app that's still attached to it):
   `/v1/vector_stores/{id}/embeddings[/batch]` must use the same model.
   Secrets: `LITELLM_PGVECTOR_API_KEY`, `LITELLM_RAG_DB_PASSWORD`. infra-net
   only, no vhost.
+  `make index-vault [vault=<dir>]` (`scripts/index-vault.sh` +
+  `index_vault.py`, stdlib) fills `second-brain` from the Obsidian vault on the
+  Mac: litellm-pgvector has no delete/upsert, so it embeds changed notes through
+  LiteLLM (`/v1/embeddings`, `qwen3-embedding:0.6b`, master key) and writes in SQL
+  through `pg_run`, one transaction (rows tagged `metadata.source =
+  obsidian-maison`, keyed by `path` + `sha256`; deleted/changed notes purged,
+  `file_counts`/`usage_bytes` recomputed). Refuses an empty vault.
 - **`mcp-github`** / **`mcp-obsidian`** — the MCP servers behind LiteLLM, their own stack
   (`docker-compose.mcp.yml`, `stacks.conf` row `mcp`, homelab, before `platform`: a
   `platform` redeploy must not cut the tools; LiteLLM picks up a server that comes up later).
