@@ -4,6 +4,7 @@ Run: uv run -q --no-project --with pyyaml --with "litellm[proxy]==<tag>" python 
 """
 import asyncio
 import copy
+import hashlib
 import json
 import os
 import re
@@ -404,6 +405,38 @@ def test_a_github_write_to_a_default_branch_is_refused():
             refused(lambda: mcp_call(guard(), tool, args=dict(args)), 403)
     mcp_call(guard(), "create_or_update_file", args={"branch": "claude/feature"})
     mcp_call(guard(), "push_files", args={"branch": "claude/feature"})
+
+
+def a2a_call(g, agent_id, team="admin", auth=True):
+    """What the A2A route hands the gate (litellm 1.108.14, a2a_endpoints.py)."""
+    data = {"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "agent_id": agent_id,
+            "model": "a2a_agent/agent-test", "custom_llm_provider": "a2a_agent",
+            "params": {"message": {"parts": [{"text": "Marie Tremblay, a@b.co"}]}}}
+    key = UserAPIKeyAuth(team_id=team) if auth else None
+    return asyncio.run(g.async_pre_call_hook(user_api_key_dict=key, cache=None, data=data, call_type="asend_message"))
+
+
+def test_the_config_agent_id_is_sha256_of_its_name():
+    from litellm.proxy.agent_endpoints.agent_registry import global_agent_registry
+    assert global_agent_registry._create_agent_id({"agent_name": "agent-test"}) == hashlib.sha256(b"agent-test").hexdigest()
+
+
+def test_an_a2a_call_is_allowed_for_admin_only_and_not_masked():
+    at = hashlib.sha256(b"agent-test").hexdigest()
+    before = STUB.calls
+    out = a2a_call(guard(), at)
+    assert out["params"]["message"]["parts"][0]["text"] == "Marie Tremblay, a@b.co" and STUB.calls == before
+    for team in ("famille", "apps", "dev-sessions", None):
+        refused(lambda: a2a_call(guard(), at, team=team), 403)
+    refused(lambda: a2a_call(guard(), at, auth=False), 403)
+    for other in ("agent-test", hashlib.sha256(b"other").hexdigest(), None):
+        refused(lambda: a2a_call(guard(), other), 403)
+
+
+def test_an_agent_as_a_model_is_refused_for_everyone():
+    for model in ("a2a/agent-test", "A2A/agent-test"):
+        for team in ("admin", "apps"):
+            refused(lambda: call(guard(), model, [{"role": "user", "content": "x"}], team=team), 403)
 
 
 def test_mcp_arguments_are_not_masked_and_need_no_model():

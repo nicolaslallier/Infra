@@ -423,9 +423,10 @@ password from inside the admin console instead.
 
 ## LiteLLM: teams and budgets
 
-`litellm/teams.yaml` declares four teams (`admin`, `famille`, `apps`,
-`dev-sessions`), their users, their virtual keys and a 200 CAD/month cap in all
-(`admin` is the 30 CAD reserve; the other caps are 30, 70 and 70). Cloud models
+`litellm/teams.yaml` declares five teams (`admin`, `famille`, `apps`,
+`dev-sessions`, `agents`), their users, their virtual keys and a 200 CAD/month cap in all
+(`admin` is the 29 CAD reserve; the other caps are 30, 70, 70 and 1, `agents` being the A2A
+agents' own keys, local models only). Cloud models
 are opt-in per team through its `models:` list. The file is in CAD; LiteLLM
 counts in USD, so it holds one `cad_to_usd` factor, and
 `litellm_settings.max_budget` in `litellm/config.yaml` is the same cap in USD
@@ -551,11 +552,26 @@ the REST route `/mcp-rest/tools/call` run the team check.
   "/v1/memory/*"]` and add the family under `users:` in `litellm/teams.yaml` (`users: []` today), then
   `make litellm-provision`; neither is done here, so check live before relying on it. LiteLLM does not
   read memory back into prompts; text an agent re-sends to a cloud model is masked by the gate.
-- **Skills** (`/v1/skills`) and **A2A agents** (`/a2a/...`, `/v1/a2a/...`) answer 403 at
-  `litellm.infra.famillelallier.net`. A container calling `litellm:4000` directly is not covered.
-  No agent is registered: Jarvis does not speak A2A. To open one later, re-open `/v1/a2a/` for that
-  agent only, check whether LiteLLM runs the pre-call hook for A2A (a registered agent can also be
-  called as model `a2a/<name>` on `/v1/chat/completions`), and add the team check to `cloud_pii.gate`.
+- **Skills** (`/v1/skills`) answer 403 at `litellm.infra.famillelallier.net`. A container calling
+  `litellm:4000` directly is not covered.
+- **A2A agents** (`/a2a/...`, `/v1/a2a/...`) answer 403 at the vhost too, except
+  `POST /v1/a2a/agent-test/message/send`. One agent is registered, `agent-test`
+  (`agents/agent-test/`, in the `mcp` stack): it answers with `qwen3.8:27b-mlx` through LiteLLM with
+  its own key (team `agents`, local models only). `cloud_pii.gate` lets only team `admin` call it
+  (`agents:` in `litellm/mcp_policy.yaml`); the message is not masked, which is why only an agent
+  on local models may be listed. Model `a2a/<name>` on `/v1/chat/completions` is 403 for everyone.
+  To add an agent: `agents:` in `config.yaml` and in `mcp_policy.yaml`, and its own exact
+  `location` in `nginx/conf.d/litellm.conf`.
+
+Setup of `agent-test` (once, on the host, in this order):
+
+1. Before merging, from the branch: `make litellm-provision` (creates team `agents` and prints the
+   `agent-test` key once; it also moves `admin` to 29 CAD).
+2. `make vault-cli args="kv patch -mount=infra env AGENT_TEST_LITELLM_KEY=<key>"`, then
+   `make vault-env`.
+3. Merge, then `make app-images` (builds `infra-agent-test:1` from `main`), `make up stack=mcp`,
+   `make up stack=platform` (LiteLLM reads `agents:` and the policy), `make up stack=infra` (nginx).
+4. `docker exec litellm python -c "import a2a"`: LiteLLM's A2A routes need a2a-sdk in its image.
 
 Check, with the master key in `$M`, a key of the `apps` team in `$J` and
 `URL=https://litellm.infra.famillelallier.net`:
@@ -567,6 +583,20 @@ curl -s -H "Authorization: Bearer $M" $URL/v1/memory                        # li
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/memory   # expect 401/403
 curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" $URL/v1/skills   # 403 from nginx
 curl -s -X DELETE -H "Authorization: Bearer $M" $URL/v1/memory/apps/jarvis/test
+```
+
+`agent-test`, with a key of the `admin` team in `$A` (`nicolas-admin`):
+
+```bash
+MSG='{"jsonrpc":"2.0","id":1,"method":"SendMessage","params":{"message":{"messageId":"m1","role":"ROLE_USER","parts":[{"text":"Dis bonjour."}]}}}'
+curl -s -H "Authorization: Bearer $A" -H 'Content-Type: application/json' -H 'A2A-Version: 1.0' \
+  -d "$MSG" $URL/v1/a2a/agent-test/message/send                          # answered by qwen3.8
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $J" -H 'Content-Type: application/json' \
+  -H 'A2A-Version: 1.0' -d "$MSG" $URL/v1/a2a/agent-test/message/send      # 403 (agent-policy): apps
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $A" \
+  $URL/a2a/agent-test/.well-known/agent-card.json                        # 403 from nginx
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $A" -H 'Content-Type: application/json' \
+  -d '{"model":"a2a/agent-test","messages":[{"role":"user","content":"x"}]}' $URL/v1/chat/completions  # 403
 ```
 
 ## Secrets (OpenBao)

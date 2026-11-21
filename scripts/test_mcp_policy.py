@@ -194,6 +194,45 @@ def test_docs_name_the_mcp_stack_and_the_no_merge_rule():
         assert needle in readme, f"README.md does not mention {needle}"
 
 
+import hashlib  # noqa: E402
+
+AT = hashlib.sha256(b"agent-test").hexdigest()
+
+
+def test_agent_refusal_lets_only_listed_teams_call_a_listed_agent():
+    pol = {"agents": {"agent-test": {"teams": ["admin"]}}}
+    assert mp.agent_refusal(pol, "admin", AT) is None
+    for team in ("famille", "apps", "", None):
+        assert mp.agent_refusal(pol, team, AT) is not None, team
+    for agent_id in ("agent-test", hashlib.sha256(b"other").hexdigest(), "", None):
+        assert mp.agent_refusal(pol, "admin", agent_id) is not None, agent_id  # the id, not the name
+    assert mp.agent_refusal({}, "admin", AT) is not None  # no section: nothing
+    assert mp.agent_refusal({"agents": {"agent-test": {"teams": []}}}, "admin", AT) is not None
+
+
+def test_policy_agents_are_registered_built_and_keyed():
+    pol = mp.load_policy(os.path.join(ROOT, "litellm", "mcp_policy.yaml"))["agents"]
+    assert pol == {"agent-test": {"teams": ["admin"]}}, pol
+    reg = {a["agent_name"]: a for a in _y("litellm", "config.yaml")["agents"]}
+    assert set(pol) == set(reg), (set(pol), set(reg))
+    assert reg["agent-test"]["agent_card_params"]["url"] == "http://agent-test:8000"
+    svc = _y("docker-compose.mcp.yml")["services"]["agent-test"]
+    assert "ports" not in svc and svc["pull_policy"] == "never" and "infra-net" in svc["networks"]
+    assert ":?" in svc["environment"]["AGENT_TEST_LITELLM_KEY"]
+    assert f'build "{svc["image"]}" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-test"' in \
+        open(os.path.join(ROOT, "scripts", "portainer-images.sh")).read()
+    teams = _y("litellm", "teams.yaml")
+    assert {"alias": "agent-test", "team": "agents", "user": None} in teams["keys"]
+    local = set(_y("litellm", "pii_policy.yaml")["local_models"])
+    assert set(teams["teams"]["agents"]["models"]) <= local  # its unmasked prompt stays on the Macs
+    for t in pol["agent-test"]["teams"]:
+        assert t in teams["teams"], t
+    d = open(os.path.join(ROOT, "agents", "agent-test", "Dockerfile")).read()
+    assert re.search(r"^FROM \S+@sha256:[0-9a-f]{64}", d, re.M) and re.search(r"^USER \d+", d, re.M)
+    mcp = next(ln.split() for ln in open(os.path.join(ROOT, "stacks.conf")) if ln.startswith("mcp "))
+    assert "agents/" in mcp[3:], mcp
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

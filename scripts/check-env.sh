@@ -84,6 +84,7 @@ REQUIRED=(
 	GITHUB_MCP_TOKEN
 	OBSIDIAN_MCP_TOKEN
 	OBSIDIAN_MCP_S3_SECRET_KEY
+	AGENT_TEST_LITELLM_KEY
 )
 
 # oauth2-proxy encrypts its session cookie with these, and refuses to start

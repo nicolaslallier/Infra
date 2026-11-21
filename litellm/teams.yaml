@@ -6,7 +6,7 @@
 # The global cap is litellm_settings.max_budget in config.yaml, in USD: it
 # must equal global_budget_cad x cad_to_usd (make test checks it), so change
 # the two together. The caps below sum to the global cap; `admin` is the
-# 30 CAD reserve.
+# 29 CAD reserve.
 
 # TO CONFIRM by the owner at delivery: today's CAD -> USD rate. Revisit now
 # and then; a stale rate moves the real cap, it does not break anything.
@@ -15,7 +15,7 @@ global_budget_cad: 200
 
 teams:
   admin:
-    max_budget_cad: 30
+    max_budget_cad: 29
     models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
   famille:
     max_budget_cad: 30
@@ -26,6 +26,11 @@ teams:
   dev-sessions:
     max_budget_cad: 70
     models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, qwen3-embedding:0.6b]
+  # The A2A agents' own keys (agents/): local models only, so an agent's prompt never leaves the
+  # Macs; the cap is a tripwire, local models cost 0.
+  agents:
+    max_budget_cad: 1
+    models: [qwen3.8:27b-mlx, qwen3-embedding:0.6b]
 
 # Internal users (no UI login, no invitation). The family is the owner's to
 # add: one line per person.
@@ -40,3 +45,4 @@ keys:
   - {alias: ea, team: apps, user: null}
   - {alias: ai, team: apps, user: null}
   - {alias: dev-sessions, team: dev-sessions, user: null}
+  - {alias: agent-test, team: agents, user: null}

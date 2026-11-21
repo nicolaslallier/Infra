@@ -131,6 +131,25 @@ mcp_servers:
     allow_all_keys: true
     allowed_tools: [search_repositories, get_file_contents, list_commits, search_code, get_commit, list_branches, list_tags, get_repository_tree, issue_read, search_issues, list_issues, list_pull_requests, pull_request_read, search_pull_requests, list_label, get_label, actions_list, actions_get, get_job_logs, issue_write, add_issue_comment, update_issue_comment, create_branch, create_or_update_file, push_files, create_pull_request, update_pull_request, add_reply_to_pull_request_comment]
 
+# A2A agents (POST /a2a/<name>/message/send, or /v1/a2a/... through nginx). Who may call each one
+# is decided by the cloud_pii gate from litellm/mcp_policy.yaml (`agents:`), not here; LiteLLM's
+# own agent permissions allow everything by default. LiteLLM gives a config agent the id
+# sha256(agent_name), which is what the gate compares. An agent of the same name saved in the UI
+# wins over this entry: keep none. agent-test (agents/agent-test/) answers with qwen3.8, local.
+agents:
+  - agent_name: agent-test
+    agent_card_params:
+      protocolVersion: "1.0"
+      name: agent-test
+      description: "Test agent: answers with qwen3.8 (local model)."
+      url: http://agent-test:8000
+      version: "1"
+      capabilities:
+        streaming: false
+      defaultInputModes: [text]
+      defaultOutputModes: [text]
+      skills: []
+
 litellm_settings:
   # Silently drop OpenAI/Anthropic params the local backends don't support.
   drop_params: true

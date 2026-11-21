@@ -163,8 +163,8 @@ never orphans another app that's still attached to it):
   pushes the file over the UI, only reports objects absent from it, and prints a
   new key once (stdout) -- `rotate=<alias>` replaces one. The global cap is
   `litellm_settings.max_budget` in USD (a `make test` case fails if it disagrees
-  with the file); the four team caps sum to it, `admin` being the 30 CAD
-  reserve. Provider keys are `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`OPENAI_API_KEY`
+  with the file); the five team caps sum to it, `admin` being the 29 CAD
+  reserve (`agents`, 1 CAD, local models only, holds the A2A agents' keys). Provider keys are `ANTHROPIC_API_KEY`/`GEMINI_API_KEY`/`OPENAI_API_KEY`
   in `.env` (vault). Clients still use the master key until switched by hand: it is probably
   exempt from the budgets (verify live), so that switch is not optional once
   cloud keys are in the vault; also set hard limits in the provider consoles,
@@ -177,9 +177,12 @@ never orphans another app that's still attached to it):
   every row. Real per-team or per-person memory needs `allowed_routes` on the keys and users under
   `users:` (README). LiteLLM never reads it back into a prompt; if an agent re-sends it to a cloud model
   the gate masks it like any message. `/v1/skills`
-  (a relay to Anthropic's Skills API, so a skill would leave unmasked) and the A2A routes (`/a2a/`,
-  `/v1/a2a/`: no policy decides which team calls which agent) are 403 at the vhost; no agent is
-  registered (Jarvis does not speak A2A). A container calling `litellm:4000` directly bypasses nginx.
+  (a relay to Anthropic's Skills API, so a skill would leave unmasked) is 403 at the vhost, and so
+  are the A2A routes (`/a2a/`, `/v1/a2a/`) except `POST /v1/a2a/agent-test/message/send`: the one
+  agent registered (`agents:` in `config.yaml`, below under `agent-test`), which the gate lets only
+  team `admin` call (`asend_message`, `agents:` in `mcp_policy.yaml`, matched on the agent id
+  sha256(name)); model `a2a/<name>` on the chat routes is 403 for everyone. A container calling
+  `litellm:4000` directly bypasses nginx, not the gate.
   Personal information is masked only toward cloud models (`cloud-pii`, below
   under `presidio-*`); `second-brain` is refused toward them for now.
 - **`presidio-analyzer`** / **`presidio-anonymizer`** — Microsoft Presidio, behind
@@ -284,6 +287,15 @@ never orphans another app that's still attached to it):
   LiteLLM contact a URL of the client's choosing. The tools list is not filtered per team (LiteLLM
   does not run the hook for it), only the calls are. Portainer's MCP server is left out on
   purpose (root on the Docker daemon).
+- **`agent-test`** — the first A2A agent behind LiteLLM, in the `mcp` stack (`agents/agent-test/`,
+  image `infra-agent-test:1` built by `make app-images` like `mcp-obsidian`; `stacks.conf` row
+  `mcp` also claims `agents/`). a2a-sdk 1.1.0 server on `:8000` (card at
+  `/.well-known/agent-card.json`, JSON-RPC at `/`), no port, no vhost, no token from LiteLLM (it
+  only spends its own key). Each message goes to `qwen3.8:27b-mlx` through `litellm:4000` with
+  `AGENT_TEST_LITELLM_KEY` (key `agent-test`, team `agents`: local models only, so the unmasked
+  message never leaves the Macs). Registered under `agents:` in `litellm/config.yaml`; team `admin`
+  only, via `/v1/a2a/agent-test/message/send` (the one A2A route nginx opens). An agent of the same
+  name saved in the UI would replace the config one and its id: keep none. Setup: README ("LiteLLM: memory, skills, agents").
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2

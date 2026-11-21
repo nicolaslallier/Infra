@@ -1,4 +1,4 @@
-# MCP servers behind LiteLLM (chantier 3): Obsidian, read-only; GitHub, at the "propose" level
+# MCP servers behind LiteLLM (chantier 3), and the A2A agents LiteLLM fronts (agent-test): Obsidian, read-only; GitHub, at the "propose" level
 # (the agent opens issues, branches and PRs, the owner merges). Their own stack so a `platform`
 # redeploy does not cut the tools. Nothing here publishes a port or has an NGINX vhost: LiteLLM
 # reaches both by service name on infra-net, and decides who may call what (litellm/cloud_pii.py,
@@ -36,6 +36,26 @@ services:
       OBSIDIAN_MCP_S3_ACCESS_KEY: obsidian-mcp
       OBSIDIAN_MCP_S3_SECRET_KEY: ${OBSIDIAN_MCP_S3_SECRET_KEY:?Set OBSIDIAN_MCP_S3_SECRET_KEY in .env (openssl rand -hex 24)}
       OBSIDIAN_MCP_TOKEN: ${OBSIDIAN_MCP_TOKEN:?Set OBSIDIAN_MCP_TOKEN in .env (openssl rand -hex 32)}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - infra-net
+
+  agent-test:
+    # The first A2A agent behind LiteLLM (agents/agent-test/): answers each message with qwen3.8,
+    # through LiteLLM with its own key (team `agents`, local models only). LiteLLM calls it at
+    # http://agent-test:8000; only team admin may (litellm/mcp_policy.yaml, `agents:`). Built by
+    # `make app-images` like mcp-obsidian: bump the tag here and in portainer-images.sh together.
+    image: infra-agent-test:1
+    pull_policy: never
+    restart: unless-stopped
+    environment:
+      LITELLM_URL: http://litellm:4000
+      AGENT_TEST_LITELLM_KEY: ${AGENT_TEST_LITELLM_KEY:?Set AGENT_TEST_LITELLM_KEY in .env (make litellm-provision prints the agent-test key)}
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
       interval: 15s

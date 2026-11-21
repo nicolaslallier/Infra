@@ -1,10 +1,11 @@
-"""Who may call which MCP tool (pure, no LiteLLM import).
+"""Who may call which MCP tool or A2A agent (pure, no LiteLLM import).
 
 The gate (cloud_pii.py) asks `refusal()` for every `call_mcp_tool`. It learns only the tool's
 name (LiteLLM's hook carries the unprefixed name and no server), so each server lists its
 tools here, the lists are disjoint, and a tool on no list is refused. That is also what keeps
 `merge_pull_request` out. See docs/superpowers/specs/2026-11-14-litellm-mcp-design.md.
 """
+import hashlib
 import re
 
 import yaml
@@ -37,6 +38,17 @@ def refusal(policy: dict, team_id: str | None, tool_name: str | None, arguments:
         if _default_branch(((arguments or {}).get("branch")), refused):
             return f"'{tool_name}' needs a real branch, not {', '.join(refused)}"
     return None
+
+
+def agent_refusal(policy: dict, team_id: str | None, agent_id: str | None) -> str | None:
+    """A reason to refuse an A2A call, or None. LiteLLM hands the hook the agent's id, which for an
+    agent of config.yaml is sha256(agent_name); an id matching no listed agent is refused."""
+    for name, v in (policy.get("agents") or {}).items():
+        if agent_id == hashlib.sha256(name.encode()).hexdigest():
+            if team_id and team_id in (v.get("teams") or []):
+                return None
+            return f"this key's team may not call the '{name}' agent"
+    return "an agent that is not on the agent allowlist"
 
 
 def _default_branch(branch, refused: list[str]) -> bool:
