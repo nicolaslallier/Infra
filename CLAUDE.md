@@ -14,7 +14,7 @@ over a shared Docker network rather than being folded into this one.
 
 ## Commands
 
-Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runners-*` the six CI runners, `make dev-*` the dev-session plumbing (see "Dev sessions"), `make clean CONFIRM=1` deletes the stack + volumes.
+Run `make help` for the target list. Notable: `make up`/`down` deploy via Portainer, `make init` bootstraps `.env`/certs/`infra-net`/OpenBao's seal key, `make vault-*` drive the secrets vault, `make runners-*` the seven CI runners, `make dev-*` the dev-session plumbing (see "Dev sessions"), `make clean CONFIRM=1` deletes the stack + volumes.
 
 The `vault-*` targets deliberately do **not** run `check-env`: `make vault-env`
 is how a `.env` that `check-env` rejects gets repaired, so requiring it first
@@ -688,7 +688,7 @@ Things that look odd and are load-bearing:
 
 `.github/workflows/deploy.yml` redeploys the stack when main moves, running
 `scripts/ci-deploy.sh` on the self-hosted runner labelled `infra` — one of
-six (`ai`, `darkangel`, `ea`, `heaven`, `infra`, `moria`, one per repo) in
+seven (`ai`, `darkangel`, `ea`, `heaven`, `infra`, `moria`, `rag`, one per repo) in
 `docker-compose.runners.yml`, `make runners-up`. `workflow_dispatch` runs the
 same thing by hand, with a `pull_images` input that switches `make up` for
 `make pull`.
@@ -708,18 +708,18 @@ Several things here are load-bearing.
   (needs `PORTAINER_API_KEY` and `PORTAINER_PINNEDPUBKEY` in `.portainer.env`;
   `INFRA_HOST` comes from the Makefile, `PORTAINER_URL` optionally overrides). **Portainer reads the compose from
   GitHub main**, so merge before `make runners-up`. The env it sends is
-  `.runner.env` (six PATs) plus `INFRA_DIR`, never `.env`: that file is the
+  `.runner.env` (seven PATs) plus `INFRA_DIR`, never `.env`: that file is the
   stack's whole secret set.
 - **One fine-grained PAT per repo** (`GH_RUNNER_TOKEN_<NAME>`, Administration:
   read and write on that repo only). This limits the damage only as long as no
   socket-holding runner is compromised: any job on `darkangel`, `heaven` or
   `infra` holds `/var/run/docker.sock`, so it can `docker inspect`/`exec` into
-  the other runners and read all six tokens (admin on all six repos, on top
-  of root on the daemon) and tamper with the `ai`, `ea` and `moria` runners. That is
+  the other runners and read all seven tokens (admin on all seven repos, on top
+  of root on the daemon) and tamper with the `ai`, `ea`, `moria` and `rag` runners. That is
   the accepted ceiling. Follow-ups: darkangel could use its own
   `PORTAINER_DIRECT` mode and drop the socket; heaven's `scripts/ci-deploy.sh`
   uses `docker run`, so it needs a rewrite or keeps the socket.
-  A missing one fails `runners-up` by name rather than starting five of six.
+  A missing one fails `runners-up` by name rather than starting six of seven.
 - **Privileges differ per runner.** The Docker socket (root on the daemon) is
   mounted only on `darkangel`, `heaven` and `infra`, whose deploys need it;
   `ai`, `ea` and `moria` get none. `ai` and `ea` hold deploy secrets instead
@@ -1653,7 +1653,8 @@ method, and the only consumer is the nightly backup flow (below), which holds
 a scoped periodic token (policy `backup`: raft snapshot read plus
 `renew-self`, nothing else), renewed on each run. The AI repo's deploy (the portail) holds another
 (policy `portail-deploy`: read on `infra/portail` only, never `infra/env`,
-since the AI repo is public; README, Portail).
+since the AI repo is public; README, Portail). The RAG repo's deploy holds a third
+(policy `rag-deploy`: read on `infra/rag` only, never `infra/env`; README, RAG).
 No app container reads its secrets
 from the vault yet — they all still get them from `.env` via Compose. Prometheus does scrape it (job `openbao`, unauthenticated because
 the listener sets `unauthenticated_metrics_access`, the same posture as
