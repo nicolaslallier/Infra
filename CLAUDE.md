@@ -141,7 +141,7 @@ never orphans another app that's still attached to it):
   vhost 404s `/metrics`.
   There is no `NTFY_*` key in `.env`; the `NTFY_*` application
   variables are documented in the README ("Notifications").
-- **`litellm`** — `ghcr.io/berriai/litellm-database`, the LLM gateway, at
+- **`litellm`** — `ghcr.io/berriai/litellm`, the LLM gateway, at
   `litellm.infra.famillelallier.net` (NGINX → `litellm:4000`; admin UI at
   `/ui`). OpenAI- and Anthropic-format API in front of Ollama on the
   MacBook (by LAN address) and, through `ollama-proxy`, on the Mac Studio. The MCP
