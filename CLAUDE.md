@@ -295,7 +295,10 @@ never orphans another app that's still attached to it):
   `AGENT_TEST_LITELLM_KEY` (key `agent-test`, team `agents`: local models only, so the unmasked
   message never leaves the Macs). Registered under `agents:` in `litellm/config.yaml`; team `admin`
   only, via `/v1/a2a/agent-test/message/send` (the one A2A route nginx opens). An agent of the same
-  name saved in the UI would replace the config one and its id: keep none. Setup: README ("LiteLLM: memory, skills, agents").
+  name saved in the UI would replace the config one and its id: keep none. "Admin only" is the
+  path through LiteLLM: any container on `infra-net` can post to `agent-test:8000` directly (local
+  inference only, accepted), and the card under `/a2a/agent-test/` stays readable by any valid key
+  from `infra-net` (closed on the LAN, harmless content). Setup: README ("LiteLLM: memory, skills, agents").
 - **`openbao`** — `openbao/openbao:2.6.2`, the secret store, at
   `vault.infra.famillelallier.net` (NGINX → `openbao:8200`). OpenBao is the
   MPL-licensed fork of HashiCorp Vault, which went BUSL at 1.15; same KV v2

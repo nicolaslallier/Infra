@@ -560,17 +560,24 @@ the REST route `/mcp-rest/tools/call` run the team check.
   its own key (team `agents`, local models only). `cloud_pii.gate` lets only team `admin` call it
   (`agents:` in `litellm/mcp_policy.yaml`); the message is not masked, which is why only an agent
   on local models may be listed. Model `a2a/<name>` on `/v1/chat/completions` is 403 for everyone.
+  "Team `admin` only" holds for the path through LiteLLM: any container on `infra-net` can post
+  straight to `agent-test:8000` (local inference only, accepted). The card
+  (`/a2a/agent-test/.well-known/agent-card.json`) stays readable by any valid key from `infra-net`
+  (closed on the LAN); its content is harmless.
   To add an agent: `agents:` in `config.yaml` and in `mcp_policy.yaml`, and its own exact
   `location` in `nginx/conf.d/litellm.conf`.
 
 Setup of `agent-test` (once, on the host, in this order):
 
-1. Before merging, from the branch: `make litellm-provision` (creates team `agents` and prints the
-   `agent-test` key once; it also moves `admin` to 29 CAD).
+1. Before merging, from the branch: run the provisioning directly, since `make litellm-provision`
+   runs `check-env`, which rejects a `.env` without the key this step creates:
+   `set -a; . ./.env; set +a; uv run -q --no-project --with pyyaml python scripts/litellm_provision.py`
+   (creates team `agents`, moves `admin` to 29 CAD, prints the `agent-test` key once).
 2. `make vault-cli args="kv patch -mount=infra env AGENT_TEST_LITELLM_KEY=<key>"`, then
-   `make vault-env`.
-3. Merge, then `make app-images` (builds `infra-agent-test:1` from `main`), `make up stack=mcp`,
-   `make up stack=platform` (LiteLLM reads `agents:` and the policy), `make up stack=infra` (nginx).
+   `make vault-env`. The key must be in the vault **before the merge**: otherwise `check-env` in
+   `make up` fails the whole Deploy.
+3. Merge. The Deploy workflow builds `infra-agent-test:1` (`app-images` is a prerequisite of
+   `make up`) and redeploys `mcp`, `platform` and `infra`.
 4. `docker exec litellm python -c "import a2a"`: LiteLLM's A2A routes need a2a-sdk in its image.
 
 Check, with the master key in `$M`, a key of the `apps` team in `$J` and

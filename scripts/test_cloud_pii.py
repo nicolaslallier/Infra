@@ -442,6 +442,10 @@ def test_an_agent_as_a_model_is_refused_for_everyone():
         refused(lambda: call(guard(), LOCAL, [{"role": "user", "content": "x"}], team="admin",
                              extra={"custom_llm_provider": provider}), 403)
     call(guard(), LOCAL, [{"role": "user", "content": "a2a/ in text is fine"}], team="admin")
+    for model in (LOCAL, CLOUD):
+        for fb in ({"fallbacks": ["a2a/agent-test"]}, {"context_window_fallbacks": [{LOCAL: ["agent-test"]}]}):
+            refused(lambda: call(guard(), model, [{"role": "user", "content": "x"}], team="admin",
+                                 extra=copy.deepcopy(fb)), 403)
 
 
 def test_mcp_arguments_are_not_masked_and_need_no_model():
