@@ -150,7 +150,11 @@ never orphans another app that's still attached to it):
   `mcp_semantic_tool_filter` key in the DB (its `embedding_model` not in `model_list`) overrides
   the file and silently turns the filter off; in 1.108 the UI refuses to write it while the file
   owns the key (`reject_config_owned_writes`), so only a row from an older version can do this
-  (see the comment in `litellm/config.yaml`). Config is
+  (see the comment in `litellm/config.yaml`). `qwen3.8:27b-mlx` fails over
+  with timeouts of 120 s (.40) and 170 s (Studio), one attempt per order level
+  (`num_retries: 0` per deployment), so it answers or fails inside the Portail's
+  300 s read budget; a `make test` case asserts the sum of a Portail model's
+  timeouts is < 300. Config is
   `litellm/config.yaml`; secrets (`LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`,
   `LITELLM_UI_PASSWORD`) come from `.env`. Database/role `litellm`, provisioned
   like any other app; without it the UI login fails with "Not connected to DB".

@@ -107,6 +107,22 @@ def test_repo_files_are_consistent():
     assert lp.validate(s, c) == [], lp.validate(s, c)
 
 
+# Models of the Portail's LiteLLM key (created by hand, see README "Portail (AI repo)").
+PORTAIL_MODELS = ("qwen3.8:27b-mlx",)
+
+
+def test_portail_models_fit_portail_budget():
+    # The Portail reads for 300 s (PORTAIL_LLM_DELAI_S). One attempt per order
+    # level, so the worst case is the sum of the deployments' timeouts.
+    c = lp.load_spec(os.path.join(ROOT, "litellm", "config.yaml"))
+    for name in PORTAIL_MODELS:
+        ps = [m["litellm_params"] for m in c["model_list"] if m["model_name"] == name]
+        assert ps, name
+        assert all(p.get("num_retries") == 0 for p in ps), (name, ps)
+        timeouts = [p.get("timeout") for p in ps]
+        assert None not in timeouts and sum(timeouts) < 300, (name, timeouts)
+
+
 class FakeClient:
     """In-memory LiteLLM admin API, shaped as the v1.83 docs describe it."""
 
