@@ -212,7 +212,13 @@ def test_agent_refusal_lets_only_listed_teams_call_a_listed_agent():
 
 def test_policy_agents_are_registered_built_and_keyed():
     pol = mp.load_policy(os.path.join(ROOT, "litellm", "mcp_policy.yaml"))["agents"]
-    assert pol == {"agent-test": {"teams": ["admin"]}, "agent-musique": {"teams": ["admin"]}}, pol
+    assert pol == {"agent-test": {"teams": ["admin"]}, "agent-musique": {"teams": ["admin", "apps"]}}, pol
+    full = mp.load_policy(os.path.join(ROOT, "litellm", "mcp_policy.yaml"))
+    am = hashlib.sha256(b"agent-musique").hexdigest()
+    assert mp.agent_refusal(full, "apps", am) is None
+    assert mp.agent_refusal(full, "apps", AT) is not None  # agent-test stays admin only
+    for team in ("famille", "dev-sessions", "", None):
+        assert mp.agent_refusal(full, team, am) is not None, team
     reg = {a["agent_name"]: a for a in _y("litellm", "config.yaml")["agents"]}
     assert set(pol) == set(reg), (set(pol), set(reg))
     teams = _y("litellm", "teams.yaml")

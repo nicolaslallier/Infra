@@ -71,7 +71,7 @@ services:
     # S3 identity `agent-musique` is Read,Write,List on the whole `obsidian` bucket (provision-s3.sh
     # cannot scope a prefix): the code holds reads and writes to `02 - Domaines/Loisirs/Musique/`.
     # It refuses every request but /health without AGENT_MUSIQUE_TOKEN, which LiteLLM sends
-    # (static_headers). Only team admin may call it (litellm/mcp_policy.yaml). Built by
+    # (static_headers). Only teams admin and apps (the Portail) may call it (litellm/mcp_policy.yaml). Built by
     # `make app-images` like agent-test: bump the tag here and in portainer-images.sh together.
     image: infra-agent-musique:2
     pull_policy: never
