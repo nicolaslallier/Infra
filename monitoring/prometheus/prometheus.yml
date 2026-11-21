@@ -79,7 +79,7 @@ scrape_configs:
       - targets: ["192.168.2.35:11434"]
         labels: {host: mac-infra}
       # Same arrangement on mac-02: Ollama there is used from the Mac itself.
-      - targets: ["192.168.2.41:11434"]
+      - targets: ["192.168.2.40:11434"]
         labels: {host: mac-02}
       - targets: ["ollama-proxy-laptop:11434"]
         labels: {host: laptop-dopbpc0j}

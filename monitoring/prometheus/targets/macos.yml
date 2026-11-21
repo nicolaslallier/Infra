@@ -22,13 +22,14 @@
   labels:
     hostname: mac-infra
 
-- targets: ["192.168.2.41:9100"]
+- targets: ["192.168.2.40:9100"]
   labels:
     hostname: mac-02
 
-# Mac mini: runs the data, Keycloak and DNS stacks (Portainer env 7). Its
-# Colima VM (192.168.2.68) is a Linux guest, scraped by the colima-* jobs
-# (targets/colima.yml).
-- targets: ["192.168.2.65:9100"]
+# Mac mini: runs the data, Keycloak and DNS stacks (Portainer env 7).
+# 192.168.2.68 is macOS itself (node_exporter answers uname Darwin), not its
+# Colima VM; the VM's address is not known here (colima-mini is not in
+# targets/colima.yml).
+- targets: ["192.168.2.68:9100"]
   labels:
     hostname: mac-mini
