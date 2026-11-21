@@ -2,7 +2,7 @@
 
 LiteLLM is the only intended caller: it sends `X-Agent-Token` (static_headers in
 litellm/config.yaml), and every request but /health without it gets 401, because infra-net is
-shared and this agent can write to the vault. The model is qwen3.8 through LiteLLM with the
+shared and this agent can write to the vault. The model is gemma4 (26B MoE, faster than qwen3.8) through LiteLLM with the
 agent's own key (team `agents`, local models only). Who may call it is decided in LiteLLM
 (litellm/mcp_policy.yaml, `agents:`).
 """
@@ -28,7 +28,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-MODEL = "qwen3.8:27b-mlx"
+MODEL = "gemma4:26b-a4b-it-qat"
 LITELLM_URL = os.environ.get("LITELLM_URL", "http://litellm:4000").rstrip("/")
 PUBLIC_URL = os.environ.get("AGENT_MUSIQUE_URL", "http://agent-musique:8000/")
 KEY = os.environ.get("AGENT_MUSIQUE_LITELLM_KEY", "")
@@ -40,7 +40,7 @@ QUIET = int(os.environ.get("AGENT_MUSIQUE_QUIET_MINUTES", "10"))
 
 CARD = AgentCard(
     name="agent-musique",
-    description="Ta collection de disques, depuis ton coffre Obsidian : répond et enregistre (qwen3.8, local).",
+    description="Ta collection de disques, depuis ton coffre Obsidian : répond et enregistre (gemma4, local).",
     version="1",
     supported_interfaces=[AgentInterface(url=PUBLIC_URL, protocol_binding="JSONRPC", protocol_version="1.0")],
     capabilities=AgentCapabilities(streaming=False),
