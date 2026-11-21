@@ -951,10 +951,12 @@ same shape as the Windows list (`hostname` optional, cosmetic, becomes the
     hostname: macbook-nicolas
 ```
 
-The Mac **this stack runs on** is scraped at `host.docker.internal:9100`, the
-same route the Windows job uses for its own host. It is the one machine the
-`node` job also reports on — but that job is the container, describing the
-Linux VM, so this is the dashboard that describes the actual hardware.
+Every Mac — including one that hosts a Docker stack — is listed by its LAN
+address, with a DHCP reservation, never as `host.docker.internal` (that name is
+the Docker host, which is the Windows laptop; see the rule in `CLAUDE.md`).
+The container-side jobs (`node` for this stack, `colima-*` for a Mac's Colima
+VM) describe a Linux VM, not the hardware — this dashboard is the one that
+describes the Mac itself.
 
 Three things about the queries, all of which bite anyone adapting a
 Linux-shaped dashboard:
@@ -1257,14 +1259,20 @@ back through `--base-url` → `PORTAINER_BASE_URL` (in `.portainer.env`) →
 `api()` helper in `portainer-stack.sh` (the API sits behind Portainer's 9443
 self-signed cert). A failed poll keeps the last good reading and bumps
 `portainer_exporter_scrape_errors_total` instead of dropping the target.
+The `127.0.0.1` fallback only works on the machine that hosts Portainer: on a
+Mac, set `PORTAINER_BASE_URL=https://192.168.2.10:9443` (the laptop's
+`LAN_IP`) in `.portainer.env`, or pass `--base-url`, or
+`portainer_controlplane_up` stays at 0.
 
-To feed it to Prometheus, Prometheus (in the stack) reaches the host over
-`host.docker.internal`. Add a job to `monitoring/prometheus/prometheus.yml`:
+To feed it to Prometheus, point a job at the Mac's LAN address (give it a
+DHCP reservation, as for the `macos` targets — `host.docker.internal` is the
+Windows Docker host, not the Mac). Add a job to
+`monitoring/prometheus/prometheus.yml`:
 
 ```yaml
    - job_name: portainer
      static_configs:
-       - targets: ["host.docker.internal:9999"]
+       - targets: ["192.168.2.35:9999"]   # the Mac's LAN address
 ```
 
 What it exports: `portainer_controlplane_up` (1 when the API answered the last
