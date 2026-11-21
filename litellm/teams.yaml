@@ -22,7 +22,7 @@ teams:
     models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-gemini, qwen3-embedding:0.6b]
   apps:
     max_budget_cad: 70
-    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, cloud-gemini, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
   dev-sessions:
     max_budget_cad: 70
     models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, qwen3-embedding:0.6b]
