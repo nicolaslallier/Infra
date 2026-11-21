@@ -9,7 +9,8 @@ agent's own key (team `agents`, local models only). Who may call it is decided i
 import asyncio
 import hmac
 import os
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import boto3
 import disques
@@ -76,7 +77,7 @@ class MusiqueExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         text = await asyncio.to_thread(disques.repondre, self.s3, BUCKET, VAULT_PREFIX, llm,
-                                       context.get_user_input(), datetime.now(timezone.utc), QUIET)
+                                       context.get_user_input(), datetime.now(ZoneInfo("America/Montreal")), QUIET)
         await event_queue.enqueue_event(new_text_message(text, context_id=context.context_id, task_id=context.task_id))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:

@@ -101,8 +101,22 @@ def _absente(e: ClientError) -> bool:
 
 
 def _lire_cle(s3, bucket: str, cle: str) -> str:
+    """For the model and the index: capped at 1 MiB, bad bytes replaced. Never used to rewrite a note."""
     body = s3.get_object(Bucket=bucket, Key=cle)["Body"]
     return body.read(MAX_READ_BYTES).decode("utf-8", errors="replace")
+
+
+def _lire_exact(s3, bucket: str, cle: str, tete: dict) -> str:
+    """A note about to be rewritten: whole and strict UTF-8, or ValueError (never truncated or altered)."""
+    if tete.get("ContentLength", 0) > MAX_READ_BYTES:
+        raise ValueError(f"note de plus de {MAX_READ_BYTES} octets : je ne la réécris pas")
+    data = s3.get_object(Bucket=bucket, Key=cle)["Body"].read()
+    if len(data) > MAX_READ_BYTES:
+        raise ValueError(f"note de plus de {MAX_READ_BYTES} octets : je ne la réécris pas")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("note pas en UTF-8 valide : je ne la réécris pas") from None
 
 
 def _ecrire(s3, bucket: str, cle: str, texte: str, vault_prefix: str) -> None:
@@ -111,9 +125,9 @@ def _ecrire(s3, bucket: str, cle: str, texte: str, vault_prefix: str) -> None:
                   ContentType="text/markdown; charset=utf-8")
 
 
-def _notes(s3, bucket: str, vault_prefix: str):
-    """Keys of the notes under the Musique folder (the index excluded), at most MAX_SCAN."""
-    vp, token, n = _vp(vault_prefix), None, 0
+def _notes(s3, bucket: str, vault_prefix: str) -> tuple[list[str], bool]:
+    """(keys of the notes under the Musique folder, index excluded, at most MAX_SCAN; truncated?)."""
+    vp, token, out = _vp(vault_prefix), None, []
     while True:
         kw = {"Bucket": bucket, "Prefix": vp + MUSIQUE}
         if token:
@@ -122,13 +136,12 @@ def _notes(s3, bucket: str, vault_prefix: str):
         for o in page.get("Contents", []):
             k = o["Key"]
             if k != vp + INDEX and k.endswith(".md") and ".obsidian" not in k.split("/"):
-                n += 1
-                yield k
-                if n >= MAX_SCAN:
-                    return
+                if len(out) >= MAX_SCAN:
+                    return out, True
+                out.append(k)
         token = page.get("NextContinuationToken")
         if not page.get("IsTruncated") or not token:
-            return
+            return out, False
 
 
 def lire_frontmatter(texte: str) -> dict:
@@ -159,6 +172,8 @@ def note_neuve(champs: dict, ligne: str) -> str:
 
 def mise_a_jour(texte: str, champs: dict, ligne: str) -> str:
     """Change only the agent's own frontmatter lines, add `ligne` under `## Notes`; the rest stays byte for byte."""
+    if "\r" in texte:
+        raise ValueError("note en fins de ligne CRLF : je ne la réécris pas")
     m = re.match(r"---\n(.*?)\n---\n", texte, re.S)
     if m:
         lignes, fin = m.group(1).split("\n"), m.end()
@@ -167,6 +182,9 @@ def mise_a_jour(texte: str, champs: dict, ligne: str) -> str:
                 continue
             neuve = _fm_ligne(k, champs[k])
             i = next((i for i, ln in enumerate(lignes) if re.match(rf"{k}\s*:", ln)), None)
+            if i is not None and (not lignes[i].split(":", 1)[1].strip()
+                                  or (i + 1 < len(lignes) and lignes[i + 1][:1] in (" ", "\t", "-"))):
+                raise ValueError(f"la clé {k} est sur plusieurs lignes YAML : je ne la réécris pas")
             if i is None:
                 lignes.append(neuve)
             else:
@@ -188,10 +206,21 @@ def _cellule(v) -> str:
     return str(v or "").replace("|", "\\|").replace("\n", " ")
 
 
-def regenerer_index(s3, bucket: str, vault_prefix: str) -> None:
-    """Discographie.md, rebuilt from the frontmatter of every `type: disque` note."""
+def regenerer_index(s3, bucket: str, vault_prefix: str) -> str:
+    """Discographie.md, rebuilt from the frontmatter of every `type: disque` note; "" or a warning.
+
+    Only a missing index or one carrying our marker (type: index, source: claude) is overwritten."""
     vp, rangs = _vp(vault_prefix), []
-    for k in _notes(s3, bucket, vault_prefix):
+    try:
+        actuel = lire_frontmatter(_lire_cle(s3, bucket, vp + INDEX))
+        if actuel.get("type") != "index" or actuel.get("source") != "claude":
+            return (f" ; index NON régénéré : {INDEX} n'est pas le fichier généré par l'agent "
+                    "(renomme-le ou supprime-le pour que l'agent le recrée)")
+    except ClientError as e:
+        if not _absente(e):
+            raise
+    cles, tronque = _notes(s3, bucket, vault_prefix)
+    for k in cles:
         fm = lire_frontmatter(_lire_cle(s3, bucket, k))
         if fm.get("type") == "disque":
             rangs.append((str(fm.get("artiste", "")).casefold(), str(fm.get("titre", "")).casefold(), fm, k))
@@ -203,8 +232,11 @@ def regenerer_index(s3, bucket: str, vault_prefix: str) -> None:
              "> [!warning] Généré par agent-musique à chaque enregistrement : ne pas éditer, "
              "tes changements seraient écrasés. Modifie plutôt la note du disque.\n\n"
              "# Discographie\n\n| Artiste | Titre | Format | Année | Label | Note |\n|---|---|---|---|---|---|\n"
-             + "".join(ln + "\n" for ln in lignes))
+             + "".join(ln + "\n" for ln in lignes)
+             + (f"\n> [!warning] Index incomplet : seules les {MAX_SCAN} premières notes du dossier sont lues.\n"
+                if tronque else ""))
     _ecrire(s3, bucket, vp + INDEX, texte, vault_prefix)
+    return ""
 
 
 def enregistrer(s3, bucket: str, vault_prefix: str, now: datetime, quiet_minutes: int,
@@ -232,29 +264,30 @@ def enregistrer(s3, bucket: str, vault_prefix: str, now: datetime, quiet_minutes
         if age < timedelta(minutes=quiet_minutes):
             return rel, (f"refusé : la note a été modifiée il y a moins de {quiet_minutes} minutes "
                          "(synchro Obsidian en cours ?) ; réessaie plus tard")
-        _ecrire(s3, bucket, cle, mise_a_jour(_lire_cle(s3, bucket, cle), champs, ligne), vault_prefix)
+        _ecrire(s3, bucket, cle, mise_a_jour(_lire_exact(s3, bucket, cle, tete), champs, ligne), vault_prefix)
         msg = "note existante mise à jour"
-    regenerer_index(s3, bucket, vault_prefix)
-    return rel, msg
+    return rel, msg + regenerer_index(s3, bucket, vault_prefix)
 
 
-def chercher(s3, bucket: str, vault_prefix: str, texte: str) -> list[dict]:
+def chercher(s3, bucket: str, vault_prefix: str, texte: str) -> tuple[list[dict], bool]:
+    """(matches, at most 20; were only the first MAX_SCAN notes searched?)."""
     vp, q, out = _vp(vault_prefix), str(texte).casefold().strip(), []
     if not q:
         raise ValueError("texte vide")
-    for k in _notes(s3, bucket, vault_prefix):
+    cles, tronque = _notes(s3, bucket, vault_prefix)
+    for k in cles:
         t = _lire_cle(s3, bucket, k)
         i = t.casefold().find(q)
         if i >= 0 or q in k.casefold():
             out.append({"chemin": k[len(vp):], "extrait": t[max(i, 0):max(i, 0) + 200]})
             if len(out) >= 20:
                 break
-    return out
+    return out, tronque
 
 
 def repondre(s3, bucket: str, vault_prefix: str, llm, question: str, now: datetime, quiet_minutes: int = 10) -> str:
     """One answer: index in the system prompt, at most MAX_TOURS model calls, `Sources :` from what was read."""
-    vp, sources = _vp(vault_prefix), []
+    vp, sources, ecrit = _vp(vault_prefix), [], False
     try:
         index = _lire_cle(s3, bucket, cle_ecriture(vp + INDEX, vault_prefix))
         sources.append(INDEX)
@@ -274,20 +307,25 @@ def repondre(s3, bucket: str, vault_prefix: str, llm, question: str, now: dateti
         for a in appels:
             try:
                 nom, args = a["function"]["name"], json.loads(a["function"].get("arguments") or "{}")
+                if not isinstance(args, dict) or not all(isinstance(v, str) for v in args.values()):
+                    raise ValueError("les arguments doivent être un objet de chaînes")
                 if nom == "lire_disque":
                     cle = cle_lecture(args["chemin"], vault_prefix)
                     resultat = _lire_cle(s3, bucket, cle)
                     sources.append(cle[len(vp):])
                 elif nom == "chercher":
-                    trouve = chercher(s3, bucket, vault_prefix, args["texte"])
+                    trouve, tronque = chercher(s3, bucket, vault_prefix, args["texte"])
                     sources += [t["chemin"] for t in trouve]
                     resultat = json.dumps(trouve, ensure_ascii=False) if trouve else "aucune note trouvée"
+                    if tronque:
+                        resultat += f" (recherche limitée aux {MAX_SCAN} premières notes du dossier)"
                 elif nom == "enregistrer_disque":
                     permis = {"artiste", "titre", "format", "annee", "label", "etat", "notes"}
                     rel, resultat = enregistrer(s3, bucket, vault_prefix, now, quiet_minutes,
                                                 **{k: v for k, v in args.items() if k in permis})
                     if not resultat.startswith("refusé"):
                         sources.append(rel)
+                        ecrit = True
                     resultat = f"{resultat} : {rel}"
                 else:
                     resultat = f"erreur : outil inconnu {nom}"
@@ -296,6 +334,9 @@ def repondre(s3, bucket: str, vault_prefix: str, llm, question: str, now: dateti
             except (ValueError, KeyError, TypeError) as e:
                 resultat = f"erreur : {e}"
             msgs.append({"role": "tool", "tool_call_id": a.get("id", ""), "content": resultat})
+    else:
+        if ecrit:
+            texte += " Attention : un disque a quand même été enregistré pendant ces tours (voir Sources)."
     texte = re.sub(r"(?mi)^[ \t*_]*sources?[ \t*_]*:.*$\n?", "", texte).rstrip()
     if sources:
         texte += "\n\nSources : " + ", ".join(dict.fromkeys(sources))

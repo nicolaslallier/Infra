@@ -45,7 +45,7 @@ class FakeS3:
     def head_object(self, Bucket, Key):  # noqa: N803
         if Key not in self.data:
             self._missing("HeadObject", "404")
-        return {"LastModified": self.data[Key][1]}
+        return {"LastModified": self.data[Key][1], "ContentLength": len(self.data[Key][0])}
 
     def put_object(self, Bucket, Key, Body, ContentType=None):  # noqa: N803
         self.puts.append(Key)
@@ -261,6 +261,80 @@ def test_a_message_goes_to_qwen_through_litellm_with_the_agent_key_at_temperatur
         assert body["model"] == "qwen3.8:27b-mlx" and body["temperature"] == 0 and body["tools"], body
     assert "Miles Davis | Kind of Blue" in seen[0][2]["messages"][0]["content"]
     assert "Pressage 1959" in seen[1][2]["messages"][-1]["content"]
+
+
+
+def refused(fn, needle):
+    try:
+        fn()
+    except ValueError as e:
+        assert needle in str(e), e
+        return
+    raise AssertionError("not refused")
+
+
+def test_an_update_never_truncates_or_alters_a_note():
+    key = M + "A - B (CD).md"
+    cases = {"octets": ORIGINAL.encode() + b"x" * disques.MAX_READ_BYTES,
+             "UTF-8": ORIGINAL.encode() + b"\xff\xfe",
+             "CRLF": ORIGINAL.replace("\n", "\r\n").encode(),
+             "plusieurs lignes": ORIGINAL.replace('annee: "1975"', "annee:\n  - 1975").encode(),
+             "plusieurs lignes ": ORIGINAL.replace('annee: "1975"', "annee: >\n  1975").encode()}
+    for needle, body in cases.items():
+        s3 = FakeS3({key: body})
+        refused(lambda: disques.enregistrer(s3, "obsidian", VP, NOW, 10, artiste="A", titre="B", format="CD",
+                                            annee="1976"), needle.strip())
+        assert s3.puts == [] and s3.data[key][0] == body, needle
+
+
+def test_a_hand_written_discographie_is_never_overwritten():
+    hand = b"# Ma discographie a moi\n"
+    s3 = FakeS3({M + "Discographie.md": hand})
+    rel, msg = disques.enregistrer(s3, "obsidian", VP, NOW, 10, artiste="A", titre="B", format="CD")
+    assert "note créée" in msg and "NON régénéré" in msg, msg
+    assert s3.data[M + "Discographie.md"][0] == hand and s3.puts == [VP + rel]
+    disques.regenerer_index(FakeS3(), "obsidian", VP)  # absent: created
+    s3 = FakeS3()
+    disques.enregistrer(s3, "obsidian", VP, NOW, 10, artiste="A", titre="B", format="CD")
+    disques.enregistrer(s3, "obsidian", VP, NOW, 10, artiste="C", titre="D", format="CD")  # ours: rewritten
+    assert "| C | D |" in s3.text(M + "Discographie.md")
+
+
+def test_the_scan_limit_is_said_in_the_index_and_in_chercher():
+    s3 = FakeS3({M + f"n{i}.md": b"---\ntype: disque\n---\nzz\n" for i in range(3)})
+    old, disques.MAX_SCAN = disques.MAX_SCAN, 2
+    try:
+        disques.regenerer_index(s3, "obsidian", VP)
+        assert "Index incomplet" in s3.text(M + "Discographie.md")
+        found, truncated = disques.chercher(s3, "obsidian", VP, "zz")
+        assert len(found) == 2 and truncated
+    finally:
+        disques.MAX_SCAN = old
+
+
+def test_bad_tool_arguments_go_back_to_the_model():
+    replies = [{"role": "assistant", "tool_calls": [
+                   {"id": "1", "function": {"name": "lire_disque", "arguments": "[1]"}},
+                   {"id": "2", "function": {"name": "enregistrer_disque",
+                                            "arguments": json.dumps({"artiste": 1, "titre": "x", "format": "CD"})}},
+                   {"id": "3", "function": {"name": "chercher", "arguments": "{}"}}]},
+               {"role": "assistant", "content": "ok"}]
+    seen_msgs = []
+
+    def llm(messages, tools):
+        seen_msgs.append(messages)
+        return replies.pop(0)
+    s3 = FakeS3()
+    assert disques.repondre(s3, "obsidian", VP, llm, "x", NOW) == "ok"
+    tools = [m for m in seen_msgs[-1] if m["role"] == "tool"]
+    assert len(tools) == 3 and all(t["content"].startswith("erreur") for t in tools), tools
+    assert s3.puts == []
+
+
+def test_a_write_during_six_exhausted_rounds_is_said():
+    out = disques.repondre(FakeS3(), "obsidian", VP,
+                           lambda m, t: call("enregistrer_disque", artiste="A", titre="B", format="CD"), "x", NOW)
+    assert "6 tours" in out and "enregistré" in out and "A - B (CD).md" in out, out
 
 
 if __name__ == "__main__":
