@@ -321,6 +321,20 @@ def _team_cache(data, team, key=None):
     return data
 
 
+A2A_PROVIDERS = {"a2a", "a2a_agent"}  # LiteLLM's model prefixes / providers that reach an agent
+
+
+def _names_an_agent(model: Any, provider: Any, mcp_pol: dict) -> bool:
+    """True when a model request would go to an A2A agent: an a2a/ or a2a_agent/ prefix (any case,
+    LiteLLM's own routing and provider), that provider named explicitly, or a bare agent name."""
+    if isinstance(provider, str) and provider.strip().lower() in A2A_PROVIDERS:
+        return True
+    if not isinstance(model, str):
+        return False
+    m = model.strip().lower()
+    return ("/" in m and m.split("/", 1)[0] in A2A_PROVIDERS) or m in {n.lower() for n in (mcp_pol.get("agents") or {})}
+
+
 class CloudPIIGate(CustomLogger):
     def __init__(
         self,
@@ -421,9 +435,10 @@ class CloudPIIGate(CustomLogger):
                 raise HTTPException(status_code=403, detail=f"agent-policy: {reason}")
             return data
         model = data.get("model")
-        if isinstance(model, str) and model.lower().startswith("a2a/"):
-            # A registered agent is also reachable as model "a2a/<name>" on the chat routes, which
-            # would skip the agent check above: closed for everyone, agents go through /a2a/.
+        if _names_an_agent(model, data.get("custom_llm_provider"), self.mcp_policy):
+            # A registered agent is also reachable as model "a2a/<name>" on the chat routes (and the
+            # a2a_agent provider takes a caller-chosen api_base), which would skip the agent check
+            # above: closed for everyone, agents go through /a2a/.
             raise HTTPException(status_code=403, detail="agent-policy: call agents on /a2a/, not as a model")
         if call_type == "pass_through_endpoint":
             # The body's `model` does not decide where a pass-through request goes, so it cannot
