@@ -202,14 +202,14 @@ if [ "${TEST_ONLY:-}" != "unit" ]; then
 	fi
 
 	echo "== runners compose"
-	# ci-fake-env.sh (run by _run_all above) wrote a six-token .runner.env into $ws.
+	# ci-fake-env.sh (run by _run_all above) wrote a seven-token .runner.env into $ws.
 	rc() { (cd "$ws" && docker compose -f docker-compose.runners.yml --env-file "$1" "${@:2}" 2>&1); }
 	if cfg="$(rc .runner.env config --format json)"; then
 		names="$(jq -r '.services | keys | join(",")' <<<"$cfg")"
-		if [ "$names" = "runner-ai,runner-darkangel,runner-ea,runner-heaven,runner-infra,runner-moria" ]; then
-			pass "six runner-<name> services"
+		if [ "$names" = "runner-ai,runner-darkangel,runner-ea,runner-heaven,runner-infra,runner-moria,runner-rag" ]; then
+			pass "seven runner-<name> services"
 		else
-			fail "six runner-<name> services" "got: $names"
+			fail "seven runner-<name> services" "got: $names"
 		fi
 		for n in ai darkangel ea heaven infra moria; do
 			if jq -e --arg n "$n" '.services["runner-"+$n].environment | .LABELS == $n and .EPHEMERAL == "true" and .DISABLE_AUTO_UPDATE == "true"' <<<"$cfg" >/dev/null; then
