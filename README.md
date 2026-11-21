@@ -570,7 +570,7 @@ the REST route `/mcp-rest/tools/call` run the team check.
   To add an agent: `agents:` in `config.yaml` and in `mcp_policy.yaml`, and its own exact
   `location` in `nginx/conf.d/litellm.conf`.
 - **`agent-musique`** (`agents/agent-musique/`, `mcp` stack), opened the same way at
-  `POST /v1/a2a/agent-musique/message/send`, teams `admin` and `apps` (the Portail backend calls
+  `POST /v1/a2a/agent-musique/message/send` (model `gemma4:26b-a4b-it-qat`), teams `admin` and `apps` (the Portail backend calls
   `http://litellm:4000` with its key `ai`). It helps with the record collection
   from the Obsidian vault in S3 (bucket `obsidian`, under `02 - Domaines/Loisirs/Musique/`):
   each message loads `Discographie.md` into the prompt, then at most 6 tool rounds (temperature 0)
@@ -634,7 +634,11 @@ Setup of `agent-musique` (once, on the host, before merging, in this order):
    (prints the `agent-musique` key once).
 4. `make vault-cli args="kv patch -mount=infra env AGENT_MUSIQUE_LITELLM_KEY=<key>"`, then
    `make vault-env`. All three keys must be in the vault before the merge, or `check-env` fails the Deploy.
-5. Merge. The Deploy builds `infra-agent-musique:2` and redeploys `mcp`, `platform` and `infra`.
+5. Merge. The Deploy builds `infra-agent-musique:3` and redeploys `mcp`, `platform` and `infra`.
+
+Switching to `gemma4:26b-a4b-it-qat` (image `:3`): the Deploy does not update the teams' models.
+After the merge, re-run `litellm_provision.py` as in step 3 (from `main` this time), or the
+`agent-musique` key is refused on gemma4 and every message fails.
 
 Check, with `$A`, `$J`, `$URL` as above:
 

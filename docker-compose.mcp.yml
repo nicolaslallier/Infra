@@ -73,7 +73,7 @@ services:
     # It refuses every request but /health without AGENT_MUSIQUE_TOKEN, which LiteLLM sends
     # (static_headers). Only teams admin and apps (the Portail) may call it (litellm/mcp_policy.yaml). Built by
     # `make app-images` like agent-test: bump the tag here and in portainer-images.sh together.
-    image: infra-agent-musique:2
+    image: infra-agent-musique:3
     pull_policy: never
     restart: unless-stopped
     environment:
