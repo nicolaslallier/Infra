@@ -630,7 +630,7 @@ Setup of `agent-musique` (once, on the host, before merging, in this order):
    (prints the `agent-musique` key once).
 4. `make vault-cli args="kv patch -mount=infra env AGENT_MUSIQUE_LITELLM_KEY=<key>"`, then
    `make vault-env`. All three keys must be in the vault before the merge, or `check-env` fails the Deploy.
-5. Merge. The Deploy builds `infra-agent-musique:1` and redeploys `mcp`, `platform` and `infra`.
+5. Merge. The Deploy builds `infra-agent-musique:2` and redeploys `mcp`, `platform` and `infra`.
 
 Check, with `$A`, `$J`, `$URL` as above:
 
