@@ -146,9 +146,11 @@ never orphans another app that's still attached to it):
   `/ui`). OpenAI- and Anthropic-format API in front of Ollama on the
   MacBook (by LAN address) and, through `ollama-proxy`, on the Mac Studio. The MCP
   semantic tool filter ("Enable Semantic Filtering") embeds with
-  `qwen3-embedding:0.6b` on .10's Ollama (192.168.2.10) via `ollama-proxy-laptop`; never save that setting from the UI, a
-  `mcp_semantic_tool_filter` key in the DB silently turns the filter off (see the comment in
-  `litellm/config.yaml`). Config is
+  `qwen3-embedding:0.6b` on .10's Ollama (192.168.2.10) via `ollama-proxy-laptop`. A stale
+  `mcp_semantic_tool_filter` key in the DB (its `embedding_model` not in `model_list`) overrides
+  the file and silently turns the filter off; in 1.108 the UI refuses to write it while the file
+  owns the key (`reject_config_owned_writes`), so only a row from an older version can do this
+  (see the comment in `litellm/config.yaml`). Config is
   `litellm/config.yaml`; secrets (`LITELLM_MASTER_KEY`, `LITELLM_SALT_KEY`,
   `LITELLM_UI_PASSWORD`) come from `.env`. Database/role `litellm`, provisioned
   like any other app; without it the UI login fails with "Not connected to DB".
