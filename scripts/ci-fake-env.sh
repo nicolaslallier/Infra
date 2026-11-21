@@ -86,7 +86,7 @@ if [ -f .runner.env ] && [ "${CI_FAKE_ENV_FORCE:-0}" != "1" ]; then
 	exit 1
 fi
 : > .runner.env
-for n in DARKANGEL EA HEAVEN INFRA MORIA AI; do printf 'GH_RUNNER_TOKEN_%s=fake-%s\n' "$n" "$(rand_hex 8)" >> .runner.env; done
+for n in DARKANGEL EA HEAVEN INFRA MORIA AI RAG; do printf 'GH_RUNNER_TOKEN_%s=fake-%s\n' "$n" "$(rand_hex 8)" >> .runner.env; done
 
 echo "ci-fake-env: wrote $PWD/.env and $PWD/openbao/seal.key (throwaway values)"
 
