@@ -175,14 +175,14 @@ services:
 
   litellm:
     # LLM gateway: OpenAI- and Anthropic-format API (Claude Code, opencode,
-    # scripts) in front of Ollama on the Macs. The -database image
+    # scripts) in front of Ollama on the Macs. The unified litellm image
     # ships Prisma, which LiteLLM needs for its admin UI, virtual keys and
     # spend tracking -- without a DATABASE_URL the UI login answers "Not
     # connected to DB". Database/role `litellm`, provisioned like any other
     # app (APP_DATABASES / make provision-app app=litellm).
     # Pinned by tag *and* digest: this container holds the master key and the
     # DB salt, and main-stable moves under every redeploy. Upgrade on purpose.
-    image: ghcr.io/berriai/litellm-database:v1.108.14-lts@sha256:2758a0fe3d8844410a42b1cf22d69ed21a08628feb0a61e7c3490e02ee1eb6d1
+    image: ghcr.io/berriai/litellm:v1.108.14-lts@sha256:31d1ce109dbb444de68088d5f5946de65ca2b96f2407ade0bb36ee08f2035bef
     # liveliness needs no key.
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=4)"]

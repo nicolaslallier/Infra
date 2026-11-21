@@ -123,7 +123,7 @@ else
 fi
 echo "== cloud-pii guardrail (against the pinned LiteLLM)"
 # The version Renovate bumps in docker-compose.platform.yml, as for prefect above.
-LITELLM_VERSION="$(grep -m1 -oE 'litellm-database:v[0-9]+\.[0-9]+\.[0-9]+' docker-compose.platform.yml | sed 's/.*:v//')"
+LITELLM_VERSION="$(grep -m1 -oE 'berriai/litellm:v[0-9]+\.[0-9]+\.[0-9]+' docker-compose.platform.yml | sed 's/.*:v//')"
 if [ -z "$LITELLM_VERSION" ]; then
 	fail "scripts/test_cloud_pii.py" "could not read the litellm version from docker-compose.platform.yml"
 elif out="$(uv run -q --no-project --with pyyaml --with "litellm[proxy]==$LITELLM_VERSION" python scripts/test_cloud_pii.py 2>&1)"; then
