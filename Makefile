@@ -8,7 +8,7 @@ SHELL := bash
 .NOTPARALLEL:
 
 .PHONY: help test init net certs seal-key app-images up down restart logs ps status pull config \
-	shell psql provision-app provision-monitoring-role provision-litellm-rag litellm-provision hosts dns-provision \
+	shell psql provision-app provision-monitoring-role provision-litellm-rag provision-grafana-litellm litellm-provision hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision rabbitmq-provision \
 	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli vault-backup-token \
@@ -337,6 +337,9 @@ provision-monitoring-role: check-env ## Create/update postgres-exporter monitori
 
 provision-litellm-rag: check-env ## Create/update LiteLLM's read-only view of Jarvis's pgvector chunks
 	@./scripts/provision-litellm-rag.sh
+
+provision-grafana-litellm: check-env ## Create/update Grafana's read-only role on LiteLLM's spend log (re-run after a LiteLLM upgrade recreates the table)
+	@./scripts/provision-grafana-litellm.sh
 
 litellm-provision: check-env ## Create/update LiteLLM teams, users, keys and budgets from litellm/teams.yaml ([rotate=<alias>])
 	@set -a; . ./.env; set +a; uv run -q --no-project --with pyyaml python scripts/litellm_provision.py $(if $(rotate),--rotate "$(rotate)")

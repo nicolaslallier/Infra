@@ -1,0 +1,912 @@
+{
+  "uid": "litellm-overview",
+  "title": "LiteLLM",
+  "description": "Usage de la passerelle LiteLLM d'après son journal de dépenses (base litellm, table LiteLLM_SpendLogs). Aucun contenu de requête n'est lisible d'ici.",
+  "tags": [
+    "infra",
+    "litellm"
+  ],
+  "timezone": "browser",
+  "editable": true,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "schemaVersion": 39,
+  "version": 1,
+  "templating": {
+    "list": [
+      {
+        "type": "query",
+        "name": "model_group",
+        "label": "Modèle",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "litellm-db"
+        },
+        "query": "SELECT DISTINCT COALESCE(NULLIF(model_group, ''), '(aucun)') FROM \"LiteLLM_SpendLogs\" ORDER BY 1",
+        "definition": "SELECT DISTINCT COALESCE(NULLIF(model_group, ''), '(aucun)') FROM \"LiteLLM_SpendLogs\" ORDER BY 1",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 1,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": []
+      },
+      {
+        "type": "query",
+        "name": "team_id",
+        "label": "Équipe",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "litellm-db"
+        },
+        "query": "SELECT DISTINCT COALESCE(NULLIF(team_id, ''), '(aucune)') FROM \"LiteLLM_SpendLogs\" ORDER BY 1",
+        "definition": "SELECT DISTINCT COALESCE(NULLIF(team_id, ''), '(aucune)') FROM \"LiteLLM_SpendLogs\" ORDER BY 1",
+        "multi": true,
+        "includeAll": true,
+        "refresh": 1,
+        "sort": 1,
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "options": []
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "links": [
+    {
+      "title": "Agents",
+      "type": "link",
+      "url": "/d/agents-overview"
+    },
+    {
+      "title": "Ollama",
+      "type": "link",
+      "url": "/d/ollama"
+    }
+  ],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Vue d'ensemble",
+      "collapsed": false,
+      "panels": [],
+      "id": 1,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Requêtes (période)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT count(*) FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "id": 2,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Taux d'échec (période)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT (count(*) FILTER (WHERE COALESCE(status, 'success') <> 'success'))::float8 / NULLIF(count(*), 0) FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.05
+              },
+              {
+                "color": "red",
+                "value": 0.2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "id": 3,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Coût (période)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(sum(spend), 0) FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "id": 4,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 1
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Taux de cache (période)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT (count(*) FILTER (WHERE cache_hit = 'True'))::float8 / NULLIF(count(*), 0) FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "value",
+        "justifyMode": "center",
+        "wideLayout": true
+      },
+      "id": 5,
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 1
+      }
+    },
+    {
+      "type": "row",
+      "title": "Trafic",
+      "collapsed": false,
+      "panels": [],
+      "id": 6,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requêtes / min par modèle",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval, 0),\n       COALESCE(NULLIF(model_group, ''), '(aucun)') AS metric,\n       count(*) * 60000.0 / $__interval_ms AS value\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqpm",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 7,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Taux d'échec",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval),\n       (count(*) FILTER (WHERE COALESCE(status, 'success') <> 'success'))::float8 / count(*) AS value\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "échecs"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 8,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latence p50 / p95",
+      "description": "Requêtes réussies. request_duration_ms, sinon endTime - startTime.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval),\n       percentile_cont(0.5)  WITHIN GROUP (ORDER BY d) AS \"p50\",\n       percentile_cont(0.95) WITHIN GROUP (ORDER BY d) AS \"p95\"\nFROM (SELECT \"startTime\", COALESCE(request_duration_ms, EXTRACT(EPOCH FROM (\"endTime\" - \"startTime\")) * 1000)::float8 AS d\n      FROM \"LiteLLM_SpendLogs\"\n      WHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\n        AND COALESCE(status, 'success') = 'success') s\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 14
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Tokens (prompt / completion)",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval, 0),\n       COALESCE(sum(prompt_tokens), 0) AS \"prompt\",\n       COALESCE(sum(completion_tokens), 0) AS \"completion\"\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 14
+      }
+    },
+    {
+      "type": "row",
+      "title": "Coût et cache",
+      "collapsed": false,
+      "panels": [],
+      "id": 11,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Coût par modèle",
+      "description": "Dépense comptée par LiteLLM, en USD. Les modèles locaux coûtent 0.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval, 0),\n       COALESCE(NULLIF(model_group, ''), '(aucun)') AS metric, sum(spend) AS value\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Coût par équipe",
+      "description": "Dépense comptée par LiteLLM, en USD. Les modèles locaux coûtent 0.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval, 0),\n       COALESCE(NULLIF(team_id, ''), '(aucune)') AS metric, sum(spend) AS value\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Taux de cache",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval),\n       (count(*) FILTER (WHERE cache_hit = 'True'))::float8 / count(*) AS value\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Appels d'outils MCP",
+      "description": "Appels d'outils MCP passés par LiteLLM, par outil. Filtré par équipe seulement : le filtre Modèle ne s'applique pas ici.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "interval": "5m",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval, 0),\n       mcp_namespaced_tool_name AS metric, count(*) AS value\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(mcp_namespaced_tool_name, '') <> ''\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\nGROUP BY 1, 2 ORDER BY 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "normal",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "mean",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 15,
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      }
+    },
+    {
+      "type": "row",
+      "title": "Échecs récents",
+      "collapsed": false,
+      "panels": [],
+      "id": 16,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      }
+    },
+    {
+      "type": "table",
+      "title": "50 dernières requêtes en échec",
+      "description": "Le message d'erreur est dans metadata, que ce rôle ne peut pas lire : chercher le request_id dans les logs (Explore → Loki).",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "litellm-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "litellm-db"
+          },
+          "rawQuery": true,
+          "editorMode": "code",
+          "format": "table",
+          "rawSql": "SELECT \"startTime\" AS \"Heure\",\n       COALESCE(NULLIF(model_group, ''), '(aucun)') AS \"Modèle\",\n       model AS \"Déploiement\",\n       custom_llm_provider AS \"Fournisseur\",\n       call_type AS \"Type\",\n       team_id AS \"Équipe\",\n       status AS \"Statut\",\n       COALESCE(request_duration_ms, EXTRACT(EPOCH FROM (\"endTime\" - \"startTime\")) * 1000)::float8 AS \"Durée (ms)\",\n       total_tokens AS \"Tokens\",\n       mcp_namespaced_tool_name AS \"Outil MCP\",\n       request_id,\n       session_id\nFROM \"LiteLLM_SpendLogs\"\nWHERE $__timeFilter(\"startTime\")\n  AND COALESCE(NULLIF(model_group, ''), '(aucun)') IN (${model_group:sqlstring})\n  AND COALESCE(NULLIF(team_id, ''), '(aucune)') IN (${team_id:sqlstring})\n  AND COALESCE(status, 'success') <> 'success'\nORDER BY \"startTime\" DESC\nLIMIT 50"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "id": 17,
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 40
+      }
+    }
+  ]
+}

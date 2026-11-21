@@ -43,6 +43,11 @@
       "url": "/d/librechat-overview"
     },
     {
+      "title": "LiteLLM",
+      "type": "link",
+      "url": "/d/litellm-overview"
+    },
+    {
       "title": "Ollama",
       "type": "link",
       "url": "/d/ollama"
@@ -200,6 +205,10 @@
         {
           "title": "Dashboard LibreChat",
           "url": "/d/librechat-overview"
+        },
+        {
+          "title": "Dashboard LiteLLM",
+          "url": "/d/litellm-overview"
         },
         {
           "title": "Dashboard Ollama",
@@ -1683,7 +1692,7 @@
     {
       "type": "timeseries",
       "title": "LiteLLM : requêtes par endpoint et statut",
-      "description": "Appels à l'API de LiteLLM d'après ses logs d'accès. LiteLLM n'est pas collecté par Prometheus aujourd'hui, donc pas de ventilation par modèle ni de coût ici.",
+      "description": "Appels à l'API de LiteLLM d'après ses logs d'accès. LiteLLM n'est pas collecté par Prometheus aujourd'hui, donc pas de ventilation par modèle ni de coût ici : voir le dashboard LiteLLM, qui lit son journal de dépenses.",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -1731,6 +1740,12 @@
           "sort": "desc"
         }
       },
+      "links": [
+        {
+          "title": "Dashboard LiteLLM",
+          "url": "/d/litellm-overview"
+        }
+      ],
       "id": 23,
       "gridPos": {
         "h": 8,

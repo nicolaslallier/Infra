@@ -73,7 +73,8 @@ make init      # creates infra-net, local dev certs, OpenBao's seal key, copies 
 
 Edit `.env` and set real passwords (`POSTGRES_PASSWORD`, `PGADMIN_PASSWORD`,
 `KEYCLOAK_ADMIN_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`, `S3_ADMIN_SECRET_KEY`,
-`RABBITMQ_DEFAULT_PASS`, `MORIA_AMQP_PASSWORD`, `MONITORING_DB_PASSWORD`, and one
+`RABBITMQ_DEFAULT_PASS`, `MORIA_AMQP_PASSWORD`, `MONITORING_DB_PASSWORD`,
+`GRAFANA_LITELLM_DB_PASSWORD`, and one
 `<APPNAME>_DB_PASSWORD` per entry in `APP_DATABASES`, including
 `KEYCLOAK_DB_PASSWORD` and `GRAFANA_DB_PASSWORD`), plus the
 oauth2-proxy cookie keys (`JARVIS_OAUTH_COOKIE_SECRET`,
@@ -781,6 +782,7 @@ Run `make` / `make help` for the full list. Notable targets:
 | `make provision-app app=<name>` | Add/update an app's database/role (and `vector` extension) on an **already-running** cluster |
 | `make rabbitmq-provision app=<name>` | Create/update an app's RabbitMQ vhost + user (`<APP>_AMQP_PASSWORD` from `.env`; no tags, permissions on its own vhost only) on the **running** broker |
 | `make provision-monitoring-role` | Create/update the postgres-exporter `monitoring` role |
+| `make provision-grafana-litellm` | Create/update Grafana's read-only `grafana_litellm` role on LiteLLM's spend log (re-run after a LiteLLM upgrade recreates the table) |
 | `make certs` / `make certs FORCE=1` | Generate certs (or regenerate with `FORCE=1`) |
 | `make seal-key` | Generate OpenBao's auto-unseal key (`FORCE=1` replaces it — destroys an existing vault) |
 | `make vault-init` | Initialise the vault: root token → `.openbao.env`, KV v2 at `infra/` and `ea/` (idempotent) |
@@ -835,7 +837,12 @@ Prefect flow-run outcomes, Ollama tokens), linking to each app's own
 dashboard. Its container selectors are cAdvisor name regexes without a
 `job=` matcher on purpose, so an agent counts on the homelab and on the
 Colima VMs alike; its log panels only see the homelab (Alloy reads that
-Docker socket alone).
+Docker socket alone). **LiteLLM** (`uid: litellm-overview`) charts requests,
+failures, latency, tokens, cost, cache hits and MCP tool calls per model and
+team from LiteLLM's spend log (LiteLLM exposes no `/metrics`), through the
+Postgres datasource `litellm-db`: role `grafana_litellm` may `SELECT` an
+allowlist of `"LiteLLM_SpendLogs"` columns only, never prompts, responses,
+metadata, keys or client addresses (`make provision-grafana-litellm`).
 
 ### Windows machines
 
@@ -1057,6 +1064,7 @@ On an **already-running** Postgres volume (init scripts won't re-run):
 # After adding grafana to APP_DATABASES + GRAFANA_DB_PASSWORD in .env:
 make provision-app app=grafana
 make provision-monitoring-role   # postgres-exporter role (idempotent)
+make provision-grafana-litellm   # Grafana's read-only role on LiteLLM's spend log (idempotent)
 ```
 
 **macOS / Docker Desktop:** node-exporter and cAdvisor see Docker Desktop's

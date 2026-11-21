@@ -265,6 +265,7 @@ def _checks(workspace: str) -> list[dict[str, Any]]:
                 "docker compose --env-file .env -f docker-compose.openbao.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.data.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.monitoring.yml config -q && "
+                "docker compose --env-file .env -f docker-compose.grafana.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.auth.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.platform.yml config -q && "
                 "docker compose --env-file .env -f docker-compose.mcp.yml config -q && "
