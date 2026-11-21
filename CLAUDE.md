@@ -301,7 +301,7 @@ never orphans another app that's still attached to it):
   inference only, accepted), and the card under `/a2a/agent-test/` stays readable by any valid key
   from `infra-net` (closed on the LAN, harmless content). Setup: README ("LiteLLM: memory, skills, agents").
 - **`agent-musique`** — second A2A agent, same pattern as `agent-test` (`agents/agent-musique/`,
-  image `infra-agent-musique:1`, `mcp` stack, team `admin` only via
+  image `infra-agent-musique:2`, `mcp` stack, team `admin` only via
   `/v1/a2a/agent-musique/message/send`): the record collection, from and into the Obsidian vault in
   S3 (`02 - Domaines/Loisirs/Musique/`), with boto3 directly (the `mcp-obsidian` server stays
   read-only). Keys: `AGENT_MUSIQUE_LITELLM_KEY` (team `agents`), `AGENT_MUSIQUE_TOKEN` (LiteLLM
