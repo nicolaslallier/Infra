@@ -8,7 +8,7 @@ SHELL := bash
 .NOTPARALLEL:
 
 .PHONY: help test init net certs seal-key app-images up down restart logs ps status pull config \
-	shell psql provision-app provision-monitoring-role provision-litellm-rag provision-grafana-litellm litellm-provision hosts dns-provision \
+	shell psql provision-app provision-monitoring-role provision-litellm-rag index-vault provision-grafana-litellm litellm-provision hosts dns-provision \
 	dns-check clean check-env check-docker docker-start docker-stop \
 	migrate-volumes keycloak-seed-users s3-provision ntfy-provision rabbitmq-provision \
 	vault-init vault-seed vault-oidc vault-seed-ea vault-env vault-render vault-status vault-cli vault-backup-token \
@@ -327,6 +327,8 @@ run-up: check-env ## Rebuild the portail's run-egress image from main and (re)de
 run-down: ## Stop the run stack (portail commands lose their network)
 	STACK=run ./scripts/portainer-stack.sh down
 
+vault ?= $(HOME)/Obsidian/Maison
+
 ##@ App provisioning
 provision-app: check-env ## Add an app DB/role (app=<name>)
 	@test -n "$(app)" || { echo "usage: make provision-app app=<name>" >&2; exit 1; }
@@ -335,8 +337,11 @@ provision-app: check-env ## Add an app DB/role (app=<name>)
 provision-monitoring-role: check-env ## Create/update postgres-exporter monitoring role
 	@./scripts/provision-monitoring-role.sh
 
-provision-litellm-rag: check-env ## Create/update LiteLLM's read-only view of Jarvis's pgvector chunks
+provision-litellm-rag: check-env ## Create/update LiteLLM's vector database litellm_rag (tables, store second-brain)
 	@./scripts/provision-litellm-rag.sh
+
+index-vault: check-env ## Index the Obsidian vault into the second-brain vector store (vault=<dir>, default ~/Obsidian/Maison)
+	@./scripts/index-vault.sh "$(vault)"
 
 provision-grafana-litellm: check-env ## Create/update Grafana's read-only role on LiteLLM's spend log (re-run after a LiteLLM upgrade recreates the table)
 	@./scripts/provision-grafana-litellm.sh
