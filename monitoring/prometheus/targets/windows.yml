@@ -10,10 +10,11 @@
 # the change before the next `make up` (the drift guard refuses untracked
 # files anyway).
 
-# The machine this stack itself runs on. host.docker.internal is Docker
-# Desktop's route from a container back to its own host: from inside
-# infra-net the laptop is not a container and has no service name.
-- targets: ["host.docker.internal:9182"]
+# The machine this stack itself runs on, by LAN address like any other.
+# host.docker.internal stopped resolving inside the Prometheus container
+# (Docker DNS: NXDOMAIN) and up{job="windows"} went to 0; the LAN address
+# answers. Keep a DHCP reservation on it (ollama-proxy-laptop relies on it too).
+- targets: ["192.168.2.10:9182"]
   labels:
     hostname: laptop-dopbpc0j
 

@@ -891,8 +891,8 @@ Confirm with Prometheus → Status → Targets, or the dashboard's *Machines*
 tile.
 
 Two things to know about the machine **this stack runs on**: it is scraped at
-`host.docker.internal:9182` (Docker Desktop's route from a container back to
-its own host — from inside `infra-net` the laptop is not a container), and
+its LAN address, `192.168.2.10:9182` (`host.docker.internal` no longer
+resolves from the Prometheus container), and
 its firewall rule has to cover the Docker/WSL virtual adapter, not just the
 LAN one. It is also the one machine node-exporter and cAdvisor already
 report on — but they see Docker Desktop's Linux VM, so windows_exporter is
