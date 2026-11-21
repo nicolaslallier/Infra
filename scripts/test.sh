@@ -109,6 +109,12 @@ if out="$(uv run -q --no-project --with-requirements agents/agent-test/requireme
 else
 	fail "scripts/test_agent_test.py" "$out"
 fi
+echo "== A2A agent-musique (fake LiteLLM, in-memory S3, with the image's own pinned requirements)"
+if out="$(uv run -q --no-project --with-requirements agents/agent-musique/requirements.txt python scripts/test_agent_musique.py 2>&1)"; then
+	pass "scripts/test_agent_musique.py"
+else
+	fail "scripts/test_agent_musique.py" "$out"
+fi
 echo "== cloud-pii guardrail (against the pinned LiteLLM)"
 # The version Renovate bumps in docker-compose.platform.yml, as for prefect above.
 LITELLM_VERSION="$(grep -m1 -oE 'litellm-database:v[0-9]+\.[0-9]+\.[0-9]+' docker-compose.platform.yml | sed 's/.*:v//')"
@@ -499,7 +505,7 @@ FAKE
 		expect_reject "amqp password not url-safe" "MORIA_AMQP_PASSWORD must be letters and digits" "set_env MORIA_AMQP_PASSWORD 'a@b/c'"
 		expect_reject "portail db password not url-safe" "PORTAIL_DB_PASSWORD must be letters and digits" "set_env PORTAIL_DB_PASSWORD 'a@b/c'"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
-		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY; do
+		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY AGENT_MUSIQUE_LITELLM_KEY AGENT_MUSIQUE_TOKEN AGENT_MUSIQUE_S3_SECRET_KEY; do
 			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
 			expect_reject "$k empty" "set but empty" "set_env $k ''"
 		done

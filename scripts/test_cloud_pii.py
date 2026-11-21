@@ -435,7 +435,7 @@ def test_an_a2a_call_is_allowed_for_admin_only_and_not_masked():
 
 def test_an_agent_as_a_model_is_refused_for_everyone():
     for model in ("a2a/agent-test", "A2A/agent-test", "a2a_agent/agent-test", "A2A_Agent/agent-test",
-                  " a2a/agent-test", "a2a/other", "agent-test", "Agent-Test"):
+                  " a2a/agent-test", "a2a/other", "agent-test", "Agent-Test", "a2a/agent-musique"):
         for team in ("admin", "apps"):
             refused(lambda: call(guard(), model, [{"role": "user", "content": "x"}], team=team), 403)
     for provider in ("a2a_agent", "A2A"):  # the provider named in the body, whatever the model
@@ -443,7 +443,8 @@ def test_an_agent_as_a_model_is_refused_for_everyone():
                              extra={"custom_llm_provider": provider}), 403)
     call(guard(), LOCAL, [{"role": "user", "content": "a2a/ in text is fine"}], team="admin")
     for model in (LOCAL, CLOUD):
-        for fb in ({"fallbacks": ["a2a/agent-test"]}, {"context_window_fallbacks": [{LOCAL: ["agent-test"]}]}):
+        for fb in ({"fallbacks": ["a2a/agent-test"]}, {"context_window_fallbacks": [{LOCAL: ["agent-test"]}]},
+                   {"fallbacks": ["agent-musique"]}):
             refused(lambda: call(guard(), model, [{"role": "user", "content": "x"}], team="admin",
                                  extra=copy.deepcopy(fb)), 403)
     refused(lambda: call(guard(), CLOUD, [{"role": "user", "content": "x"}], team="admin",

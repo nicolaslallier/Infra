@@ -46,3 +46,4 @@ keys:
   - {alias: ai, team: apps, user: null}
   - {alias: dev-sessions, team: dev-sessions, user: null}
   - {alias: agent-test, team: agents, user: null}
+  - {alias: agent-musique, team: agents, user: null}

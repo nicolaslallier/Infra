@@ -212,23 +212,33 @@ def test_agent_refusal_lets_only_listed_teams_call_a_listed_agent():
 
 def test_policy_agents_are_registered_built_and_keyed():
     pol = mp.load_policy(os.path.join(ROOT, "litellm", "mcp_policy.yaml"))["agents"]
-    assert pol == {"agent-test": {"teams": ["admin"]}}, pol
+    assert pol == {"agent-test": {"teams": ["admin"]}, "agent-musique": {"teams": ["admin"]}}, pol
     reg = {a["agent_name"]: a for a in _y("litellm", "config.yaml")["agents"]}
     assert set(pol) == set(reg), (set(pol), set(reg))
-    assert reg["agent-test"]["agent_card_params"]["url"] == "http://agent-test:8000"
-    svc = _y("docker-compose.mcp.yml")["services"]["agent-test"]
-    assert "ports" not in svc and svc["pull_policy"] == "never" and "infra-net" in svc["networks"]
-    assert ":?" in svc["environment"]["AGENT_TEST_LITELLM_KEY"]
-    assert f'build "{svc["image"]}" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-test"' in \
-        open(os.path.join(ROOT, "scripts", "portainer-images.sh")).read()
     teams = _y("litellm", "teams.yaml")
-    assert {"alias": "agent-test", "team": "agents", "user": None} in teams["keys"]
+    images = open(os.path.join(ROOT, "scripts", "portainer-images.sh")).read()
+    for name, secrets in (("agent-test", ["AGENT_TEST_LITELLM_KEY"]), ("agent-musique",
+                          ["AGENT_MUSIQUE_LITELLM_KEY", "AGENT_MUSIQUE_TOKEN", "AGENT_MUSIQUE_S3_SECRET_KEY"])):
+        assert reg[name]["agent_card_params"]["url"] == f"http://{name}:8000"
+        svc = _y("docker-compose.mcp.yml")["services"][name]
+        assert "ports" not in svc and svc["pull_policy"] == "never" and "infra-net" in svc["networks"]
+        assert "healthcheck" in svc
+        for k in secrets:
+            assert ":?" in svc["environment"][k], k
+        assert f'build "{svc["image"]}" "https://github.com/nicolaslallier/Infra.git#main:agents/{name}"' in images
+        assert {"alias": name, "team": "agents", "user": None} in teams["keys"]
+        d = open(os.path.join(ROOT, "agents", name, "Dockerfile")).read()
+        assert re.search(r"^FROM \S+@sha256:[0-9a-f]{64}", d, re.M) and re.search(r"^USER \d+", d, re.M)
+    # the token LiteLLM sends agent-musique: an env reference, and that env set on litellm
+    assert reg["agent-musique"]["static_headers"] == {"X-Agent-Token": "os.environ/AGENT_MUSIQUE_TOKEN"}
+    lenv = _y("docker-compose.platform.yml")["services"]["litellm"]["environment"]
+    assert ":?" in lenv["AGENT_MUSIQUE_TOKEN"], lenv.get("AGENT_MUSIQUE_TOKEN")
+    assert _y("docker-compose.mcp.yml")["services"]["agent-musique"]["environment"]["AGENT_MUSIQUE_S3_ACCESS_KEY"] == "agent-musique"
     local = set(_y("litellm", "pii_policy.yaml")["local_models"])
     assert set(teams["teams"]["agents"]["models"]) <= local  # its unmasked prompt stays on the Macs
-    for t in pol["agent-test"]["teams"]:
-        assert t in teams["teams"], t
-    d = open(os.path.join(ROOT, "agents", "agent-test", "Dockerfile")).read()
-    assert re.search(r"^FROM \S+@sha256:[0-9a-f]{64}", d, re.M) and re.search(r"^USER \d+", d, re.M)
+    for agent in pol.values():
+        for t in agent["teams"]:
+            assert t in teams["teams"], t
     mcp = next(ln.split() for ln in open(os.path.join(ROOT, "stacks.conf")) if ln.startswith("mcp "))
     assert "agents/" in mcp[3:], mcp
 
