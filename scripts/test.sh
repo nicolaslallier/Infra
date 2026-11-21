@@ -85,7 +85,7 @@ if out="$(uv run -q --no-project --with pyyaml python scripts/test_mcp_policy.py
 else
 	fail "scripts/test_mcp_policy.py" "$out"
 fi
-echo "== litellm vhost: skills and A2A routes closed, docs"
+echo "== litellm vhost: skills and A2A routes closed (but agent-test), docs"
 if out="$(python3 scripts/test_litellm_routes.py 2>&1)"; then
 	pass "scripts/test_litellm_routes.py"
 else
@@ -102,6 +102,12 @@ if out="$(uv run -q --no-project --with pyyaml --with-requirements mcp/obsidian/
 	pass "scripts/test_mcp_obsidian.py"
 else
 	fail "scripts/test_mcp_obsidian.py" "$out"
+fi
+echo "== A2A agent-test (against a fake LiteLLM, with the image's own pinned requirements)"
+if out="$(uv run -q --no-project --with-requirements agents/agent-test/requirements.txt python scripts/test_agent_test.py 2>&1)"; then
+	pass "scripts/test_agent_test.py"
+else
+	fail "scripts/test_agent_test.py" "$out"
 fi
 echo "== cloud-pii guardrail (against the pinned LiteLLM)"
 # The version Renovate bumps in docker-compose.platform.yml, as for prefect above.
@@ -493,7 +499,7 @@ FAKE
 		expect_reject "amqp password not url-safe" "MORIA_AMQP_PASSWORD must be letters and digits" "set_env MORIA_AMQP_PASSWORD 'a@b/c'"
 		expect_reject "portail db password not url-safe" "PORTAIL_DB_PASSWORD must be letters and digits" "set_env PORTAIL_DB_PASSWORD 'a@b/c'"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
-		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY; do
+		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY; do
 			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
 			expect_reject "$k empty" "set but empty" "set_env $k ''"
 		done

@@ -45,6 +45,13 @@ servers:
       - update_pull_request
       - add_reply_to_pull_request_comment
 
+# A2A agents registered in config.yaml (`agents:`) and the teams that may call them. LiteLLM gives
+# the hook the agent's id (sha256 of its name); an agent not listed here is refused. Only list an
+# agent that uses local models: the message it receives is NOT masked (the gate lets it through).
+agents:
+  agent-test:
+    teams: [admin]
+
 # A file write must name a branch, and not a default one: an unprotected repo with a runner
 # would run it. (A default branch with an unusual name is the repo ruleset's job.)
 branch_guard:

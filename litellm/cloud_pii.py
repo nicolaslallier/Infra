@@ -8,6 +8,9 @@ callback always runs, sees the whole request and receives the authenticated key 
 
 The policy (pii_policy.yaml) lists the local aliases; everything else is masked, so an alias
 added in the admin UI under a free name is masked, not leaked. Fails closed.
+
+It also decides who may call which MCP tool (`call_mcp_tool`) and which A2A agent
+(`asend_message`, and never as model "a2a/<name>"), from mcp_policy.yaml and the key's team.
 Design: docs/superpowers/specs/2026-11-14-litellm-cloud-pii-design.md
 """
 import asyncio
@@ -318,6 +321,20 @@ def _team_cache(data, team, key=None):
     return data
 
 
+A2A_PROVIDERS = {"a2a", "a2a_agent"}  # LiteLLM's model prefixes / providers that reach an agent
+
+
+def _names_an_agent(model: Any, provider: Any, mcp_pol: dict) -> bool:
+    """True when a model request would go to an A2A agent: an a2a/ or a2a_agent/ prefix (any case,
+    LiteLLM's own routing and provider), that provider named explicitly, or a bare agent name."""
+    if isinstance(provider, str) and provider.strip().lower() in A2A_PROVIDERS:
+        return True
+    if not isinstance(model, str):
+        return False
+    m = model.strip().lower()
+    return ("/" in m and m.split("/", 1)[0] in A2A_PROVIDERS) or m in {n.lower() for n in (mcp_pol.get("agents") or {})}
+
+
 class CloudPIIGate(CustomLogger):
     def __init__(
         self,
@@ -408,11 +425,28 @@ class CloudPIIGate(CustomLogger):
             if reason:
                 raise HTTPException(status_code=403, detail=f"mcp-policy: {reason}")
             return data
+        if call_type == "asend_message":
+            # An A2A call (/a2a/{agent}/...): the proxy sets data["agent_id"] to the registered
+            # agent's id itself. Who may call which agent is the key's team (mcp_policy.yaml,
+            # `agents:`). The message is not masked: only agents that use local models are listed.
+            reason = mcp_policy.agent_refusal(
+                self.mcp_policy, getattr(user_api_key_dict, "team_id", None) or None, data.get("agent_id"))
+            if reason:
+                raise HTTPException(status_code=403, detail=f"agent-policy: {reason}")
+            return data
+        model = data.get("model")
+        if _names_an_agent(model, data.get("custom_llm_provider"), self.mcp_policy):
+            # A registered agent is also reachable as model "a2a/<name>" on the chat routes (and the
+            # a2a_agent provider takes a caller-chosen api_base), which would skip the agent check
+            # above: closed for everyone, agents go through /a2a/.
+            raise HTTPException(status_code=403, detail="agent-policy: call agents on /a2a/, not as a model")
+        for key in FALLBACK_KEYS:  # the router would retry on a fallback: same rule, local or cloud
+            if any(_names_an_agent(n, n, self.mcp_policy) for n in _strings(data.get(key))):
+                raise HTTPException(status_code=403, detail="agent-policy: an agent cannot be a fallback")
         if call_type == "pass_through_endpoint":
             # The body's `model` does not decide where a pass-through request goes, so it cannot
             # make the request local.
             raise _refuse("provider pass-through is not available (it is not masked)")
-        model = data.get("model")
         # The team is the authenticated key's team_id, never anything the request body says; a
         # team alias can be duplicated or renamed, the id cannot. No team: the strictest set.
         team = getattr(user_api_key_dict, "team_id", None) or None

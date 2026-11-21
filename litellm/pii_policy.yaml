@@ -46,6 +46,7 @@ teams:
   famille: [identifiants, noms]
   apps: [identifiants, noms]
   dev-sessions: [identifiants]
+  agents: [identifiants, noms]
 
 # A team missing above. A key with no team at all (the master key, a user's own
 # key) gets every group instead.

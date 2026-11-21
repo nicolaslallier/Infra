@@ -52,3 +52,5 @@ build "infra-litellm-pgvector:${LITELLM_PGVECTOR_REF:0:7}" "https://github.com/B
 # The Obsidian MCP server (mcp/obsidian/), from this repo's main: merge a change there first, then bump the tag here and in
 # docker-compose.mcp.yml together (a tag already on the daemon is not rebuilt).
 build "infra-mcp-obsidian:1" "https://github.com/nicolaslallier/Infra.git#main:mcp/obsidian"
+# The A2A test agent (agents/agent-test/), same rule as the Obsidian MCP server above.
+build "infra-agent-test:1" "https://github.com/nicolaslallier/Infra.git#main:agents/agent-test"
