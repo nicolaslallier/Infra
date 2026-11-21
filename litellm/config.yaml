@@ -155,7 +155,8 @@ litellm_settings:
   # "Enable Semantic Filtering" (admin UI, MCP settings): when a request
   # carries MCP tools, keep only the top_k whose name + description are
   # closest to the last user message. The index of the registry's tools is
-  # built at startup; on any failure the request keeps all its tools.
+  # built at startup; on most failures the request keeps all its tools, but
+  # if the embedding model overflows its context window LiteLLM answers 400.
   # embedding_model is a model_name from model_list above. A value saved in
   # the UI is stored in the DB and wins over this one.
   mcp_semantic_tool_filter:
