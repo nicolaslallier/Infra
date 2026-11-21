@@ -67,7 +67,7 @@ services:
 
   agent-musique:
     # A2A agent for the record collection (agents/agent-musique/): answers from the Obsidian vault
-    # in S3 and records discs there, with qwen3.8 through LiteLLM (its own key, team `agents`). Its
+    # in S3 and records discs there, with gemma4 through LiteLLM (its own key, team `agents`). Its
     # S3 identity `agent-musique` is Read,Write,List on the whole `obsidian` bucket (provision-s3.sh
     # cannot scope a prefix): the code holds reads and writes to `02 - Domaines/Loisirs/Musique/`.
     # It refuses every request but /health without AGENT_MUSIQUE_TOKEN, which LiteLLM sends

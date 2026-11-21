@@ -249,7 +249,7 @@ def test_the_loop_is_bounded_to_six_model_calls():
     assert len(n) == 6 and "6 tours" in out, (len(n), out)
 
 
-def test_a_message_goes_to_qwen_through_litellm_with_the_agent_key_at_temperature_zero():
+def test_a_message_goes_to_gemma4_through_litellm_with_the_agent_key_at_temperature_zero():
     seen.clear()
     script[:] = [call("lire_disque", chemin="02 - Domaines/Loisirs/Musique/Miles Davis - Kind of Blue (vinyle).md"),
                  {"role": "assistant", "content": "Tu l'as en vinyle."}]

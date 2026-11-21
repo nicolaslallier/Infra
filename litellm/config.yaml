@@ -167,7 +167,7 @@ agents:
     agent_card_params:
       protocolVersion: "1.0"
       name: agent-musique
-      description: "Ta collection de disques, depuis ton coffre Obsidian : répond et enregistre (qwen3.8, local)."
+      description: "Ta collection de disques, depuis ton coffre Obsidian : répond et enregistre (gemma4, local)."
       url: http://agent-musique:8000
       version: "1"
       capabilities:

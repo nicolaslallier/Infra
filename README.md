@@ -637,8 +637,8 @@ Setup of `agent-musique` (once, on the host, before merging, in this order):
 5. Merge. The Deploy builds `infra-agent-musique:3` and redeploys `mcp`, `platform` and `infra`.
 
 Switching to `gemma4:26b-a4b-it-qat` (image `:3`): the Deploy does not update the teams' models.
-After the merge, re-run `litellm_provision.py` as in step 3 (from `main` this time), or the
-`agent-musique` key is refused on gemma4 and every message fails.
+Before the merge, re-run `litellm_provision.py` from the branch, as in step 3, so the
+`agent-musique` key is never refused on gemma4 (the old image keeps working with qwen3.8).
 
 Check, with `$A`, `$J`, `$URL` as above:
 
