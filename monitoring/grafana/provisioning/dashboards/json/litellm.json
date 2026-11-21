@@ -1356,7 +1356,7 @@
         {
           "type": "stat",
           "title": "Erreurs dans les logs (période)",
-          "description": "Lignes de log de niveau erreur sur la période affichée. Loki ne lit que les conteneurs du homelab : une instance d'agent sur le Mac Studio ou le Mac mini n'y figure pas.",
+          "description": "Lignes de log de niveau erreur sur la période affichée. Loki ne lit que les conteneurs du homelab : une instance d'agent sur le Mac Studio n'y figure pas.",
           "datasource": {
             "type": "loki",
             "uid": "loki"
