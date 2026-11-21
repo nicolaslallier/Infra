@@ -31,6 +31,6 @@ pg_run -- psql -X -At -F $'\t' -v ON_ERROR_STOP=1 -d litellm_rag -c \
   "select distinct metadata->>'path', metadata->>'sha256' from embeddings where vector_store_id='second-brain' and metadata->>'source'='obsidian-maison'" \
   </dev/null >"$tmp/state"
 
-python3 scripts/index_vault.py --vault "$VAULT" --state "$tmp/state" >"$tmp/apply.sql"
+python3 scripts/index_vault.py --vault "$VAULT" --state "$tmp/state" ${FORCE:+--force} >"$tmp/apply.sql"
 pg_run -- psql -X -q -v ON_ERROR_STOP=1 -1 -d litellm_rag -f - <"$tmp/apply.sql"
 echo "index-vault.sh: second-brain is up to date"

@@ -14,7 +14,9 @@ import hashlib
 import json
 import os
 import pathlib
+import ssl
 import sys
+import unicodedata
 import urllib.request
 
 EXCLUDED = (".obsidian/", ".trash/", ".git/", "06 - Modèles/")
@@ -30,9 +32,10 @@ def notes(vault):
     """{relative path: text} of every indexable .md note."""
     out = {}
     for p in sorted(vault.rglob("*.md")):
-        rel = p.relative_to(vault).as_posix()
+        # macOS may hand back NFD names: compare (and store) in NFC.
+        rel = unicodedata.normalize("NFC", p.relative_to(vault).as_posix())
         if not any(rel.startswith(e) or f"/{e}" in rel for e in EXCLUDED):
-            out[rel] = p.read_text(encoding="utf-8", errors="replace")
+            out[rel] = p.read_text(encoding="utf-8", errors="replace").replace("\x00", "")
     return out
 
 
@@ -86,7 +89,9 @@ def embed(texts, url, key):
     req = urllib.request.Request(
         url, data=json.dumps({"model": MODEL, "input": texts}).encode(),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=300) as r:
+    ca = pathlib.Path(__file__).resolve().parent.parent / "certs" / "infra-ca.crt"
+    ctx = ssl.create_default_context(cafile=str(ca)) if ca.exists() else None
+    with urllib.request.urlopen(req, timeout=300, context=ctx) as r:
         data = sorted(json.load(r)["data"], key=lambda d: d["index"])
     vecs = [d["embedding"] for d in data]
     assert len(vecs) == len(texts), "embedding count mismatch"
@@ -101,12 +106,12 @@ def copy_escape(s):
 
 
 SQL_HEAD = r"""\set ON_ERROR_STOP on
+SET ROLE litellm_rag;
 CREATE TEMP TABLE vault_in (j jsonb);
 COPY vault_in (j) FROM STDIN;
 """
 
 SQL_TAIL = r"""\.
-SET ROLE litellm_rag;
 DELETE FROM embeddings
  WHERE vector_store_id = 'second-brain' AND metadata->>'source' = 'obsidian-maison'
    AND metadata->>'path' IN (SELECT j->>'purge' FROM vault_in WHERE j ? 'purge');
@@ -128,6 +133,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--vault", required=True, type=pathlib.Path)
     ap.add_argument("--state", required=True, type=pathlib.Path)
+    ap.add_argument("--force", action="store_true", help="allow deleting over half the index")
     a = ap.parse_args()
 
     texts = notes(a.vault)
@@ -136,6 +142,9 @@ def main():
     state = dict(l.split("\t", 1) for l in a.state.read_text().splitlines() if "\t" in l)
     current = {p: sha(t) for p, t in texts.items()}
     new, changed, deleted, unchanged = diff(current, state)
+    if state and len(deleted) * 2 > len(state) and not a.force:
+        sys.exit(f"index_vault.py: {len(deleted)}/{len(state)} indexed notes missing from {a.vault} "
+                 "(partial vault?); refusing, force=1 to override")
 
     rows = [{"purge": p} for p in changed + deleted]
     pending = [(p, i, c) for p in new + changed for i, c in enumerate(chunks(p, texts[p]))]

@@ -340,8 +340,8 @@ provision-monitoring-role: check-env ## Create/update postgres-exporter monitori
 provision-litellm-rag: check-env ## Create/update LiteLLM's vector database litellm_rag (tables, store second-brain)
 	@./scripts/provision-litellm-rag.sh
 
-index-vault: check-env ## Index the Obsidian vault into the second-brain vector store (vault=<dir>, default ~/Obsidian/Maison)
-	@./scripts/index-vault.sh "$(vault)"
+index-vault: check-env ## Index the Obsidian vault into the second-brain vector store (vault=<dir>, default ~/Obsidian/Maison; force=1 allows deleting over half the index)
+	@FORCE="$(filter 1,$(force) $(FORCE))" ./scripts/index-vault.sh "$(vault)"
 
 provision-grafana-litellm: check-env ## Create/update Grafana's read-only role on LiteLLM's spend log (re-run after a LiteLLM upgrade recreates the table)
 	@./scripts/provision-grafana-litellm.sh
