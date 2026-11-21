@@ -13,6 +13,10 @@ model_list:
   # the connection), the Mac Studio's through the stack's ollama-proxy next
   # (order 2). LAN address: .10's containers use the router's DNS. Used by
   # the dev sessions' Claude Code (the devbox CLI's [llm] model) and Jarvis.
+  # The Portail also calls it with a 300 s read budget (PORTAIL_LLM_DELAI_S):
+  # keep (router_settings.num_retries + 1) x max(timeout) < 300, i.e. today
+  # 2 x 140 = 280. Raising num_retries or either timeout breaks that rule
+  # (make test checks it); a deployment without timeout waits ~6000 s.
   - model_name: qwen3.8:27b-mlx
     litellm_params:
       model: ollama_chat/qwen3.8:27b-mlx
@@ -24,6 +28,7 @@ model_list:
     litellm_params:
       model: ollama_chat/qwen3.8:27b-mlx
       api_base: http://ollama-proxy:11434
+      timeout: 140
       order: 2
 
   # Gemma 4 26B (MoE, ~4B active: fast for its size), on the Mac Studio's

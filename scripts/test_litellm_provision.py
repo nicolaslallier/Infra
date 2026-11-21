@@ -107,6 +107,15 @@ def test_repo_files_are_consistent():
     assert lp.validate(s, c) == [], lp.validate(s, c)
 
 
+def test_qwen_failover_fits_portail_budget():
+    # The Portail reads for 300 s (PORTAIL_LLM_DELAI_S): every attempt must end before.
+    c = lp.load_spec(os.path.join(ROOT, "litellm", "config.yaml"))
+    timeouts = [m["litellm_params"].get("timeout") for m in c["model_list"] if m["model_name"] == "qwen3.8:27b-mlx"]
+    assert timeouts and None not in timeouts, timeouts
+    tries = c["router_settings"]["num_retries"] + 1
+    assert tries * max(timeouts) < 300, (tries, timeouts)
+
+
 class FakeClient:
     """In-memory LiteLLM admin API, shaped as the v1.83 docs describe it."""
 

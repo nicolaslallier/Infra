@@ -267,7 +267,9 @@ both together, then `make provision-app app=portail`.
      -d '{"key_alias":"portail","models":["qwen3.8:27b-mlx"]}'
    ```
 
-   Add a model to the key when `agents.yaml` gains one.
+   Add a model to the key when `agents.yaml` gains one. Each of its
+   deployments in `litellm/config.yaml` needs a `timeout` with
+   `(num_retries + 1) x max(timeout) < 300` (the Portail's 300 s read budget).
 3. The AI deploy's secret, its policy and its token
    (`openbao/policies/portail-deploy.hcl`: `read` on `infra/data/portail`,
    nothing else; the `default` policy every token carries already allows
