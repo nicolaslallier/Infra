@@ -30,7 +30,7 @@ teams:
   # Macs; the cap is a tripwire, local models cost 0.
   agents:
     max_budget_cad: 1
-    models: [qwen3.8:27b-mlx, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3-embedding:0.6b]
 
 # Internal users (no UI login, no invitation). The family is the owner's to
 # add: one line per person.

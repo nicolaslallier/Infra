@@ -258,7 +258,7 @@ def test_a_message_goes_to_qwen_through_litellm_with_the_agent_key_at_temperatur
     assert len(seen) == 2
     for path, auth, body in seen:
         assert path == "/v1/chat/completions" and auth == "Bearer sk-musique", (path, auth)
-        assert body["model"] == "qwen3.8:27b-mlx" and body["temperature"] == 0 and body["tools"], body
+        assert body["model"] == "gemma4:26b-a4b-it-qat" and body["temperature"] == 0 and body["tools"], body
     assert "Miles Davis | Kind of Blue" in seen[0][2]["messages"][0]["content"]
     assert "Pressage 1959" in seen[1][2]["messages"][-1]["content"]
 
