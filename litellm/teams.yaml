@@ -27,7 +27,8 @@ teams:
     max_budget_cad: 70
     models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, cloud-anthropic, qwen3-embedding:0.6b]
   # The A2A agents' own keys (agents/): local models only, so an agent's prompt never leaves the
-  # Macs; the cap is a tripwire, local models cost 0.
+  # Macs; the cap is a tripwire, local models cost 0. Also the RAG service (RAG repo): embeddings,
+  # generation, bench judge.
   agents:
     max_budget_cad: 1
     models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3-embedding:0.6b]
@@ -47,3 +48,4 @@ keys:
   - {alias: dev-sessions, team: dev-sessions, user: null}
   - {alias: agent-test, team: agents, user: null}
   - {alias: agent-musique, team: agents, user: null}
+  - {alias: rag, team: agents, user: null}
