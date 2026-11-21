@@ -365,6 +365,15 @@ def test_main_refuses_invalid_spec_before_any_request():
     assert code == 1 and "sum" in err and out == "" and c.calls == [], (code, out, err)
 
 
+def test_the_rag_key_reaches_local_models_only():
+    import yaml
+    spec = yaml.safe_load(open(os.path.join(ROOT, "litellm", "teams.yaml")))
+    key = next(k for k in spec["keys"] if k["alias"] == "rag")
+    models = spec["teams"][key["team"]]["models"]
+    assert key["team"] == "agents" and not [m for m in models if m.startswith("cloud-")]
+    assert {"qwen3-embedding:0.6b", "gemma4:26b-a4b-it-qat", "qwen3.8:27b-mlx"} <= set(models)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):
