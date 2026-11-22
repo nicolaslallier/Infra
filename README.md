@@ -271,17 +271,30 @@ redeploy the Portail.
    `make vault-env`, `make s3-provision app=portail bucket=obsidian actions=Read,Write,List`.
 2. LiteLLM key: in `https://litellm.infra.famillelallier.net/ui` → Virtual
    Keys → Create, alias `portail`, models limited to those in the AI repo's
-   `agents.yaml` (today `qwen3.8:27b-mlx`). Or with the master key:
+   `agents.yaml`'s `modeles_permis` (today `qwen3.8:27b-mlx`,
+   `gemma4:26b-a4b-it-qat`, `qwen3.6:35b-a3b` and the three `cloud-*`). Or
+   with the master key:
 
    ```bash
    curl -sS https://litellm.infra.famillelallier.net/key/generate \
      -H "Authorization: Bearer $LITELLM_MASTER_KEY" -H 'Content-Type: application/json' \
-     -d '{"key_alias":"portail","models":["qwen3.8:27b-mlx"]}'
+     -d '{"key_alias":"portail","models":["qwen3.8:27b-mlx","gemma4:26b-a4b-it-qat","qwen3.6:35b-a3b","cloud-anthropic","cloud-openai","cloud-gemini"]}'
    ```
 
-   Add a model to the key when `agents.yaml` gains one. Each of its
-   deployments in `litellm/config.yaml` needs a `timeout` and
-   `num_retries: 0`, with the sum of the timeouts < 300 (the Portail's 300 s
+   Add a model to the key when `agents.yaml` gains one (`/key/update`
+   replaces the whole list, so read it first; run from this checkout on the homelab, with the
+   stack up -- each step stops the chain if it fails, so an empty list never reaches the key):
+
+   ```bash
+   M=$(make -s vault-cli args="kv get -field=LITELLM_MASTER_KEY -mount=infra env") && [ -n "$M" ] &&
+   U=https://litellm.infra.famillelallier.net && C=(--cacert certs/infra-ca.crt -fsS -H "Authorization: Bearer $M") &&
+   T=$(curl "${C[@]}" "$U/key/list?key_alias=portail&return_full_object=true" | jq -er '.keys[0].token') &&
+   L=$(curl "${C[@]}" "$U/key/info?key=$T" | jq -ec '.info.models + ["<model>"] | unique') &&
+   curl "${C[@]}" -H 'Content-Type: application/json' -d "{\"key\":\"$T\",\"models\":$L}" "$U/key/update" | jq -c .models
+   ```
+
+   Each of its deployments in `litellm/config.yaml` needs a `timeout` and
+   `num_retries: 0`, with the sum of the timeouts < 840 (the Portail's 840 s
    read budget); list it in `PORTAIL_MODELS` in `scripts/test_litellm_provision.py`.
 3. The AI deploy's secret, its policy and its token
    (`openbao/policies/portail-deploy.hcl`: `read` on `infra/data/portail`,
