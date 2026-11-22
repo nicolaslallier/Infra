@@ -16,22 +16,22 @@ global_budget_cad: 200
 teams:
   admin:
     max_budget_cad: 29
-    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-mlx, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-a3b, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
   famille:
     max_budget_cad: 30
-    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-mlx, cloud-gemini, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-a3b, cloud-gemini, qwen3-embedding:0.6b]
   apps:
     max_budget_cad: 70
-    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-mlx, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-a3b, cloud-anthropic, cloud-gemini, cloud-openai, qwen3-embedding:0.6b]
   dev-sessions:
     max_budget_cad: 70
-    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-mlx, cloud-anthropic, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-a3b, cloud-anthropic, qwen3-embedding:0.6b]
   # The A2A agents' own keys (agents/): local models only, so an agent's prompt never leaves the
   # Macs; the cap is a tripwire, local models cost 0. Also the RAG service (RAG repo): embeddings,
   # generation, bench judge.
   agents:
     max_budget_cad: 1
-    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-mlx, qwen3-embedding:0.6b]
+    models: [qwen3.8:27b-mlx, gemma4:26b-a4b-it-qat, qwen3.6:35b-a3b, qwen3-embedding:0.6b]
 
 # Internal users (no UI login, no invitation). The family is the owner's to
 # add: one line per person.

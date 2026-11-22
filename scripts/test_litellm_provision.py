@@ -108,7 +108,7 @@ def test_repo_files_are_consistent():
 
 
 # Models of the Portail's LiteLLM key (created by hand, see README "Portail (AI repo)").
-PORTAIL_MODELS = ("qwen3.8:27b-mlx", "qwen3.6:35b-mlx", "gemma4:26b-a4b-it-qat")
+PORTAIL_MODELS = ("qwen3.8:27b-mlx", "qwen3.6:35b-a3b", "gemma4:26b-a4b-it-qat")
 # The two Macs every local chat model is balanced between.
 MACS = {"http://192.168.2.40:11434", "http://ollama-proxy:11434"}
 
