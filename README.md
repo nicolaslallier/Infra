@@ -282,14 +282,15 @@ redeploy the Portail.
    ```
 
    Add a model to the key when `agents.yaml` gains one (`/key/update`
-   replaces the whole list, so read it first; run where `make vault-cli` works):
+   replaces the whole list, so read it first; run from this checkout on the homelab, with the
+   stack up -- each step stops the chain if it fails, so an empty list never reaches the key):
 
    ```bash
-   M=$(make -s vault-cli args="kv get -field=LITELLM_MASTER_KEY -mount=infra env")
-   U=https://litellm.infra.famillelallier.net
-   T=$(curl -sS "$U/key/list?key_alias=portail&return_full_object=true" -H "Authorization: Bearer $M" | jq -r '.keys[0].token')
-   L=$(curl -sS "$U/key/info?key=$T" -H "Authorization: Bearer $M" | jq -c '.info.models + ["<model>"] | unique')
-   curl -sS "$U/key/update" -H "Authorization: Bearer $M" -H 'Content-Type: application/json' -d "{\"key\":\"$T\",\"models\":$L}" | jq -c .models
+   M=$(make -s vault-cli args="kv get -field=LITELLM_MASTER_KEY -mount=infra env") && [ -n "$M" ] &&
+   U=https://litellm.infra.famillelallier.net && C=(--cacert certs/infra-ca.crt -fsS -H "Authorization: Bearer $M") &&
+   T=$(curl "${C[@]}" "$U/key/list?key_alias=portail&return_full_object=true" | jq -er '.keys[0].token') &&
+   L=$(curl "${C[@]}" "$U/key/info?key=$T" | jq -ec '.info.models + ["<model>"] | unique') &&
+   curl "${C[@]}" -H 'Content-Type: application/json' -d "{\"key\":\"$T\",\"models\":$L}" "$U/key/update" | jq -c .models
    ```
 
    Each of its deployments in `litellm/config.yaml` needs a `timeout` and
