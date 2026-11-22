@@ -252,11 +252,23 @@ so it never sees `infra/env`. The values live only in the vault, never in a comm
 `infra/env` (this stack's `check-env` and `make provision-app` read it from
 `.env`, rendered from `infra/env`) and `infra/portail` (the AI deploy). Rotate
 both together, then `make provision-app app=portail`.
+**`PORTAIL_S3_SECRET_KEY` is kept twice too**: `infra/env` (`check-env`,
+`make s3-provision`) and `infra/portail` (the Portail's vault view, S3 identity
+`portail`, `Read,Write,List` on bucket `obsidian`; the code writes only under
+`01 - Projets/*/Docs/`). Missing from `infra/portail`, the Portail starts with
+the vault off. Rotate: new value in both, then
+`make s3-provision app=portail bucket=obsidian actions=Read,Write,List` and
+redeploy the Portail.
 
 1. Database: `openssl rand -hex 24` (letters and digits only, it goes into a
    URL; `check-env` rejects anything else), then
    `make vault-cli args="kv patch -mount=infra env PORTAIL_DB_PASSWORD=... APP_DATABASES=<current list>,portail"`,
    `make vault-env`, `make provision-app app=portail`.
+   S3 (before merging the change that requires it, or `check-env` fails the
+   Deploy): `openssl rand -hex 24`, then
+   `make vault-cli args="kv patch -mount=infra env PORTAIL_S3_SECRET_KEY=..."`,
+   `make vault-cli args="kv patch -mount=infra portail PORTAIL_S3_SECRET_KEY=<same> PORTAIL_COFFRE_PREFIXE=<value of ORGANIZER_VAULT_PREFIX>"`,
+   `make vault-env`, `make s3-provision app=portail bucket=obsidian actions=Read,Write,List`.
 2. LiteLLM key: in `https://litellm.infra.famillelallier.net/ui` → Virtual
    Keys → Create, alias `portail`, models limited to those in the AI repo's
    `agents.yaml` (today `qwen3.8:27b-mlx`). Or with the master key:

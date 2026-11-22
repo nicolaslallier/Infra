@@ -514,7 +514,7 @@ FAKE
 		expect_reject "portail db password not url-safe" "PORTAIL_DB_PASSWORD must be letters and digits" "set_env PORTAIL_DB_PASSWORD 'a@b/c'"
 		expect_reject "rag db password not url-safe" "RAG_DB_PASSWORD must be letters and digits" "set_env RAG_DB_PASSWORD 'a@b/c'"
 		expect_reject "prefect auth without colon" "must be user:password" "set_env PREFECT_AUTH_STRING nocolon"
-		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY RAG_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY AGENT_MUSIQUE_LITELLM_KEY AGENT_MUSIQUE_TOKEN AGENT_MUSIQUE_S3_SECRET_KEY; do
+		for k in GITHUB_MCP_TOKEN OBSIDIAN_MCP_TOKEN OBSIDIAN_MCP_S3_SECRET_KEY RAG_S3_SECRET_KEY PORTAIL_S3_SECRET_KEY AGENT_TEST_LITELLM_KEY AGENT_MUSIQUE_LITELLM_KEY AGENT_MUSIQUE_TOKEN AGENT_MUSIQUE_S3_SECRET_KEY; do
 			expect_reject "$k change-me placeholder" "placeholder" "set_env $k change-me"
 			expect_reject "$k empty" "set but empty" "set_env $k ''"
 		done

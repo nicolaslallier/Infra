@@ -304,6 +304,10 @@ never orphans another app that's still attached to it):
   path through LiteLLM: any container on `infra-net` can post to `agent-test:8000` directly (local
   inference only, accepted), and the card under `/a2a/agent-test/` stays readable by any valid key
   from `infra-net` (closed on the LAN, harmless content). Setup: README ("LiteLLM: memory, skills, agents").
+- **S3 identity `portail`** — the Portail (AI repo) reads the Obsidian vault and publishes docs:
+  `Read,Write,List` on the whole `obsidian` bucket (`provision-s3.sh` cannot scope a prefix, so the
+  limit to `01 - Projets/*/Docs/` is in the Portail's code). `PORTAIL_S3_SECRET_KEY` is kept in
+  `infra/env` (`check-env`, `make s3-provision`) and `infra/portail`, same value. Setup: README "Portail".
 - **`agent-musique`** — second A2A agent, same pattern as `agent-test` (`agents/agent-musique/`,
   image `infra-agent-musique:3`, model `gemma4:26b-a4b-it-qat` (qwen3.8 was too slow), `mcp` stack, teams `admin` and `apps` (the Portail) via
   `/v1/a2a/agent-musique/message/send`): the record collection, from and into the Obsidian vault in
