@@ -1558,7 +1558,7 @@ max_active = 2                 # the Mac Studio VM has 8 GiB, shared with DarkAn
 # [llm]                        # Claude Code in new sessions uses the LLM gateway
 # base_url = "https://litellm.infra.famillelallier.net"
 # api_key = "sk-..."           # a LiteLLM virtual key, never the master key
-# model = "qwen3.8:27b-mlx"    # the MacBook's Ollama first, then the Mac Studio's
+# model = "qwen3.8:27b-mlx"    # balanced between the MacBook's and the Mac Studio's Ollama
 # ca_cert = "/Users/me/OpenCode/Infra/certs/infra-ca.crt"
 ```
 

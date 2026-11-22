@@ -8,40 +8,87 @@
 # for anything that should survive a fresh database.
 
 model_list:
-  # Qwen 3.8: the MacBook's Ollama first (order 1; 192.168.2.40, often
-  # asleep or away, hence the short timeout -- a sleeping laptop never refuses
-  # the connection), the Mac Studio's through the stack's ollama-proxy next
-  # (order 2). LAN address: .10's containers use the router's DNS. Used by
-  # the dev sessions' Claude Code (the devbox CLI's [llm] model) and Jarvis.
-  # The Portail also calls it with an 840 s read budget (PORTAIL_LLM_DELAI_S).
-  # num_retries: 0 per deployment: one attempt per order level, the router's
-  # order fallback does the failover (a retry would restart at order 1). So
-  # the worst case is the sum of the timeouts: 120 + 700 = 820 < 840 (make
-  # test checks it); a deployment without timeout waits ~6000 s. Non-streamed,
-  # the timeout is also the longest generation allowed: 170 s cut long-context
-  # Portail prefills (408). Clients with a shorter delay give up first.
+  # Local models, load-balanced between the two Macs: each alias has one
+  # deployment per Mac, same weight, no `order`, so the router shuffles
+  # requests between them (router_settings.routing_strategy). The
+  # MacBook by LAN address (192.168.2.40; .10's containers use the router's
+  # DNS), the Mac Studio through the stack's ollama-proxy (metrics).
+  #   - Qwen 3.8 27B: dense, the best quality; dev sessions' Claude Code (the
+  #     devbox CLI's [llm] model), Jarvis, most Portail agents.
+  #   - Qwen 3.6 35B-A3B: MoE, ~3B active, several times faster; the Portail's
+  #     documentation agents.
+  #   - Gemma 4 26B-A4B: MoE, ~4B active; documentaliste, agent-musique.
+  # Pull each model on both Macs (`ollama pull <name>`): a Mac without it
+  # answers 404, which fails over to the other one and cools it down.
+  #
+  # Failover (router_settings.enable_weighted_failover): a request that fails
+  # on one Mac -- asleep, away, timed out -- is re-sent once to the other,
+  # never back to the one that failed. num_retries: 0 per deployment, so that
+  # failover is the only second attempt. Worst case = the two timeouts:
+  # 400 + 400 = 800 < the Portail's 840 s read budget (PORTAIL_LLM_DELAI_S;
+  # `make test` checks it). Non-streamed, the timeout is also the longest
+  # generation allowed: 170 s cut long-context Portail prefills (408).
+  # Cooldown (model_info): one failure takes that Mac out of rotation for
+  # 300 s, so a sleeping MacBook costs one timeout, not one per request.
   - model_name: qwen3.8:27b-mlx
     litellm_params:
       model: ollama_chat/qwen3.8:27b-mlx
       api_base: http://192.168.2.40:11434
-      timeout: 120
+      timeout: 400
       num_retries: 0
-      order: 1
+    model_info:
+      allowed_fails: 0
+      cooldown_time: 300
 
   - model_name: qwen3.8:27b-mlx
     litellm_params:
       model: ollama_chat/qwen3.8:27b-mlx
       api_base: http://ollama-proxy:11434
-      timeout: 700
+      timeout: 400
       num_retries: 0
-      order: 2
+    model_info:
+      allowed_fails: 0
+      cooldown_time: 300
 
-  # Gemma 4 26B (MoE, ~4B active: fast for its size), on the Mac Studio's
-  # Ollama only, through the stack's ollama-proxy.
+  - model_name: qwen3.6:35b-mlx
+    litellm_params:
+      model: ollama_chat/qwen3.6:35b-mlx
+      api_base: http://192.168.2.40:11434
+      timeout: 400
+      num_retries: 0
+    model_info:
+      allowed_fails: 0
+      cooldown_time: 300
+
+  - model_name: qwen3.6:35b-mlx
+    litellm_params:
+      model: ollama_chat/qwen3.6:35b-mlx
+      api_base: http://ollama-proxy:11434
+      timeout: 400
+      num_retries: 0
+    model_info:
+      allowed_fails: 0
+      cooldown_time: 300
+
+  - model_name: gemma4:26b-a4b-it-qat
+    litellm_params:
+      model: ollama_chat/gemma4:26b-a4b-it-qat
+      api_base: http://192.168.2.40:11434
+      timeout: 400
+      num_retries: 0
+    model_info:
+      allowed_fails: 0
+      cooldown_time: 300
+
   - model_name: gemma4:26b-a4b-it-qat
     litellm_params:
       model: ollama_chat/gemma4:26b-a4b-it-qat
       api_base: http://ollama-proxy:11434
+      timeout: 400
+      num_retries: 0
+    model_info:
+      allowed_fails: 0
+      cooldown_time: 300
 
   # Cloud models, one per provider. Real money: the 200 CAD/month cap is
   # litellm_settings.max_budget below, split per team in teams.yaml; a team
@@ -224,12 +271,15 @@ litellm_settings:
     similarity_threshold: 0.3
 
 router_settings:
-  # Without this, `order:` in model_list is ignored and the two qwen3.8
-  # deployments are shuffled. With it, the router uses the lowest order that
-  # is healthy (the .40 laptop) and moves to order 2 (Mac Studio) when it
-  # fails or sits in cooldown: that order fallback is what makes the first
-  # request after the laptop falls asleep land on the Studio. num_retries
-  # applies to the cloud models; qwen3.8 overrides it with 0 per deployment.
+  # Load balancing between the two Macs (see model_list): simple-shuffle picks
+  # a healthy deployment at random, and weighted failover re-sends a failed
+  # request to the other deployment of the same alias (not back to the one
+  # that failed), bounded by max_fallbacks (5). Only simple-shuffle supports
+  # it, hence the explicit strategy. enable_pre_call_checks drops deployments
+  # whose context window is too small for the request. num_retries applies to
+  # the cloud models; the local ones override it with 0 per deployment.
+  routing_strategy: simple-shuffle
+  enable_weighted_failover: true
   enable_pre_call_checks: true
   num_retries: 1
 

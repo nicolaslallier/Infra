@@ -108,12 +108,14 @@ def test_repo_files_are_consistent():
 
 
 # Models of the Portail's LiteLLM key (created by hand, see README "Portail (AI repo)").
-PORTAIL_MODELS = ("qwen3.8:27b-mlx",)
+PORTAIL_MODELS = ("qwen3.8:27b-mlx", "qwen3.6:35b-mlx", "gemma4:26b-a4b-it-qat")
+# The two Macs every local chat model is balanced between.
+MACS = {"http://192.168.2.40:11434", "http://ollama-proxy:11434"}
 
 
 def test_portail_models_fit_portail_budget():
-    # The Portail reads for 840 s (PORTAIL_LLM_DELAI_S in OpenBao infra/portail). One attempt per order
-    # level, so the worst case is the sum of the deployments' timeouts.
+    # The Portail reads for 840 s (PORTAIL_LLM_DELAI_S in OpenBao infra/portail). Weighted failover
+    # tries each deployment at most once, so the worst case is the sum of the deployments' timeouts.
     c = lp.load_spec(os.path.join(ROOT, "litellm", "config.yaml"))
     for name in PORTAIL_MODELS:
         ps = [m["litellm_params"] for m in c["model_list"] if m["model_name"] == name]
@@ -121,6 +123,22 @@ def test_portail_models_fit_portail_budget():
         assert all(p.get("num_retries") == 0 for p in ps), (name, ps)
         timeouts = [p.get("timeout") for p in ps]
         assert None not in timeouts and sum(timeouts) < 840, (name, timeouts)
+
+
+def test_local_models_are_balanced_between_the_two_macs():
+    c = lp.load_spec(os.path.join(ROOT, "litellm", "config.yaml"))
+    r = c["router_settings"]
+    # Weighted failover (retry on the other Mac) only works with simple-shuffle.
+    assert r.get("routing_strategy", "simple-shuffle") == "simple-shuffle", r
+    assert r.get("enable_weighted_failover") is True, r
+    for name in PORTAIL_MODELS:
+        ds = [m for m in c["model_list"] if m["model_name"] == name]
+        assert {d["litellm_params"]["api_base"] for d in ds} == MACS and len(ds) == 2, (name, ds)
+        # An `order` turns balancing back into failover; a weight skews it.
+        assert not [d for d in ds if "order" in d["litellm_params"] or "weight" in d["litellm_params"]], (name, ds)
+        # One failure takes a Mac out of rotation, so a sleeping one costs one timeout.
+        assert all(d.get("model_info", {}).get("allowed_fails") == 0 for d in ds), (name, ds)
+        assert all(d.get("model_info", {}).get("cooldown_time", 0) > 0 for d in ds), (name, ds)
 
 
 class FakeClient:

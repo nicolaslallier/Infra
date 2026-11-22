@@ -9,6 +9,7 @@
 local_models:
   - qwen3.8:27b-mlx
   - gemma4:26b-a4b-it-qat
+  - qwen3.6:35b-mlx
   - qwen3-embedding:0.6b
 
 groups:
