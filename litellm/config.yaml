@@ -187,6 +187,16 @@ mcp_servers:
     auth_value: os.environ/GITHUB_MCP_TOKEN
     allow_all_keys: true
     allowed_tools: [search_repositories, get_file_contents, list_commits, search_code, get_commit, list_branches, list_tags, get_repository_tree, issue_read, search_issues, list_issues, list_pull_requests, pull_request_read, search_pull_requests, list_label, get_label, actions_list, actions_get, get_job_logs, issue_write, add_issue_comment, update_issue_comment, create_branch, create_or_update_file, push_files, create_pull_request, update_pull_request, add_reply_to_pull_request_comment]
+  # The RAG service (RAG repo). Its stack runs in the MacBook's Colima VM, so LiteLLM reaches it by
+  # LAN IP over plain HTTP (port 8000), not over infra-net. The bearer is RAG_JETON (public-maison
+  # visibility), copied into infra/env as RAG_MCP_TOKEN: rotate both together.
+  rag:
+    url: http://192.168.2.40:8000/mcp
+    transport: http
+    auth_type: bearer_token
+    auth_value: os.environ/RAG_MCP_TOKEN
+    allow_all_keys: true
+    allowed_tools: [rag_chercher, rag_lister, rag_repondre, rag_chemin, rag_expliquer, rag_sources, rag_fichiers]
 
 # A2A agents (POST /a2a/<name>/message/send, or /v1/a2a/... through nginx). Who may call each one
 # is decided by the cloud_pii gate from litellm/mcp_policy.yaml (`agents:`), not here; LiteLLM's

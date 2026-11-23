@@ -343,8 +343,10 @@ Obsidian vault and the code. Two containers, `rag` (API, port 8000) and
 (`deploy/portainer-stack.yml`) — not a row of `stacks.conf`, no vhost, no
 published port, no Prometheus target. This repo provides its database, a
 read-only S3 identity on the vault, a LiteLLM key limited to local models,
-its vault secret's policy and its runner. The MCP entry in LiteLLM comes
-later, once `http://rag:8000/mcp` answers.
+its vault secret's policy and its runner, and registers its MCP server in
+LiteLLM (step 7). The RAG stack now runs in the MacBook's Colima VM
+(`192.168.2.40`, port 8000 in plain HTTP; see the RAG repo's README), so LiteLLM
+reaches its MCP server by LAN IP, not over `infra-net`.
 
 | Item | Value | Provided by |
 |---|---|---|
@@ -356,7 +358,7 @@ later, once `http://rag:8000/mcp` answers.
 | LiteLLM | `http://litellm:4000`, key alias `rag`, team `agents` (local models only) | Infra |
 | S3 | `http://s3:8333`, bucket `obsidian`, identity `rag` **`Read,List`**, `RAG_S3_SECRET_KEY`; `RAG_COFFRE_PREFIXE` = `ORGANIZER_VAULT_PREFIX` | Infra |
 | GitHub | `RAG_GITHUB_JETON`: fine-grained, `Contents: Read` on `nicolaslallier/*` | Nicolas |
-| MCP | LiteLLM `mcp_servers.rag` → `http://rag:8000/mcp`, bearer `RAG_MCP_TOKEN` (= `RAG_JETON`), teams `[admin]` (later PR) | Infra (config), RAG (server) |
+| MCP | LiteLLM `mcp_servers.rag` → `http://192.168.2.40:8000/mcp`, bearer `RAG_MCP_TOKEN` (= `RAG_JETON`, `public-maison` visibility), teams `[admin]`; seven read-only tools `rag_chercher`, `rag_lister`, `rag_repondre`, `rag_chemin`, `rag_expliquer`, `rag_sources`, `rag_fichiers` | Infra (config), RAG (server) |
 | Runner | `runner-rag`, label `rag`, repo `nicolaslallier/RAG`, `GH_RUNNER_TOKEN_RAG`, no Docker socket | Infra |
 
 The authoritative copy is the RAG repo's
@@ -396,16 +398,33 @@ and rendered. Run `make vault-env` in the checkout the Deploy uses
    `make runners-up` and `runners-pull` fail by name; the six runners already
    up are not touched. `runner-rag` mounts `certs/infra-ca.crt` at
    `/etc/rag/infra-ca.crt`.
+7. MCP, once the RAG is deployed and
+   `curl -s -o /dev/null -w '%{http_code}' -X POST http://192.168.2.40:8000/mcp`
+   answers `401` from the homelab host. **Before merging this repo's RAG MCP
+   change** (`make up` fails on the `:?` until the key is rendered):
+
+   ```bash
+   make vault-cli args="kv patch -mount=infra env RAG_MCP_TOKEN=<value of RAG_JETON in infra/rag>"
+   make vault-env
+   ```
+
+   Then merge, and `make up stack=platform`. Check, with the `nicolas-admin`
+   key: the tools list shows the seven `rag-...` tools and a `rag_chercher` call
+   returns passages; the same call with an `apps` key is refused (403). In
+   LiteLLM's logs the MCP semantic tool filter rebuilds without error
+   (`MCP Semantic Tool Filter enabled`, never `Failed to initialize`).
 
 **Values kept twice, both copies must match**: `RAG_DB_PASSWORD` and
 `RAG_S3_SECRET_KEY` in `infra/env` (read by `make provision-app` and
-`make s3-provision`) and in `infra/rag` (the RAG deploy); later
+`make s3-provision`) and in `infra/rag` (the RAG deploy); and
 `RAG_MCP_TOKEN` (`infra/env`, read by LiteLLM) = `RAG_JETON` (`infra/rag`).
 Rotate `RAG_DB_PASSWORD`: patch both, `make vault-env`,
 `make provision-app app=rag`, redeploy the RAG. Rotate `RAG_S3_SECRET_KEY`:
 `make s3-provision app=rag bucket=obsidian actions=Read,List` (it rotates),
 copy the new value into `infra/rag`, redeploy the RAG. Rotate `RAG_JETON`:
-new value in `infra/rag` (and `RAG_MCP_TOKEN` once it exists), redeploy both.
+new value in `infra/rag` and the same in `RAG_MCP_TOKEN` (`infra/env`),
+`make vault-env`, redeploy the RAG and `make up stack=platform`, or LiteLLM loses
+the RAG tools.
 
 ### Jarvis login (Keycloak + oauth2-proxy)
 
