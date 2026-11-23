@@ -102,6 +102,7 @@ def test_the_real_policy_gives_the_agreed_access():
     pol = mp.load_policy(os.path.join(ROOT, "litellm", "mcp_policy.yaml"))
     assert pol["servers"]["obsidian"]["teams"] == ["admin", "apps"]
     assert pol["servers"]["github"]["teams"] == ["admin"]
+    assert pol["servers"]["rag"]["teams"] == ["admin"]
     assert set(pol["branch_guard"]["tools"]) == {"create_or_update_file", "push_files"}
     assert set(pol["branch_guard"]["refuse_branches"]) == {"main", "master"}
 
@@ -182,6 +183,27 @@ def test_litellm_mounts_the_mcp_policy_and_receives_the_two_tokens():
         assert any(v.endswith(f"/litellm/{f}:/app/{f}:ro") for v in svc["volumes"]), f
     for k in ("GITHUB_MCP_TOKEN", "OBSIDIAN_MCP_TOKEN"):
         assert ":?" in svc["environment"][k], k
+
+
+RAG_TOOLS = ["rag_chercher", "rag_lister", "rag_repondre", "rag_chemin", "rag_expliquer", "rag_sources", "rag_fichiers"]
+
+
+def test_the_rag_server_is_admin_only_with_the_agreed_tools():
+    pol = _y("litellm", "mcp_policy.yaml")["servers"]["rag"]
+    assert pol["teams"] == ["admin"] and pol["tools"] == RAG_TOOLS
+
+
+def test_the_rag_server_is_registered_in_litellm():
+    # The RAG stack runs in the MacBook's Colima VM (RAG repo, contract): reached by LAN IP, not infra-net.
+    s = _y("litellm", "config.yaml")["mcp_servers"]["rag"]
+    assert s["url"] == "http://192.168.2.40:8000/mcp" and s["transport"] == "http"
+    assert s["auth_type"] == "bearer_token" and s["auth_value"] == "os.environ/RAG_MCP_TOKEN"
+    assert s["allowed_tools"] == RAG_TOOLS
+
+
+def test_litellm_gets_the_rag_token():
+    env = _y("docker-compose.platform.yml")["services"]["litellm"]["environment"]
+    assert env["RAG_MCP_TOKEN"].startswith("${RAG_MCP_TOKEN:?")
 
 
 def test_docs_name_the_mcp_stack_and_the_no_merge_rule():

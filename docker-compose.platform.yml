@@ -215,6 +215,7 @@ services:
       # MCP servers (mcp_servers in config.yaml): LiteLLM sends each its token.
       GITHUB_MCP_TOKEN: ${GITHUB_MCP_TOKEN:?Set GITHUB_MCP_TOKEN in .env (a fine-grained github_pat_ token, see .env.example)}
       OBSIDIAN_MCP_TOKEN: ${OBSIDIAN_MCP_TOKEN:?Set OBSIDIAN_MCP_TOKEN in .env (openssl rand -hex 32)}
+      RAG_MCP_TOKEN: ${RAG_MCP_TOKEN:?Set RAG_MCP_TOKEN in .env (same value as RAG_JETON in the vault secret infra/rag)}
       # A2A agents (agents: in config.yaml): LiteLLM sends agent-musique this token (static_headers).
       AGENT_MUSIQUE_TOKEN: ${AGENT_MUSIQUE_TOKEN:?Set AGENT_MUSIQUE_TOKEN in .env (openssl rand -hex 32)}
       # PII guardrails (guardrails: in config.yaml).

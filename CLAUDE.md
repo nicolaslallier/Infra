@@ -267,7 +267,7 @@ never orphans another app that's still attached to it):
   `allow_all_keys: true` (LiteLLM otherwise denies every key without an explicit grant), because
   **who may call what is decided by the `cloud_pii` gate**, from the authenticated key's
   `team_id`, per `litellm/mcp_policy.yaml` (bind-mounted next to the gate): Obsidian for `admin`
-  and `apps`, GitHub for `admin`, nothing for `famille`, `dev-sessions`, a key with no team or the
+  and `apps`, GitHub and RAG for `admin`, nothing for `famille`, `dev-sessions`, a key with no team or the
   master key (so the admin UI's tool test page does not work; use the `nicolas-admin` key). The
   gate sees only the unprefixed tool name, so each server lists its tools there, the lists are
   disjoint, and a tool on no list is refused. `mcp-github` is the official
@@ -285,7 +285,10 @@ never orphans another app that's still attached to it):
   `portainer-images.sh` together) serves `list_notes`, `read_note`, `search_notes` over the vault
   in S3: read-only by construction (S3 identity `obsidian-mcp`, `Read,List`, no write call in the
   code), `.md` only, never under `.obsidian/`, paths normalised, reads capped at 1 MiB, searches
-  bounded, and it refuses any request without `OBSIDIAN_MCP_TOKEN`. MCP arguments are not masked
+  bounded, and it refuses any request without `OBSIDIAN_MCP_TOKEN`. A third server, `rag`, is not
+  in this stack: it is the RAG repo's service in the MacBook's Colima VM, registered by LAN IP
+  (`http://192.168.2.40:8000/mcp`, plain HTTP) with bearer `RAG_MCP_TOKEN` (= `RAG_JETON` in
+  `infra/rag`, rotate both together); seven read-only `rag_*` tools, `admin` only. MCP arguments are not masked
   (they are the owner's action); what comes back to a cloud model is, as a `tool_result`. The gate
   also refuses provider-native MCP (`mcp_servers`, `mcp_toolset`, an `mcp` tool whose `server_url`
   is not `litellm_proxy...`), also inside `extra_body`, because those make the provider or

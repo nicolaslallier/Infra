@@ -44,6 +44,11 @@ servers:
       - create_pull_request
       - update_pull_request
       - add_reply_to_pull_request_comment
+  # The RAG service (RAG repo): read-only search over the vault and the code. Reindexing and
+  # exclusions are not MCP tools (they live behind the RAG's own /ui/ and REST tokens).
+  rag:
+    teams: [admin]
+    tools: [rag_chercher, rag_lister, rag_repondre, rag_chemin, rag_expliquer, rag_sources, rag_fichiers]
 
 # A2A agents registered in config.yaml (`agents:`) and the teams that may call them. LiteLLM gives
 # the hook the agent's id (sha256 of its name); an agent not listed here is refused. Only list an
