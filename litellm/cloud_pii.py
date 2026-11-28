@@ -16,6 +16,7 @@ Design: docs/superpowers/specs/2026-11-14-litellm-cloud-pii-design.md
 import asyncio
 import hashlib
 import os
+import re
 from collections import OrderedDict
 from typing import Any
 
@@ -35,7 +36,12 @@ ALLOWED_CALL_TYPES = {
     "embedding", "aembedding", "responses", "aresponses", "anthropic_messages",
 }
 # The message fields this module reads. Any other field, toward a non-local model, is refused
-# rather than guessed at: it could carry free text that would leave unscanned.
+# rather than guessed at: it could carry free text that would leave unscanned. Free text is masked;
+# tool names and call ids are identifiers, checked against these patterns and never masked
+# (a `<PERSON>` would break the provider's pattern, and the names are sent in clear in `tools`).
+TOOL_NAME = re.compile(r"[a-zA-Z0-9_-]{1,128}")
+# LiteLLM carries Gemini's thought signature in the id: call_<uuid>__thought__<base64>
+CALL_ID = re.compile(r"[a-zA-Z0-9_-]{1,256}(__thought__[A-Za-z0-9+/=_-]{1,16384})?")
 MESSAGE_KEYS = {
     "role", "content", "name", "tool_calls", "tool_call_id", "function_call",
     "thinking_blocks", "reasoning_content", "refusal", "cache_control",
@@ -91,13 +97,23 @@ def _check_cache_control(node: dict) -> None:
 
 
 def _str(node: dict, key: str, slots: list, strict: bool = False) -> None:
-    """A string field: scanned (masked, or strictly checked if signed); any other type is refused."""
+    """A string field: scanned (masked, or, if strict, refused when flagged); any other type is refused."""
     v = node.get(key)
     if v is None:
         return
     if not isinstance(v, str):
         raise _refuse(f"'{key}' is not a string and cannot be scanned")
     slots.append((node, key, True) if strict else (node, key))
+
+
+def _ident(node: dict, key: str, pattern: re.Pattern, what: str) -> None:
+    """A tool name or call id: never scanned nor masked, it must match `pattern` (the value is
+    never put in the error)."""
+    v = node.get(key)
+    if v is None:
+        return
+    if not isinstance(v, str) or not pattern.fullmatch(v):
+        raise _refuse(f"{what} is not an identifier and cannot be sent to a non-local model")
 
 
 def _rest(node: dict, known: set, slots: list) -> None:
@@ -126,12 +142,12 @@ def _blocks(content: Any, slots: list) -> None:
             _str(b, "text", slots)
             _rest(b, {"type", "text", "cache_control"}, slots)
         elif t == "tool_use":
-            _str(b, "id", slots)
-            _str(b, "name", slots)
+            _ident(b, "id", CALL_ID, "a tool_use id")
+            _ident(b, "name", TOOL_NAME, "a tool name")
             _string_leaves(b.get("input"), slots)
             _rest(b, {"type", "id", "name", "input", "cache_control"}, slots)
         elif t == "tool_result":
-            _str(b, "tool_use_id", slots)
+            _ident(b, "tool_use_id", CALL_ID, "a tool_use_id")
             c = b.get("content")
             if isinstance(c, str):
                 slots.append((b, "content"))
@@ -194,13 +210,19 @@ def _slots(data: dict) -> list:
             _blocks(tb, slots)
         elif tb is not None:
             raise _refuse("thinking_blocks must be a list")
-        for field in ("reasoning_content", "refusal", "name", "tool_call_id"):
+        for field in ("reasoning_content", "refusal"):
             _str(m, field, slots)
+        _ident(m, "tool_call_id", CALL_ID, "a tool_call_id")
+        if m["role"] in ("tool", "function"):
+            _ident(m, "name", TOOL_NAME, "a tool name")
+        else:  # a participant's name: an identifier too, scanned and refused if flagged, never masked
+            _ident(m, "name", TOOL_NAME, "a participant name")
+            _str(m, "name", slots, strict=True)
         fc = m.get("function_call")
         if fc is not None:
             if not isinstance(fc, dict) or set(fc) - {"name", "arguments"}:
                 raise _refuse("an unexpected function_call cannot be scanned")
-            _str(fc, "name", slots)
+            _ident(fc, "name", TOOL_NAME, "a function name")
             _str(fc, "arguments", slots)
         c = m.get("content")
         if isinstance(c, str):
@@ -220,8 +242,8 @@ def _slots(data: dict) -> list:
             _check_cache_control(tc)
             if "index" in tc and (not isinstance(tc["index"], int) or isinstance(tc["index"], bool)):
                 raise _refuse("a tool call index must be an integer")
-            _str(tc, "id", slots)
-            _str(fn, "name", slots)
+            _ident(tc, "id", CALL_ID, "a tool call id")
+            _ident(fn, "name", TOOL_NAME, "a tool name")
             _str(fn, "arguments", slots)
     return slots
 
@@ -473,7 +495,7 @@ class CloudPIIGate(CustomLogger):
                     continue
                 masked = await self._mask(container[key], decision.groups, data)
                 if flag and masked != container[key]:
-                    raise _refuse("a signed thinking block contains personal information and cannot be altered")
+                    raise _refuse("a field that cannot be altered contains personal information")
                 if not flag:
                     container[key] = masked
         except HTTPException:

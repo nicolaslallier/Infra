@@ -225,8 +225,13 @@ never orphans another app that's still attached to it):
   message field outside a closed list (role, content, name, tool_calls,
   tool_call_id, function_call, thinking_blocks, reasoning_content, refusal,
   cache_control) is refused toward a non-local model, and inside the allowed
-  ones every string is masked (ids and names too, consistently) or strictly
-  checked (thinking, data, signature), `role` must be a known role and
+  ones every free-text string is masked or strictly checked (thinking, data,
+  signature); tool/function names and call ids are identifiers, not prose: never
+  sent to Presidio nor masked (a `<PERSON>` would break the provider's pattern, and
+  the name is already sent in clear in `tools`), they must match
+  `[a-zA-Z0-9_-]{1,128}` (ids: `{1,256}`, plus LiteLLM's `__thought__<base64>`
+  suffix) or the request is refused; a participant `name` is scanned and refused,
+  not masked; `role` must be a known role and
   `cache_control` must have its known shape, a wrong type is refused, and a dict key
   that carries personal information is refused (it cannot be masked without
   renaming it); provider pass-through is refused
