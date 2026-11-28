@@ -26,11 +26,12 @@ LOCAL, CLOUD = "qwen3.8:27b-mlx", "cloud-anthropic"
 
 
 class Stub(ThreadingHTTPServer):
-    """Stands in for presidio-analyzer: emails and one person's name."""
+    """Stands in for presidio-analyzer: emails and the terms of `persons` (each read as a PERSON)."""
 
     def __init__(self):
         self.calls = 0
         self.delay = 0.0
+        self.persons = (NAME,)
 
         class H(BaseHTTPRequestHandler):
             def do_POST(h):  # noqa: N805
@@ -43,9 +44,9 @@ class Stub(ThreadingHTTPServer):
                 if "EMAIL_ADDRESS" in wanted:
                     out += [{"entity_type": "EMAIL_ADDRESS", "start": m.start(), "end": m.end(), "score": 0.9}
                             for m in EMAIL.finditer(text)]
-                if "PERSON" in wanted and NAME in text:
-                    i = text.index(NAME)
-                    out.append({"entity_type": "PERSON", "start": i, "end": i + len(NAME), "score": 0.9})
+                if "PERSON" in wanted:
+                    out += [{"entity_type": "PERSON", "start": m.start(), "end": m.end(), "score": 0.9}
+                            for p in self.persons for m in re.finditer(re.escape(p), text)]
                 data = json.dumps(out).encode()
                 h.send_response(200)
                 h.send_header("Content-Type", "application/json")
@@ -92,7 +93,7 @@ def refused(fn, code):
         fn()
     except HTTPException as e:
         assert e.status_code == code, e.status_code
-        return
+        return e.detail
     raise AssertionError("not refused")
 
 
@@ -202,7 +203,7 @@ def test_system_tool_result_and_tool_use_text_are_masked_in_place():
 
 def test_other_free_text_fields_are_masked():
     msgs = [
-        {"role": "user", "name": "a@b.co", "content": "x"},
+        {"role": "user", "content": "x"},
         {"role": "assistant", "content": None, "function_call": {"name": "f", "arguments": '{"e": "a@b.co"}'}},
     ]
     tools = [
@@ -260,16 +261,115 @@ def test_malformed_blocks_are_refused_not_skipped():
 
 def test_every_string_of_an_allowed_field_is_scanned():
     msgs = [
-        {"role": "assistant", "content": None, "tool_calls": [{"id": "a@b.co", "type": "function", "function": {"name": "a@b.co", "arguments": "{}"}}]},
-        {"role": "tool", "tool_call_id": "a@b.co", "name": "a@b.co", "content": "x"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "mail", "arguments": '{"to": "a@b.co"}'}}]},
+        {"role": "tool", "tool_call_id": "call_1", "name": "mail", "content": "sent to a@b.co"},
         {"role": "assistant", "content": [
-            {"type": "tool_use", "id": "a@b.co", "name": "a@b.co", "input": {}},
+            {"type": "tool_use", "id": "toolu_1", "name": "mail", "input": {"to": "a@b.co"}},
             {"type": "text", "text": "x", "citations": [{"cited_text": "a@b.co"}]},
         ]},
-        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "a@b.co", "content": "x"}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_1", "content": "a@b.co"}]},
     ]
     flat = json.dumps(call(guard(), CLOUD, msgs))
-    assert "a@b.co" not in flat and flat.count("<EMAIL_ADDRESS>") == 8, flat
+    assert "a@b.co" not in flat and flat.count("<EMAIL_ADDRESS>") == 5, flat
+    assert flat.count('"call_1"') == 2 and flat.count('"toolu_1"') == 2 and flat.count('"mail"') == 3, flat
+
+
+def test_a_tool_name_presidio_takes_for_a_person_is_left_intact():
+    # Presidio (en) read the Portail's tool name `lister` as a PERSON: the `<PERSON>` sent back in
+    # the history broke OpenAI's pattern for function names (400 on the 2nd turn of the tool loop).
+    def history():
+        return [
+            {"role": "user", "content": "liste mes notes"},
+            {"role": "assistant", "content": None, "tool_calls": [
+                {"id": "call_1", "type": "function", "function": {"name": "lister", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "call_1", "content": "lister a@b.co"},
+        ]
+    tools = [{"type": "function", "function": {"name": "lister", "description": "notes",
+                                               "parameters": {"type": "object", "properties": {}}}}]
+    STUB.persons = (NAME, "lister")
+    try:
+        for extra in ({"tools": tools}, None):  # the Portail's last call has the history, not the tools
+            out = call(guard(), "cloud-openai", history(), extra=copy.deepcopy(extra))["messages"]
+            tc = out[1]["tool_calls"][0]
+            assert tc["function"]["name"] == "lister" and tc["id"] == "call_1", tc
+            assert out[2]["tool_call_id"] == "call_1" and out[2]["content"] == "<PERSON> <EMAIL_ADDRESS>", out[2]
+    finally:
+        STUB.persons = (NAME,)
+
+
+def test_a_tool_use_name_and_ids_are_left_intact_on_v1_messages():
+    msgs = [
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01", "name": "lister", "input": {"q": "a@b.co"}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_01", "content": "ok"}]},
+    ]
+    STUB.persons = (NAME, "lister")
+    try:
+        out = call(guard(), CLOUD, msgs, call_type="anthropic_messages")["messages"]
+    finally:
+        STUB.persons = (NAME,)
+    assert out[0]["content"][0] == {"type": "tool_use", "id": "toolu_01", "name": "lister", "input": {"q": "<EMAIL_ADDRESS>"}}, out
+    assert out[1]["content"][0]["tool_use_id"] == "toolu_01", out
+
+
+def _named(name):
+    """Every place a tool or function name sits in a request."""
+    return (
+        [{"role": "assistant", "content": None, "tool_calls": [
+            {"id": "call_1", "type": "function", "function": {"name": name, "arguments": "{}"}}]}],
+        [{"role": "assistant", "content": None, "function_call": {"name": name, "arguments": "{}"}}],
+        [{"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_01", "name": name, "input": {}}]}],
+        [{"role": "tool", "tool_call_id": "call_1", "name": name, "content": "x"}],
+        [{"role": "function", "name": name, "content": "x"}],
+    )
+
+
+def test_a_tool_name_that_is_not_an_identifier_is_refused():
+    for bad in ("a@b.co", NAME, "<PERSON>", "a.b", "x\n", "", "x" * 129, 3):
+        for msgs in _named(bad):
+            detail = refused(lambda: call(guard(), CLOUD, copy.deepcopy(msgs)), 400)
+            assert "a@b.co" not in detail and NAME not in detail, detail  # never the value in the error
+            call(guard(), LOCAL, msgs)  # a local model sees the request as sent
+    for msgs in _named("x" * 128):
+        assert call(guard(), CLOUD, copy.deepcopy(msgs))["messages"] == msgs
+
+
+def _ids(i):
+    """Every place a call id sits in a request."""
+    return (
+        [{"role": "assistant", "content": None, "tool_calls": [
+            {"id": i, "type": "function", "function": {"name": "lister", "arguments": "{}"}}]}],
+        [{"role": "tool", "tool_call_id": i, "content": "x"}],
+        [{"role": "assistant", "content": [{"type": "tool_use", "id": i, "name": "lister", "input": {}}]}],
+        [{"role": "user", "content": [{"type": "tool_result", "tool_use_id": i, "content": "x"}]}],
+    )
+
+
+def test_call_ids_are_checked_not_masked():
+    for bad in ("a@b.co", "id avec espace", "", ["call_1"]):
+        for msgs in _ids(bad):
+            detail = refused(lambda: call(guard(), CLOUD, copy.deepcopy(msgs)), 400)
+            assert "a@b.co" not in detail, detail
+    # LiteLLM carries Gemini's thought signature in the id: call_<uuid>__thought__<base64>
+    for ok in ("call_abc-123", "toolu_01AbC", "appel_0", "call_x__thought__QUJD+/8="):
+        for msgs in _ids(ok):
+            assert call(guard(), CLOUD, copy.deepcopy(msgs))["messages"] == msgs
+        before = STUB.calls
+        call(guard(), CLOUD, _ids(ok)[2])  # no free text at all: nothing for Presidio
+        assert STUB.calls == before
+
+
+def test_a_participant_name_is_scanned_and_refused_not_masked():
+    def msg(n, role="user"):
+        return [{"role": role, "name": n, "content": "x"}]
+    STUB.persons = (NAME, "lister")
+    try:
+        refused(lambda: call(guard(), CLOUD, msg("lister")), 400)
+        assert call(guard(), CLOUD, msg("lister", "tool"))["messages"][0]["name"] == "lister"  # a tool's name
+    finally:
+        STUB.persons = (NAME,)
+    assert call(guard(), CLOUD, msg("bot_1"))["messages"][0]["name"] == "bot_1"
+    refused(lambda: call(guard(), CLOUD, msg("a@b.co")), 400)
+    refused(lambda: call(guard(), CLOUD, msg(NAME, "assistant")), 400)
 
 
 def test_role_must_be_a_known_role():
