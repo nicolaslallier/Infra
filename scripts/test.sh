@@ -328,6 +328,41 @@ FAKE
 	out="$(cd "$sb" && FAKE_BUSY=none PATH="$sb/bin:$PATH" bash scripts/runner-status.sh --busy 2>&1)"; code=$?
 	if [ "$code" = 0 ]; then pass "runner-status --busy: all idle -> exit 0"; else fail "runner-status --busy: all idle -> exit 0" "exit $code: $out"; fi
 
+	echo "== wait-healthy.sh (fake docker)"
+	# A fake docker: `ps` lists the ids of $FIX's lines, `inspect` prints them
+	# (the --format line wait-healthy.sh asks for). Timeout 0: one poll, no sleep.
+	wb="$ws/.wait-sb"; mkdir -p "$wb/bin"
+	cat >"$wb/bin/docker" <<'FAKE'
+#!/usr/bin/env bash
+case "$1" in
+  ps) cut -d'|' -f1 "$FIX" ;;
+  inspect) cat "$FIX" ;;
+  *) exit 1 ;;
+esac
+FAKE
+	chmod +x "$wb/bin/docker"
+	# id|service|name|state|health|exit code|one-shot label|last health log
+	grafana='g2|grafana|/grafana-grafana-1|running|healthy|0|<no value>|""'
+	wh() { # name, want exit, want text, fixture lines, [BEFORE_IDS]
+		printf '%s\n' "$4" >"$wb/fix"
+		out="$(FIX="$wb/fix" BEFORE_IDS="${5:-p1 g1}" WAIT_PROJECT=grafana PATH="$wb/bin:$PATH" bash "$ws/scripts/wait-healthy.sh" 0 2>&1)"; code=$?
+		if [ "$code" = "$2" ] && grep -qF -- "$3" <<<"$out"; then pass "$1"; else fail "$1" "exit $code: $out"; fi
+	}
+	wh "wait-healthy: labelled one-shot exited 0 is done" 0 "1 one-shot done" \
+		"p2|grafana-provisioning|/grafana-grafana-provisioning-1|exited|none|0|true|\"\""$'\n'"$grafana"
+	wh "wait-healthy: labelled one-shot exited 1 fails, with its code" 1 "exited / health=none (exit 1)" \
+		"p2|grafana-provisioning|/grafana-grafana-provisioning-1|exited|none|1|true|\"\""$'\n'"$grafana"
+	wh "wait-healthy: unlabelled exited 0 still fails" 1 "grafana-grafana-provisioning-1: exited" \
+		"p2|grafana-provisioning|/grafana-grafana-provisioning-1|exited|none|0|<no value>|\"\""$'\n'"$grafana"
+	wh "wait-healthy: one-shot not recreated yet still fails" 1 "not recreated yet" \
+		"p1|grafana-provisioning|/grafana-grafana-provisioning-1|exited|none|0|true|\"\""$'\n'"$grafana"
+	if awk '/^  [a-z0-9_-]+:$/ { svc = $1 } svc == "grafana-provisioning:" && /^      infra\.one-shot: "true"$/ { f = 1 } END { exit !f }' \
+		"$ws/docker-compose.grafana.yml"; then
+		pass "grafana-provisioning carries infra.one-shot"
+	else
+		fail "grafana-provisioning carries infra.one-shot"
+	fi
+
 	echo "== github-harden.sh (fake gh, no write ever)"
 	hs="$ws/scripts/github-harden.sh"
 	# shellcheck disable=SC1090

@@ -675,8 +675,12 @@ Things that look odd and are load-bearing:
   `docker start <names>` hint. It is ID-based because "everything is healthy"
   is also true of the old stack before Portainer has touched it.
   `WAIT_HEALTHY=0 make up` skips it; `WAIT_HEALTHY_TIMEOUT=<seconds>`
-  changes the 600s. A one-shot/init service added to the infra project would
-  sit in `exited` and fail every deploy unless the gate is taught to skip it.
+  changes the 600s. A one-shot/init service (one that runs to completion,
+  e.g. `grafana-provisioning`) must carry the compose label
+  `infra.one-shot: "true"`: the gate then accepts it `exited` with code 0
+  (still only once recreated); unlabelled, or with a non-zero code, `exited`
+  fails the deploy. A label, not `restart: "no"`, which is every unset
+  service's default.
   Services with a `healthcheck:` are
   nginx, grafana, prometheus, loki, litellm, prefect-server (`/api/health`
   is exempt from the auth string), dns, plus the older ones; the

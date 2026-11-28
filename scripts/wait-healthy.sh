@@ -18,6 +18,13 @@
 # and would otherwise hold the gate until it times out. It is reported, to be
 # removed by hand.
 #
+# One-shot services (an init job that runs to completion, then stops) carry
+# the compose label `infra.one-shot: "true"`. Such a container counts as done
+# when it is `exited` with code 0 -- still only once it has been recreated.
+# Any other exited container, or a one-shot with a non-zero code, is a failure.
+# A label rather than `restart: "no"`: that is also Docker's default for any
+# service without a restart key, so it would excuse far more than the jobs.
+#
 # Two docker CLI calls per poll (ps + one batched inspect): over
 # DOCKER_HOST=ssh://... each call is its own ssh session.
 # Runs under busybox + bash (CI container).
@@ -35,17 +42,17 @@ if [ -n "${WAIT_COMPOSE_FILE:-}" ]; then
 fi
 orphans=""
 
-# One line per container: id|service|name|state|health|last health log (json, one line).
+# One line per container: id|service|name|state|health|exit code|one-shot label|last health log (json, one line).
 # `index .State "Health"`, not `.State.Health`: with {{.Id}} in the format the
 # CLI templates over a raw map, where a container that never started has no
 # Health key and a plain field access errors.
 # shellcheck disable=SC2016 # Go template, not shell
-fmt='{{.Id}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Name}}|{{.State.Status}}|{{with index .State "Health"}}{{.Status}}{{else}}none{{end}}|{{$l := ""}}{{with index .State "Health"}}{{range .Log}}{{$l = .Output}}{{end}}{{end}}{{json $l}}'
+fmt='{{.Id}}|{{index .Config.Labels "com.docker.compose.service"}}|{{.Name}}|{{.State.Status}}|{{with index .State "Health"}}{{.Status}}{{else}}none{{end}}|{{.State.ExitCode}}|{{index .Config.Labels "infra.one-shot"}}|{{$l := ""}}{{with index .State "Health"}}{{range .Log}}{{$l = .Output}}{{end}}{{end}}{{json $l}}'
 
 # Sets total/healthy/bad/created. Returns 0 ready, 1 not ready, 2 daemon unreachable.
 check() {
-  total=0 healthy=0 bad=""
-  local ids out id service name state health log
+  total=0 healthy=0 finished=0 bad=""
+  local ids out id service name state health code oneshot log
   orphans=""
   ids=$(docker ps -a -q --no-trunc --filter "label=$label") || return 2
   [ -n "$ids" ] || { bad="  (no containers found for project $project)"; return 1; }
@@ -54,7 +61,7 @@ check() {
     # a container vanished between ps and inspect (mid-recreate): poll again
     bad="  (a container disappeared while inspecting; retrying)"$'\n'; return 1
   fi
-  while IFS='|' read -r id service name state health log; do
+  while IFS='|' read -r id service name state health code oneshot log; do
     [ -n "$id" ] || continue
     name=${name#/}
     if [ -n "$services" ] && [[ "$services" != *" $service "* ]]; then
@@ -64,9 +71,13 @@ check() {
     if [[ "$before" == *" $id "* ]]; then
       bad+="  $name: not recreated yet ($state)"$'\n'; continue
     fi
+    if [ "$state" = exited ] && [ "$oneshot" = true ] && [ "$code" = 0 ]; then
+      finished=$((finished + 1)); continue
+    fi
     case "$state/$health" in
       created/*|restarting/*|exited/*|dead/*|paused/*|*/starting|*/unhealthy)
         bad+="  $name: $state / health=$health"
+        [ "$state" = exited ] && bad+=" (exit $code)"
         if [ "$health" = unhealthy ] || [ "$health" = starting ]; then
           log=${log#\"}; log=${log%\"}; log=${log//\\n/ }; log=${log//\\r/}
           log=${log%"${log##*[![:space:]]}"}
@@ -85,7 +96,7 @@ while :; do
   created=""
   check; rc=$?
   if [ "$rc" -eq 0 ]; then
-    echo "wait-healthy: all $total $project containers recreated and up ($healthy healthy)"
+    echo "wait-healthy: all $total $project containers recreated and up ($healthy healthy, $finished one-shot done)"
     [ -z "$orphans" ] || echo "wait-healthy: not in $WAIT_COMPOSE_FILE any more, left alone (remove by hand): $orphans" >&2
     exit 0
   fi
