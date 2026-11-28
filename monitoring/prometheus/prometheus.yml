@@ -137,9 +137,11 @@ scrape_configs:
       - regex: hostname
         action: labeldrop
 
-  # The Colima VMs (Mac Studio's, Mac mini's): Linux node-exporter and
-  # cadvisor running *inside* each VM (stacks colima-studio / colima-mini,
-  # docker-compose.colima.yml). Distinct jobs from `node`/`cadvisor` (the
+  # The Colima VMs (Mac Studio's, Mac mini's, MacBook's): Linux node-exporter
+  # and cadvisor running *inside* each VM (stacks colima-studio / colima-mini /
+  # colima-macbook, docker-compose.colima.yml). node-exporter is on :9110, not
+  # :9100: the mini's and MacBook's VMs are in shared mode and publish on the
+  # Mac's address, where :9100 is the Mac's own (job macos). Distinct jobs from `node`/`cadvisor` (the
   # homelab's Docker VM) and `macos` (the Macs themselves) for the same
   # reason `macos` is distinct: they emit the same metric names. Both jobs
   # read one target list and append their own port.
@@ -151,7 +153,7 @@ scrape_configs:
       - source_labels: [__address__]
         regex: ([^:]+)
         target_label: __address__
-        replacement: ${1}:9100
+        replacement: ${1}:9110
       - source_labels: [hostname]
         regex: (.+)
         target_label: instance
