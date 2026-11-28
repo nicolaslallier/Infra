@@ -917,7 +917,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (datname) (pg_stat_database_numbackends{datname!~\"template.*\"})",
+          "expr": "sum by (datname) (pg_stat_database_numbackends{cluster=~\"infra|\", datname!~\"template.*\"})",
           "legendFormat": "{{datname}}",
           "refId": "A"
         }
@@ -966,7 +966,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (datname) (rate(pg_stat_database_xact_commit{datname!~\"template.*\"}[5m]) + rate(pg_stat_database_xact_rollback{datname!~\"template.*\"}[5m]))",
+          "expr": "sum by (datname) (rate(pg_stat_database_xact_commit{cluster=~\"infra|\", datname!~\"template.*\"}[5m]) + rate(pg_stat_database_xact_rollback{cluster=~\"infra|\", datname!~\"template.*\"}[5m]))",
           "legendFormat": "{{datname}}",
           "refId": "A"
         }
@@ -1015,7 +1015,7 @@
       },
       "targets": [
         {
-          "expr": "pg_database_size_bytes{datname!~\"template.*\"}",
+          "expr": "pg_database_size_bytes{cluster=~\"infra|\", datname!~\"template.*\"}",
           "legendFormat": "{{datname}}",
           "refId": "A"
         }

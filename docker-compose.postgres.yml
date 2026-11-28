@@ -93,6 +93,14 @@ services:
     restart: unless-stopped
     environment:
       DATA_SOURCE_NAME: postgresql://monitoring:${MONITORING_DB_PASSWORD}@postgres:5432/postgres?sslmode=disable
+    # Off by default in v0.17.1: postmaster (uptime), stat_checkpointer (PG 17+
+    # moved the checkpoint counters out of pg_stat_bgwriter), database_wraparound.
+    # The RAG repo's exporter (deploy/portainer-stack.yml there) runs the same
+    # image with the same flags: keep the two in step (dashboard postgresql.json).
+    command:
+      - --collector.postmaster
+      - --collector.stat_checkpointer
+      - --collector.database_wraparound
     ports:
       - "9187:9187" # metrics, for Prometheus on the homelab
     networks:
