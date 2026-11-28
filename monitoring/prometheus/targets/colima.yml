@@ -1,8 +1,11 @@
-# The Colima VMs, scraped by the `colima-node` (:9100) and `colima-cadvisor`
+# The Colima VMs, scraped by the `colima-node` (:9110) and `colima-cadvisor`
 # (:9338) jobs in ../prometheus.yml. The exporters themselves are the
-# colima-studio / colima-mini stacks (docker-compose.colima.yml, stacks.conf).
+# colima-studio / colima-mini / colima-macbook stacks
+# (docker-compose.colima.yml, stacks.conf).
 #
-# One entry per VM, by its LAN address (bridged, DHCP reservation). The
+# One entry per VM, by the LAN address it answers on (DHCP reservation): the
+# VM's own in bridged mode (Studio), the Mac's in shared mode (mini, MacBook).
+# The MacBook is a laptop: its targets are down whenever it sleeps. The
 # `hostname` label becomes `instance`, and `mac` names the Mac the VM runs
 # on, matching that Mac's `instance` in the `macos` job. No port here: each
 # job appends its own (relabel_configs), so one list serves both.
@@ -11,3 +14,12 @@
     hostname: colima-studio
     mac: mac-infra
 
+- targets: ["192.168.2.68"]
+  labels:
+    hostname: colima-mini
+    mac: mac-mini
+
+- targets: ["192.168.2.40"]
+  labels:
+    hostname: colima-macbook
+    mac: mac-02

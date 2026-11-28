@@ -1,7 +1,8 @@
 # Exporters for the Colima VMs, so Grafana sees inside them (dashboard
-# colima.json, "Colima VMs"). One file, two Portainer stacks (stacks.conf):
-#   colima-studio  environment 6, the Mac Studio's VM (192.168.2.66)
-#   colima-mini    environment 7, the Mac mini's VM   (192.168.2.67)
+# colima.json, "Colima VMs"). One file, three Portainer stacks (stacks.conf):
+#   colima-studio   environment 6, the Mac Studio's VM, bridged (192.168.2.66)
+#   colima-mini     environment 7, the Mac mini's VM, shared    (192.168.2.68)
+#   colima-macbook  environment 8, the MacBook's VM, shared     (192.168.2.40)
 # No `name:` on purpose: each stack's project is its Portainer stack name.
 #
 # Each VM is a Linux guest, so this is the Linux node-exporter and cadvisor,
@@ -10,7 +11,8 @@
 # on the Mac's own address); these describe the VM: the CPUs, memory and
 # disk Colima gave it, and the containers in it.
 #
-# Both publish on the VM's LAN address and Prometheus on the homelab scrapes
+# Both publish on the address the VM answers on: its own in bridged mode,
+# the Mac's in shared mode. Prometheus on the homelab scrapes
 # them as jobs `colima-node` and `colima-cadvisor`
 # (monitoring/prometheus/targets/colima.yml). Unauthenticated, read-only
 # metrics, the same posture as seaweedfs's or rabbitmq's /metrics; the
@@ -33,9 +35,10 @@ services:
       - /:/host:ro
     pid: host
     ports:
-      # 9100 on the VM's address: the Mac's own node_exporter is on the
-      # Mac's address (.35 / .68), so the two never collide.
-      - "9100:9100"
+      # 9110 everywhere: in shared mode the VM publishes on the Mac's own
+      # address, whose :9100 is the Mac's darwin node_exporter (job macos).
+      # One port on every VM, so the colima-node job appends just one.
+      - "9110:9100"
     mem_limit: 128m
 
   cadvisor:
@@ -51,7 +54,10 @@ services:
       # default set multiplies the series count for nothing.
       - --docker_only=true
       - --housekeeping_interval=15s
-      - --disable_metrics=accelerator,advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,perf_event,process,referenced_memory,resctrl,sched,tcp,udp
+      # v0.60 removed `accelerator`, and an unknown name is fatal at start
+      # (unsupported metric "accelerator" specified). `disk` as in the
+      # monitoring stack's cadvisor.
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,perf_event,process,referenced_memory,resctrl,sched,tcp,udp,disk
     volumes:
       - /:/rootfs:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro

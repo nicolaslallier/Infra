@@ -462,10 +462,14 @@ never orphans another app that's still attached to it):
   `macos`, distinct from the `node` job (the node-exporter container, which
   describes Docker Desktop's Linux VM). See "macOS machines
   (`node_exporter` on darwin)" below.
-- **Colima VMs** — the Mac Studio's (192.168.2.66) and the Mac mini's
-  (192.168.2.67) Linux VMs run the Linux node-exporter (:9100) and cadvisor
-  (:9338) from `docker-compose.colima.yml`, deployed as two stacks,
-  `colima-studio` (environment 6) and `colima-mini` (environment 7).
+- **Colima VMs** — three Linux VMs: the Mac Studio's (bridged, its own
+  192.168.2.66), the Mac mini's and the MacBook's (shared mode: they answer on
+  the Mac's address, 192.168.2.68 / .40). Each runs the Linux node-exporter on
+  **:9110** (in shared mode :9100 is the Mac's darwin node_exporter, job
+  `macos`) and cadvisor (:9338) from `docker-compose.colima.yml`, deployed as
+  `colima-studio` (environment 6), `colima-mini` (7) and `colima-macbook` (8).
+  The MacBook's targets are down whenever it sleeps; `Target down` excludes
+  `instance="colima-macbook"`.
   Prometheus scrapes them as jobs `colima-node` / `colima-cadvisor` from
   `monitoring/prometheus/targets/colima.yml`; dashboard `colima.json`
   ("Colima VMs"). A query on `node_*` or `container_*` without a `job=`
@@ -519,9 +523,10 @@ Docker Desktop on the deploy host, the Windows laptop (12 CPU / ~7.7 GiB VM; the
 
 ### Single-host layout (everything on the laptop)
 
-Every row of `stacks.conf` now has environment `-`: `dns`, `postgres`, `data`,
-`keycloak`, `auth` and `grafana` run on the deploy host like the rest, and the
-Mac mini runs none of it (`colima-mini` is gone). On one `infra-net` the
+Every service stack in `stacks.conf` runs on the deploy host (environment `-`):
+`dns`, `postgres`, `data`, `keycloak`, `auth` and `grafana` like the rest. The
+only remote rows are `dev` and `colima-studio` (env 6), `colima-mini` (env 7)
+and `colima-macbook` (env 8), the last three exporters only. On one `infra-net` the
 containers answer to their own names, so nginx no longer carries the aliases
 `s3`/`rabbitmq`/`ntfy`/`postgres`, `stream.d/s3.conf` and the `server_name ntfy`
 vhost are deleted, and every vhost, Prometheus job, oauth2-proxy and Keycloak

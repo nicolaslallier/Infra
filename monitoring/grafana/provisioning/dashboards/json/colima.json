@@ -55,8 +55,8 @@
   "timezone": "browser",
   "title": "Colima VMs",
   "uid": "colima-vms",
-  "version": 1,
-  "description": "The Colima VMs on the Mac Studio (colima-studio, 192.168.2.66) and the Mac mini (colima-mini, 192.168.2.68): node-exporter and cadvisor inside each VM (docker-compose.colima.yml).",
+  "version": 2,
+  "description": "The Colima VMs on the Mac Studio (colima-studio, 192.168.2.66), the Mac mini (colima-mini, 192.168.2.68) and the MacBook (colima-macbook, 192.168.2.40): node-exporter (:9110) and cadvisor (:9338) inside each VM (docker-compose.colima.yml).",
   "panels": [
     {
       "type": "row",
@@ -140,7 +140,7 @@
         }
       ],
       "id": 2,
-      "description": "node-exporter inside each Colima VM (stacks colima-studio / colima-mini). DOWN means the VM is stopped, or the stack is not deployed on it."
+      "description": "node-exporter (:9110) inside each Colima VM (stacks colima-studio / colima-mini / colima-macbook). DOWN means the VM is stopped, the Mac asleep (expected for the MacBook), or the stack is not deployed on it."
     },
     {
       "type": "stat",
@@ -1105,7 +1105,7 @@
         }
       ],
       "id": 19,
-      "description": "The VM's own interfaces (bridged LAN), not the Docker bridges. Out drawn below zero."
+      "description": "The VM's own interfaces, not the Docker bridges. Out drawn below zero."
     },
     {
       "type": "timeseries",
