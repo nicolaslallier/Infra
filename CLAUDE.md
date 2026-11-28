@@ -454,6 +454,22 @@ never orphans another app that's still attached to it):
   provision-grafana-litellm`) can SELECT an allowlist of
   `"LiteLLM_SpendLogs"` columns, never `messages`, `response`, `metadata`
   or keys. Re-run the target after a LiteLLM upgrade recreates the table.
+  Dashboard `postgresql.json` (`uid: postgresql`) covers every PostgreSQL of
+  the house: job `postgres` has two targets, `postgres-exporter:9187` labelled
+  `cluster="infra"` and the RAG repo's exporter at `192.168.2.40:9187`
+  (MacBook, `cluster="rag"`, its own `deploy/portainer-stack.yml`, DSN base
+  `rag`, role `monitoring` created by `rag migrer`). A `pg_*` query without a
+  `cluster=` matcher mixes the two instances (`infra-overview` filters
+  `cluster=~"infra|"`, which keeps pre-label history). Both exporters run the
+  same image and the same three flags, which are off by default in v0.17.1:
+  `--collector.postmaster` (uptime), `--collector.stat_checkpointer` (PG 17+
+  moved the checkpoint counters out of `pg_stat_bgwriter`, which now has
+  only 4 series) and `--collector.database_wraparound`; keep them in step
+  (Renovate bumps only this side). Per-table stats cover the DSN's database
+  only (`postgres` here, `rag` there). Rules `Postgres down` (`pg_up < 1`,
+  OK on no data, so a sleeping MacBook is silent), `Postgres connections
+  high` (> 80% of `max_connections`) and `Postgres deadlocks`; `Target down`
+  skips `cluster="rag"`. Postgres logs in Loki are the Infra's only.
 - **Windows machines** — no service of this stack at all: `windows_exporter`
   runs *on* each Windows host and Prometheus scrapes it over the LAN as job
   `windows`. See "Windows machines (`windows_exporter`)" below.

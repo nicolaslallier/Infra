@@ -354,11 +354,12 @@ reaches its MCP server by LAN IP, not over `infra-net`.
 | Stack | Portainer `rag`, services `rag` (API, port 8000) and `rag-indexeur` | RAG |
 | Image | `ghcr.io/nicolaslallier/rag:sha-<7 chars>` (private package) | RAG |
 | Database | database `rag`, role `rag`, host `postgres:5432`, `RAG_DB_PASSWORD` (letters and digits only); `vector` created by `make provision-app`, `unaccent`/`pg_trgm` by the RAG migration | Infra provisions, RAG migrates |
-| OpenBao | KV v2 secret `infra/rag` (API path `infra/data/rag`), policy `rag-deploy`; keys `RAG_DB_PASSWORD`, `RAG_LITELLM_CLE`, `RAG_JETON`, `RAG_JETON_PRIVE` (optional), `RAG_JETON_REINDEXER`, `RAG_GITHUB_JETON`, `RAG_S3_SECRET_KEY`, `RAG_COFFRE_PREFIXE` (optional) | Infra (policy), Nicolas (values) |
+| OpenBao | KV v2 secret `infra/rag` (API path `infra/data/rag`), policy `rag-deploy`; keys `RAG_DB_PASSWORD`, `RAG_LITELLM_CLE`, `RAG_JETON`, `RAG_JETON_PRIVE` (optional), `RAG_JETON_REINDEXER`, `RAG_GITHUB_JETON`, `RAG_S3_SECRET_KEY`, `RAG_COFFRE_PREFIXE` (optional), `RAG_MONITORING_DB_PASSWORD` (`openssl rand -hex 24`, for the role `monitoring` of the RAG's postgres-exporter) | Infra (policy), Nicolas (values) |
 | LiteLLM | `http://litellm:4000`, key alias `rag`, team `agents` (local models only) | Infra |
 | S3 | `http://s3:8333`, bucket `obsidian`, identity `rag` **`Read,List`**, `RAG_S3_SECRET_KEY`; `RAG_COFFRE_PREFIXE` = `ORGANIZER_VAULT_PREFIX` | Infra |
 | GitHub | `RAG_GITHUB_JETON`: fine-grained, `Contents: Read` on `nicolaslallier/*` | Nicolas |
 | MCP | LiteLLM `mcp_servers.rag` → `http://192.168.2.40:8000/mcp`, bearer `RAG_MCP_TOKEN` (= `RAG_JETON`, `public-maison` visibility), teams `[admin]`; seven read-only tools `rag_chercher`, `rag_lister`, `rag_repondre`, `rag_chemin`, `rag_expliquer`, `rag_sources`, `rag_fichiers` | Infra (config), RAG (server) |
+| Metrics | postgres-exporter `192.168.2.40:9187` (same image and flags as the Infra's), job `postgres`, `cluster="rag"`, dashboard **PostgreSQL** | RAG (exporter), Infra (scrape) |
 | Runner | `runner-rag`, label `rag`, repo `nicolaslallier/RAG`, `GH_RUNNER_TOKEN_RAG`, no Docker socket | Infra |
 
 The authoritative copy is the RAG repo's
@@ -1026,6 +1027,9 @@ What you get:
   the same trace
 
 Provisioned dashboards (Grafana → Dashboards): **Infra overview**,
+**PostgreSQL** (`uid: postgresql`: every PostgreSQL of the house, picked by
+the `cluster` label, `infra` or `rag`; connections, activity, storage, locks,
+checkpoints, container, per-table stats of the DSN's database, Infra logs),
 **Application logs**, **Jarvis** (`uid: jarvis-overview`) covering
 API HTTP metrics, containers, the `jarvis` Postgres DB, Loki logs and
 Tempo traces, **Windows machines** (`uid: windows-hosts`), **macOS

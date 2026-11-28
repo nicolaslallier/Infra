@@ -19,8 +19,10 @@ groups:
             # LAN machines and outside stacks are off by design; an exclusion list (not an
             # allow list) so a new in-stack job alerts by default; give those hosts their
             # own rule if they ever matter. colima-macbook is a laptop: off or asleep
-            # is its normal state, not an outage.
-            model: {refId: A, expr: 'up{job!~"windows|macos|ollama|moria|jarvis", instance!="colima-macbook"}', instant: true}
+            # is its normal state, not an outage. So is the RAG's postgres-exporter on the
+            # same MacBook (job postgres, cluster="rag"); `cluster!="rag"` keeps every
+            # series without a cluster label.
+            model: {refId: A, expr: 'up{job!~"windows|macos|ollama|moria|jarvis", instance!="colima-macbook", cluster!="rag"}', instant: true}
           - refId: B
             datasourceUid: __expr__
             model:
@@ -178,5 +180,92 @@ groups:
         for: 30m
         annotations:
           summary: "No backup has ever reported success (or backup.prom is unreadable)"
+        labels: {}
+        isPaused: false
+
+      - uid: infra-postgres-down
+        title: Postgres down
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            # Same shape as Target down: keep every series, test for < 1. OK on no data, which
+            # covers the MacBook asleep and the RAG exporter not deployed yet (no pg_up series
+            # then); a missing Infra exporter is Target down's job. This fires when the exporter
+            # answers but cannot log in or reach the database (13 silent days in Nov 2026).
+            model:
+              refId: A
+              expr: 'pg_up'
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: lt, params: [1]}
+        noDataState: OK
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "PostgreSQL {{ $labels.cluster }} does not answer its exporter ({{ $labels.instance }})"
+        labels: {}
+        isPaused: false
+
+      - uid: infra-postgres-connections
+        title: Postgres connections high
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            # Backends over max_connections, per cluster (Infra: 200, set in docker-compose.postgres.yml).
+            model:
+              refId: A
+              expr: 'sum by (cluster) (pg_stat_database_numbackends) / on (cluster) pg_settings_max_connections'
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0.8]}
+        noDataState: OK
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "PostgreSQL {{ $labels.cluster }} uses over 80% of max_connections"
+        labels: {}
+        isPaused: false
+
+      - uid: infra-postgres-deadlocks
+        title: Postgres deadlocks
+        condition: B
+        data:
+          - refId: A
+            relativeTimeRange: {from: 600, to: 0}
+            datasourceUid: prometheus
+            # Any deadlock in the last 10 minutes, per database.
+            model:
+              refId: A
+              expr: 'sum by (cluster, datname) (increase(pg_stat_database_deadlocks[10m]))'
+              instant: true
+          - refId: B
+            datasourceUid: __expr__
+            model:
+              refId: B
+              type: threshold
+              expression: A
+              conditions:
+                - evaluator: {type: gt, params: [0]}
+        noDataState: OK
+        execErrState: Error
+        for: 0m
+        annotations:
+          summary: "Deadlock in {{ $labels.datname }} ({{ $labels.cluster }})"
         labels: {}
         isPaused: false
