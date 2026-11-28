@@ -29,6 +29,10 @@ services:
     # only reads it.
     user: "0"
     restart: "no"
+    labels:
+      # Exited (0) is its done state: the deploy gate (wait-healthy.sh)
+      # accepts it instead of counting it as a failure.
+      infra.one-shot: "true"
     entrypoint: ["/bin/sh", "-c"]
     # If GitHub cannot be reached, keep the files of the previous deploy
     # rather than leaving Grafana down; fail only when there are none yet.
